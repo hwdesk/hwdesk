@@ -298,7 +298,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="card">
       <div id="layaBox"></div>
       <div class="laya-ops">
-        <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（复制给 WorkBuddy）</button>
+        <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（直连 AI 执行）</button>
         <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核；成稿自动附去AI化要求与课程上下文</span>
       </div>
     </div>
@@ -350,7 +350,18 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 
   <!-- ========== 8) 设置 ========== -->
   <section class="view" id="view-settings">
-    <div class="section-title"><h2>设置 · 数据管理</h2></div>
+    <div class="section-title"><h2>AI 直连</h2><span class="hint">点「AI 代提交」直接派发给下面的 AI，不再经过 WorkBuddy</span></div>
+    <div class="card" style="padding:14px">
+      <label class="f" style="max-width:280px">默认执行 AI
+        <select id="selDefaultAi" style="width:100%"></select>
+      </label>
+      <p class="hint" style="margin:8px 0 0">
+        选「每次询问」时会弹出选择器；在弹出选择器里也可以点「设为默认」。
+        直连方式 = 自动复制指令 + 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
+        「WorkBuddy（本地代理）」保留旧流程：可代登录学在城院完成提交。
+      </p>
+    </div>
+    <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
       <footer class="ops" style="margin:0">
         <button class="btn sm" id="btnExport">导出 JSON 备份</button>
@@ -371,8 +382,28 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   </section>
   </main>
 </div>
+<!-- AI 直连选择器（点「AI 代提交」且未设默认时弹出） -->
+<div class="ai-picker-mask" id="aiPicker" style="display:none">
+  <div class="ai-picker">
+    <div class="ai-picker-title">选择执行 AI <span class="hint" id="aiPickerFor"></span></div>
+    <div id="aiPickerList"></div>
+    <div style="text-align:right;margin-top:10px">
+      <button class="btn sm" id="aiPickerCancel">取消</button>
+    </div>
+  </div>
+</div>
+<style>
+  .ai-picker-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:flex;align-items:center;justify-content:center}
+  .ai-picker{background:#fff;border-radius:12px;padding:18px;width:min(420px,92vw);max-height:80vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .ai-picker-title{font-weight:600;margin-bottom:10px}
+  .ai-pick-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+  .ai-pick-item:hover{border-color:var(--pri,#6c5ce7);background:#f4f1ff}
+  .ai-pick-item b{font-size:14px}
+  .ai-pick-item .hint{display:block}
+</style>
 <div class="toast" id="toast"></div>
 
+<script src="bridge.js"></script>
 <script src="laya.js"></script>
 <script src="humanize.js"></script>
 <script src="db.js"></script>
@@ -779,6 +810,59 @@ function onAiSubmit(id){
   saveState();
   refreshAll();
 }
+/* ---------- AI 直连派发（bridge.js）：复制指令 + 打开对应 AI 网页 ---------- */
+function dispatchToAi(cmd, category, taskName){
+  if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return; }
+  var pick = Bridge.pick(category || "");
+  if(pick.source === "none"){ openAiPicker(cmd, category, taskName); return; }
+  doDispatch(Bridge.describe(pick), cmd, taskName);
+}
+function doDispatch(plan, cmd, taskName){
+  copyText(cmd);
+  if(plan.action === "open+copy"){ window.open(plan.url, "_blank"); }
+  showToast(Bridge.toastText(plan));
+  addLog("AI 直连派发：" + taskName + " → " + plan.label);
+}
+var _pickerCtx = null;
+function openAiPicker(cmd, category, taskName){
+  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "" };
+  var catLabel = (category && typeof Laya !== "undefined" && Laya.AI_REGISTRY[category])
+    ? Laya.AI_REGISTRY[category].label : "通用";
+  el("aiPickerFor").textContent = "（" + catLabel + " · " + taskName + "）";
+  var html = "";
+  Bridge.ORDER.forEach(function(id){
+    var ai = Bridge.AI[id];
+    html += '<div class="ai-pick-item" data-ai="' + id + '">'
+      + '<span><b>' + esc(ai.label) + '</b><span class="hint">' + esc(ai.desc) + '</span></span>'
+      + '<button class="btn sm" data-setdef="' + id + '">设为默认</button></div>';
+  });
+  el("aiPickerList").innerHTML = html;
+  el("aiPicker").style.display = "flex";
+}
+function closeAiPicker(){ el("aiPicker").style.display = "none"; _pickerCtx = null; }
+function confirmAiPick(id, makeDefault){
+  if(!_pickerCtx) return;
+  var ctx = _pickerCtx;
+  if(makeDefault){
+    Bridge.setPref("defaultAi", id);
+    refreshDefaultAiSelect();
+    addLog("已设默认执行 AI：" + Bridge.AI[id].label);
+  }
+  closeAiPicker();
+  doDispatch(Bridge.describe({ ai: id }), ctx.cmd, ctx.taskName);
+}
+/* 设置页：默认执行 AI 下拉（含「每次询问」） */
+function refreshDefaultAiSelect(){
+  var sel = el("selDefaultAi");
+  if(!sel) return;
+  var html = '<option value="">每次询问（弹选择器）</option>';
+  Bridge.ORDER.forEach(function(id){
+    html += '<option value="' + id + '">' + esc(Bridge.AI[id].label) + '</option>';
+  });
+  sel.innerHTML = html;
+  Bridge.load();
+  sel.value = Bridge.prefs.defaultAi || "";
+}
 /* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
 function onLayaPlan(){
   if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
@@ -792,8 +876,8 @@ function onLayaPlan(){
   }
   var plan = Laya.buildPlan(state.items, null, opts);
   if(!plan.queue.length){ showToast("没有待处理的作业"); return; }
-  copyText(plan.instruction);
-  showToast("Laya 执行计划已复制（" + plan.queue.length + " 项），去 WorkBuddy 粘贴发送即可");
+  /* 执行计划整包派发给默认 AI（不再强制走 WorkBuddy） */
+  dispatchToAi(plan.instruction, "", "Laya 执行计划（" + plan.queue.length + " 项）");
   addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
   saveState();
   refreshAll();
@@ -1068,6 +1152,7 @@ document.addEventListener("DOMContentLoaded", function(){
     setTimeout(function(){ showToast("数据已积累 30 条，建议导出备份"); }, 800);
   }
   bind();
+  refreshDefaultAiSelect();
   refreshAll();
   switchView("overview");
 });
