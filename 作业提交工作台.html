@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>作业提交工作台 · 学在城院</title>
-<!-- 本工作台由 WorkBuddy「小台」搭建：demo 版为本地单文件 + localStorage -->
+<!-- 本工作台由 WorkBuddy「小台」搭建：本地单页 + localStorage；多区块布局参照 RoleWeave 工作台 -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%232f6bff'/%3E%3Crect x='10' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='26' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='8' y='38' width='32' height='3' fill='%23fff'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -15,15 +15,32 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);font-size:16px;line-height:1.5}
-.wrap{max-width:960px;margin:0 auto;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
-header.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 2px 14px}
-.brand{display:flex;align-items:center;gap:10px}
-.brand .logo{width:38px;height:38px;border-radius:10px;background:var(--blue);display:flex;align-items:center;justify-content:center;flex:none}
-.brand h1{font-size:18px}
-.brand .sub{font-size:12px;color:var(--sub)}
-.sync{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:99px;padding:5px 12px;box-shadow:var(--shadow)}
-.sync .dot{width:8px;height:8px;border-radius:50%;background:var(--orange)}
-.section-title{display:flex;align-items:center;justify-content:space-between;margin:18px 2px 10px}
+/* ---------- 多区块布局（参照 RoleWeave 工作台） ---------- */
+.shell{display:flex;max-width:1120px;margin:0 auto;min-height:100vh}
+.side{flex:none;width:208px;padding:18px 12px;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
+.side .brand{display:flex;align-items:center;gap:10px;padding:2px 6px 16px}
+.side .brand .logo{width:38px;height:38px;border-radius:10px;background:var(--blue);display:flex;align-items:center;justify-content:center;flex:none}
+.side .brand h1{font-size:17px}
+.side .brand .sub{font-size:12px;color:var(--sub)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:transparent;color:var(--txt);font-size:15px;padding:11px 12px;border-radius:10px;cursor:pointer;text-align:left}
+.nav button:hover{background:#fff}
+.nav button.on{background:var(--blue-weak);color:var(--blue);font-weight:600}
+.nav .ico{width:20px;text-align:center;flex:none}
+.side .sync{margin-top:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:99px;padding:5px 12px;box-shadow:var(--shadow)}
+.side .sync .dot{width:8px;height:8px;border-radius:50%;background:var(--orange)}
+.main{flex:1;min-width:0;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+.view{display:none}
+.view.on{display:block}
+@media (max-width:800px){
+  .shell{flex-direction:column}
+  .side{width:100%;height:auto;position:static;padding:12px}
+  .nav{flex-direction:row;overflow-x:auto;gap:6px}
+  .nav button{flex:none;padding:8px 12px;font-size:14px}
+  .side .sync{display:none}
+  .main{padding:12px}
+}
+.section-title{display:flex;align-items:center;justify-content:space-between;margin:18px 2px 10px;gap:8px;flex-wrap:wrap}
 .section-title h2{font-size:15px}
 .section-title .hint{font-size:12px;color:var(--sub)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -45,8 +62,8 @@ header.top{display:flex;align-items:center;justify-content:space-between;gap:8px
 .btn:active{transform:scale(.97)}
 .empty{padding:26px 14px;text-align:center;color:var(--sub);font-size:14px}
 /* 新建表单 */
-#addForm{display:none;padding:14px;margin-top:10px}
-#addForm.open{display:block}
+#addForm,#matForm,#capForm{display:none;padding:14px;margin-top:10px}
+#addForm.open,#matForm.open,#capForm.open{display:block}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid2 .full{grid-column:1/-1}
 label.f{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
@@ -71,7 +88,7 @@ textarea{resize:vertical;min-height:64px}
 .stat .num{font-size:24px;font-weight:700}
 .stat .lab{font-size:12px;color:var(--sub)}
 .num.red{color:var(--red)} .num.green{color:var(--green)} .num.blue{color:var(--blue)}
-/* 日志 */
+/* 日志 / 记录 */
 .log-item{padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
 .log-item:last-child{border-bottom:none}
 .log-item .lt{color:var(--sub);font-size:12px}
@@ -80,11 +97,6 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .ai-note b{color:var(--txt)}
 .toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#1f2430;color:#fff;padding:10px 18px;border-radius:99px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:99}
 .toast.show{opacity:.95}
-@media (max-width:640px){
-  .grid2{grid-template-columns:1fr}
-  .stats{grid-template-columns:repeat(2,1fr)}
-  .today-item .btn,.hw-actions .btn{flex:1}
-}
 /* Laya 决策中心 */
 .laya-item{padding:12px 14px;border-bottom:1px solid var(--line)}
 .laya-item:last-child{border-bottom:none}
@@ -101,7 +113,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .tag.ok{background:var(--green-weak);color:var(--green)}
 .laya-why{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.6}
 .laya-ops{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
-/* 上下文库 */
+/* 上下文库 / 采集库 */
 .mat-item{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
 .mat-item:last-child{border-bottom:none}
 .mat-kind{flex:none;font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600;background:var(--green-weak);color:var(--green)}
@@ -109,134 +121,266 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .mat-title{font-weight:600;font-size:14px;word-break:break-all}
 .mat-meta{font-size:12px;color:var(--sub);margin-top:2px}
 .mat-note{font-size:12px;color:var(--sub);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#matForm{display:none;padding:14px;margin-top:10px}
-#matForm.open{display:block}
+/* 交付 / 审批记录 */
+.sub-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.sub-row:last-child{border-bottom:none}
+.sub-main{flex:1;min-width:0}
+.sub-name{font-weight:600;font-size:14px;word-break:break-all}
+.sub-meta{font-size:12px;color:var(--sub);margin-top:2px}
+.risk-out{margin:0 14px 14px;padding:12px;border-radius:10px;background:var(--blue-weak);font-size:13px;line-height:1.7;white-space:pre-wrap}
+@media (max-width:640px){
+  .grid2{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .today-item .btn,.hw-actions .btn{flex:1}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
+<div class="shell">
+  <!-- ========== 侧边栏（参照 RoleWeave 区块） ========== -->
+  <aside class="side">
     <div class="brand">
       <div class="logo">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v14.5a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 0 4 22V5.5Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8h8M8 12h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
       <div>
-        <h1>作业提交工作台</h1>
-        <div class="sub">学在城院 · 个人工作台</div>
+        <h1>作业工作台</h1>
+        <div class="sub">学在城院 · hwdesk</div>
       </div>
     </div>
-    <div class="sync"><span class="dot"></span><span id="syncText">本地模式</span></div>
-  </header>
+    <nav class="nav" id="nav">
+      <button data-view="overview" class="on"><span class="ico">🏠</span>总览</button>
+      <button data-view="capture"><span class="ico">📷</span>数据获取</button>
+      <button data-view="assets"><span class="ico">🗄️</span>数据资产</button>
+      <button data-view="workflow"><span class="ico">🧭</span>工作流</button>
+      <button data-view="approvals"><span class="ico">✅</span>审批</button>
+      <button data-view="actions"><span class="ico">⚡</span>行动</button>
+      <button data-view="insights"><span class="ico">📊</span>洞察</button>
+      <button data-view="settings"><span class="ico">⚙️</span>设置</button>
+    </nav>
+    <div class="sync" style="margin-top:16px"><span class="dot"></span><span id="syncText">本地模式</span></div>
+  </aside>
 
-  <!-- 1) 今天要处理 -->
-  <div class="section-title">
-    <h2>今天要处理</h2>
-    <span class="hint">逾期标红 · 按 Laya 优先级排序</span>
-  </div>
-  <div class="card"><div id="todayBox"></div></div>
-
-  <!-- 2) Laya 决策中心 -->
-  <div class="section-title">
-    <h2>Laya 决策中心</h2>
-    <span class="hint">System-1 决策 · 紧急度 / 复杂度 / AI 路由 / 自动交付</span>
-  </div>
-  <div class="card">
-    <div id="layaBox"></div>
-    <div class="laya-ops">
-      <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（复制给 WorkBuddy）</button>
-      <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核；成稿自动附去AI化要求与课程上下文</span>
+  <main class="main">
+  <!-- ========== 1) 总览 ========== -->
+  <section class="view on" id="view-overview">
+    <div class="stats">
+      <div class="card stat"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
+      <div class="card stat"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内截止</div></div>
+      <div class="card stat"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
+      <div class="card stat"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
     </div>
-  </div>
 
-  <!-- 3) 上下文库 -->
-  <div class="section-title">
-    <h2>上下文库（课件 / 作业要求 / 范文）</h2>
-    <button class="btn sm" id="btnMat">＋ 添加材料</button>
-  </div>
-  <div class="card">
-    <div id="matBox"></div>
-    <div id="matForm">
-      <div class="grid2">
-        <div><label class="f">材料类型</label>
-          <select id="mKind"><option>课件</option><option>作业要求</option><option>范文</option><option>其他</option></select></div>
-        <div><label class="f">所属课程</label>
-          <select id="mCourse">
-            <option>通用（所有课程可用）</option>
-            <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
-            <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
-          </select></div>
-        <div class="full"><label class="f">标题</label><input type="text" id="mTitle" placeholder="如：第3章 Buck变换器课件 / 实验报告格式要求"></div>
-        <div class="full"><label class="f">内容摘要（供 AI 执行时参考）</label><textarea id="mNote" placeholder="如：讲义里要求开关频率取 20kHz，报告需含波形图与误差分析…"></textarea></div>
-        <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn" id="mCancel">取消</button>
-          <button class="btn primary" id="mSave">保存材料</button>
+    <div class="section-title">
+      <h2>今天要处理</h2>
+      <span class="hint">逾期标红 · 按 Laya 优先级排序</span>
+    </div>
+    <div class="card"><div id="todayBox"></div></div>
+
+    <div class="section-title">
+      <h2>作业看板</h2>
+      <button class="btn sm primary" id="btnAdd">＋ 添加作业</button>
+    </div>
+    <div class="card">
+      <div class="filter-row" id="filterRow"></div>
+      <div id="hwList"></div>
+      <div id="addForm">
+        <div class="grid2">
+          <div><label class="f">作业名称</label><input type="text" id="fName" placeholder="如：第二章作业"></div>
+          <div><label class="f">课程</label>
+            <select id="fCourse">
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div><label class="f">截止日期</label><input type="date" id="fDue"></div>
+          <div><label class="f">提交形式</label>
+            <select id="fType"><option>文件上传</option><option>线上作答</option><option>附件+报告</option></select></div>
+          <div><label class="f">复杂程度（Laya 决策参考）</label>
+            <select id="fDiff"><option value="auto">自动判断</option><option value="easy">简单</option><option value="medium">中等</option><option value="hard">困难</option></select></div>
+          <div><label class="f">交付格式（去AI化参考）</label>
+            <select id="fFormat"><option>文字</option><option>Word文档</option><option>PPT演示</option><option>PDF报告</option><option>其他</option></select></div>
+          <div class="full"><label class="f">备注 / AI 辅助要求</label><textarea id="fNote" placeholder="例：帮我完成课后思考3的推导，生成 PDF 后提交"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="btnCancel">取消</button>
+            <button class="btn primary" id="btnSave">保存</button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
-  <div class="section-title">
-    <h2>作业看板</h2>
-    <button class="btn sm primary" id="btnAdd">＋ 添加作业</button>
-  </div>
-  <div class="card">
-    <div class="filter-row" id="filterRow"></div>
-    <div id="hwList"></div>
-    <div id="addForm">
+  <!-- ========== 2) 数据获取（学在城院平台采集） ========== -->
+  <section class="view" id="view-capture">
+    <div class="section-title">
+      <h2>数据获取 · 学在城院平台采集</h2>
+      <span class="hint">由本地 AI 代理登录平台执行（凭据不经过本页面）</span>
+    </div>
+    <div class="card" style="padding:14px">
       <div class="grid2">
-        <div><label class="f">作业名称</label><input type="text" id="fName" placeholder="如：第二章作业"></div>
-        <div><label class="f">课程</label>
-          <select id="fCourse">
+        <div><label class="f">采集课程</label>
+          <select id="capCourse">
+            <option>全部课程</option>
             <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
             <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
           </select></div>
-        <div><label class="f">截止日期</label><input type="date" id="fDue"></div>
-        <div><label class="f">提交形式</label>
-          <select id="fType"><option>文件上传</option><option>线上作答</option><option>附件+报告</option></select></div>
-        <div><label class="f">复杂程度（Laya 决策参考）</label>
-          <select id="fDiff"><option value="auto">自动判断</option><option value="easy">简单</option><option value="medium">中等</option><option value="hard">困难</option></select></div>
-        <div><label class="f">交付格式（去AI化参考）</label>
-          <select id="fFormat"><option>文字</option><option>Word文档</option><option>PPT演示</option><option>PDF报告</option><option>其他</option></select></div>
-        <div class="full"><label class="f">备注 / AI 辅助要求</label><textarea id="fNote" placeholder="例：帮我完成课后思考3的推导，生成 PDF 后提交"></textarea></div>
-        <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn" id="btnCancel">取消</button>
-          <button class="btn primary" id="btnSave">保存</button>
+        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnCapGen" style="width:100%">📋 生成采集指令（复制给 WorkBuddy）</button></div>
+        <div class="full ai-note" style="margin:0">
+          <b>怎么用？</b> 点上方按钮复制采集指令 → 回到 WorkBuddy 对话粘贴发送 → 代理会登录学在城院拉取该课程的<b>课件（PPT / Word）、作业要求原文、历史作业与成绩</b>并回报摘要 → 你把摘要登记到下方「采集登记」，之后的任务决策就会自动引用这些平台数据。
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="stats">
-    <div class="card stat"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
-    <div class="card stat"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内截止</div></div>
-    <div class="card stat"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
-    <div class="card stat"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
-  </div>
+    <div class="section-title">
+      <h2>采集登记</h2>
+      <button class="btn sm" id="btnCap">＋ 登记采集结果</button>
+    </div>
+    <div class="card">
+      <div id="capBox"></div>
+      <div id="capForm">
+        <div class="grid2">
+          <div><label class="f">材料类型</label>
+            <select id="cKind"><option>课件</option><option>作业要求</option><option>历史作业</option><option>成绩单</option><option>其他</option></select></div>
+          <div><label class="f">所属课程</label>
+            <select id="cCourse">
+              <option>通用（所有课程可用）</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div class="full"><label class="f">标题</label><input type="text" id="cTitle" placeholder="如：第3章 Buck变换器课件（PPT）"></div>
+          <div class="full"><label class="f">内容摘要（代理回报的平台数据，供 AI 执行时参考）</label><textarea id="cNote" placeholder="如：讲义要求开关频率取 20kHz；历史作业《实验1》得了 95 分，老师批语强调误差分析…"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="cCancel">取消</button>
+            <button class="btn primary" id="cSave">保存到采集库</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <div class="section-title"><h2>提交记录 / 操作日志</h2><span class="hint">由 AI 代提交后自动写入</span></div>
-  <div class="card"><div id="logBox"></div></div>
+  <!-- ========== 3) 数据资产（上下文库） ========== -->
+  <section class="view" id="view-assets">
+    <div class="section-title">
+      <h2>数据资产 · 上下文库（课件 / 作业要求 / 范文）</h2>
+      <button class="btn sm" id="btnMat">＋ 添加材料</button>
+    </div>
+    <div class="card">
+      <div id="matBox"></div>
+      <div id="matForm">
+        <div class="grid2">
+          <div><label class="f">材料类型</label>
+            <select id="mKind"><option>课件</option><option>作业要求</option><option>范文</option><option>其他</option></select></div>
+          <div><label class="f">所属课程</label>
+            <select id="mCourse">
+              <option>通用（所有课程可用）</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div class="full"><label class="f">标题</label><input type="text" id="mTitle" placeholder="如：第3章 Buck变换器课件 / 实验报告格式要求"></div>
+          <div class="full"><label class="f">内容摘要（供 AI 执行时参考）</label><textarea id="mNote" placeholder="如：讲义里要求开关频率取 20kHz，报告需含波形图与误差分析…"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="mCancel">取消</button>
+            <button class="btn primary" id="mSave">保存材料</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card ai-note" style="padding:14px;margin-top:10px">
+      <b>提示：</b>「数据获取」区块从学在城院采回的课件 / 历史作业摘要在任务决策中同样生效；此处适合登记你手工整理的材料。两处数据都会进入任务上下文简报。
+    </div>
+  </section>
 
-  <div class="card ai-note">
-    <b>AI 一键提交 & Laya 决策怎么用？</b><br>
-    ① 「Laya 决策中心」会自动按<b>交付时间 / 紧急度 / 复杂度</b>给待办排序，为每项任务推荐最合适的 AI（深度推理 / 写作 / 快速作答 / 代码 / 格式工具），并标记哪些任务<b>需要你本人自查审核</b>、哪些可以<b>直接自动交付</b>；② 「上下文库」里登记<b>学在城院的课件、作业要求、已认可的范文</b>，同时自动复用<b>同课程已提交过的任务</b>作为文风与深度参考，让 AI 按课程上下文作答以提高正确率；③ 点「生成执行计划」复制一条完整指令（含上下文简报 + 按交付格式定制的<b>去AI化润色要求</b>），回到 WorkBuddy 对话粘贴发送，我会按计划分派不同 AI 完成任务并自动提交到「学在城院」，需自查的任务会先出草稿等你确认；④ 结果自动写进上方日志。真实密码只保存在你本机，不写入本页面、不部署上公网。
-  </div>
+  <!-- ========== 4) 工作流（Laya 决策中心） ========== -->
+  <section class="view" id="view-workflow">
+    <div class="section-title">
+      <h2>工作流 · Laya 决策中心</h2>
+      <span class="hint">System-1 决策 · 紧急度 / 复杂度 / AI 路由 / 自动交付</span>
+    </div>
+    <div class="card">
+      <div id="layaBox"></div>
+      <div class="laya-ops">
+        <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（复制给 WorkBuddy）</button>
+        <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核；成稿自动附去AI化要求与课程上下文</span>
+      </div>
+    </div>
+  </section>
 
-  <footer class="ops">
-    <button class="btn sm" id="btnExport">导出 JSON 备份</button>
-    <button class="btn sm" id="btnImportBtn">导入恢复</button>
-    <input type="file" id="btnImport" accept=".json" style="display:none">
-    <button class="btn sm danger-ghost" id="btnClearDemo">清空示例数据</button>
-  </footer>
+  <!-- ========== 5) 审批 ========== -->
+  <section class="view" id="view-approvals">
+    <div class="section-title">
+      <h2>审批 · 待我自查的任务</h2>
+      <span class="hint">AI 出草稿 → 我审批 → 通过后自动交付</span>
+    </div>
+    <div class="card"><div id="approvalBox"></div></div>
+
+    <div class="section-title"><h2>审批记录</h2></div>
+    <div class="card"><div id="reviewBox"></div></div>
+  </section>
+
+  <!-- ========== 6) 行动 ========== -->
+  <section class="view" id="view-actions">
+    <div class="section-title">
+      <h2>行动 · 执行与交付</h2>
+      <span class="hint">按 Laya 执行计划分派 AI，完成后自动交付</span>
+    </div>
+    <div class="card ai-note" style="margin:0 0 10px">
+      <b>AI 一键提交 & Laya 决策怎么用？</b><br>
+      ① 「工作流」区块按<b>交付时间 / 紧急度 / 复杂度</b>排序待办并为每项任务推荐最合适的 AI，标记需你自查的任务；② 「数据获取 / 数据资产」登记<b>学在城院的课件、作业要求、历史作业</b>作为上下文，提高正确率；③ 点「生成执行计划」复制完整指令（含上下文简报 + <b>去AI化润色要求</b>）粘贴给 WorkBuddy，按计划分派执行并自动提交；④ 需自查的任务先出草稿，到「审批」区块确认后交付。
+    </div>
+    <div class="section-title"><h2>交付记录</h2><span class="hint">AI 代提交后自动写入</span></div>
+    <div class="card"><div id="subBox"></div></div>
+  </section>
+
+  <!-- ========== 7) 洞察 ========== -->
+  <section class="view" id="view-insights">
+    <div class="section-title">
+      <h2>洞察 · 去AI化风险自查</h2>
+      <span class="hint">交付前粘贴成稿，评估 AI 检测风险</span>
+    </div>
+    <div class="card" style="padding:14px">
+      <textarea id="rText" style="min-height:120px" placeholder="把 AI 生成的报告 / 答案粘贴到这里，检查套话密度与句式节奏…"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm primary" id="btnRisk">🔍 评估检测风险</button>
+      </div>
+      <div id="riskOut" class="risk-out" style="display:none"></div>
+    </div>
+
+    <div class="section-title"><h2>操作日志</h2></div>
+    <div class="card"><div id="logBox"></div></div>
+  </section>
+
+  <!-- ========== 8) 设置 ========== -->
+  <section class="view" id="view-settings">
+    <div class="section-title"><h2>设置 · 数据管理</h2></div>
+    <div class="card" style="padding:14px">
+      <footer class="ops" style="margin:0">
+        <button class="btn sm" id="btnExport">导出 JSON 备份</button>
+        <button class="btn sm" id="btnImportBtn">导入恢复</button>
+        <input type="file" id="btnImport" accept=".json" style="display:none">
+        <button class="btn sm danger-ghost" id="btnClearDemo">清空全部数据</button>
+      </footer>
+    </div>
+    <div class="section-title"><h2>关于决策模型</h2></div>
+    <div class="card ai-note" style="margin:0">
+      <b>Laya 决策参数</b>（详见 README 与 laya.js）：<br>
+      · 优先级 = 45% 紧急度 + 25% 时间压力 + 18% 复杂度 + 12% 交付物风险，逾期 +8<br>
+      · 行动阈值 act = 0.625（与 Laya act/escalate 头一致），路由置信度低于阈值强制升级学生自查<br>
+      · AI 注册表：深度推理 / 写作 / 快速作答 / 代码 / 润色 / 格式工具<br>
+      · 数据库：作业库 / 材料库（旧键兼容）+ 采集库 / 交付库 / 审批库（db.js 管理）<br>
+      · 页面不含任何账号密码；真实凭据只在你本机的 AI 代理里，不写入本页面、不部署上公网。
+    </div>
+  </section>
+  </main>
 </div>
 <div class="toast" id="toast"></div>
 
 <script src="laya.js"></script>
 <script src="humanize.js"></script>
+<script src="db.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
 var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
-var state = { items: [], logs: [], materials: [], filter: "all" };
+var state = { items: [], logs: [], materials: [], filter: "all", view: "overview" };
 
 function loadState(){
   try{
@@ -384,7 +528,7 @@ function renderList(){
     html += '<div class="hw-item">'
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
-      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span></div>'
+      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span></div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
   });
@@ -457,9 +601,82 @@ function renderMaterials(){
   });
   box.innerHTML = html;
 }
+/* 采集库渲染 */
+function renderCaptures(){
+  var box = el("capBox");
+  var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+  if(!caps.length){
+    box.innerHTML = '<div class="empty">还没有采集记录。点上方「生成采集指令」让 AI 代理从学在城院拉取课件与历史作业，再把摘要登记进来</div>';
+    return;
+  }
+  var html = "";
+  caps.forEach(function(m){
+    html += '<div class="mat-item">'
+      + '<span class="mat-kind">' + esc(m.kind) + '</span>'
+      + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
+      + '<div class="mat-meta">' + esc(m.course) + ' · 采集于 ' + esc(m.time || "-") + '</div>'
+      + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
+      + '</div>'
+      + '<button class="btn sm danger-ghost" data-cap-del="' + m.id + '">删除</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 审批队列 + 审批记录 */
+function renderApprovals(){
+  var box = el("approvalBox");
+  var pend = (typeof DB !== "undefined") ? DB.list("submissions").filter(function(s){ return s.status === "pending"; }) : [];
+  if(!pend.length){
+    box.innerHTML = '<div class="empty">没有待审批的交付。AI 完成需自查的任务后，草稿会出现在这里等你确认</div>';
+    return;
+  }
+  var html = "";
+  pend.forEach(function(s){
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:var(--red-weak);color:var(--red)">待审</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
+      + '<div class="sub-meta">' + esc(s.course) + ' · 执行AI：' + esc(s.ai || "-") + (s.risk != null ? ' · 检测风险 ' + s.risk : '') + ' · ' + esc(s.time || "-") + '</div></div>'
+      + '<button class="btn sm primary" data-appr="' + s.id + '">通过并交付</button>'
+      + '<button class="btn sm danger-ghost" data-reject="' + s.id + '">退回修改</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+function renderReviews(){
+  var box = el("reviewBox");
+  var revs = (typeof DB !== "undefined") ? DB.list("reviews") : [];
+  if(!revs.length){ box.innerHTML = '<div class="empty">还没有审批记录</div>'; return; }
+  var html = "";
+  revs.forEach(function(r){
+    var ok = r.decision === "approved";
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:' + (ok?"var(--green-weak);color:var(--green)":"var(--red-weak);color:var(--red)") + '">' + (ok?"通过":"退回") + '</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(r.name) + '</div>'
+      + '<div class="sub-meta">' + (r.note ? esc(r.note) + " · " : "") + esc(r.time || "-") + '</div></div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 交付记录 */
+function renderSubmissions(){
+  var box = el("subBox");
+  var subs = (typeof DB !== "undefined") ? DB.list("submissions") : [];
+  if(!subs.length){ box.innerHTML = '<div class="empty">还没有交付记录</div>'; return; }
+  var stMap = { pending: ["待审","var(--orange-weak)","var(--orange)"], submitted: ["已交付","var(--green-weak)","var(--green)"], changes: ["已退回","var(--red-weak)","var(--red)"] };
+  var html = "";
+  subs.forEach(function(s){
+    var st = stMap[s.status] || stMap.pending;
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:' + st[1] + ';color:' + st[2] + '">' + st[0] + '</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
+      + '<div class="sub-meta">' + esc(s.course) + ' · 执行AI：' + esc(s.ai || "-") + ' · ' + esc(s.time || "-") + '</div></div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
 function renderLogs(){
   var box = el("logBox");
-  if(!state.logs.length){ box.innerHTML = '<div class="empty">还没有提交记录</div>'; return; }
+  if(!state.logs.length){ box.innerHTML = '<div class="empty">还没有操作记录</div>'; return; }
   var html = "";
   state.logs.forEach(function(lg){
     html += '<div class="log-item"><div>' + esc(lg.text) + '</div><div class="lt">' + esc(lg.time) + '</div></div>';
@@ -479,11 +696,22 @@ function refreshAll(){
   renderToday();
   renderLaya();
   renderMaterials();
-  renderFilters();
-  renderList();
+  renderCaptures();
+  renderApprovals();
+  renderReviews();
+  renderSubmissions();
   renderStats();
   renderLogs();
   renderSync();
+}
+/* 视图切换（侧边栏多区块） */
+function switchView(v){
+  state.view = v;
+  var btns = el("nav").querySelectorAll("button");
+  for(var i=0;i<btns.length;i++) btns[i].classList.toggle("on", btns[i].getAttribute("data-view") === v);
+  var views = document.querySelectorAll(".view");
+  for(var j=0;j<views.length;j++) views[j].classList.toggle("on", views[j].id === "view-" + v);
+  window.scrollTo(0, 0);
 }
 
 /* ---------- 交互层：改数据 → saveState → refreshAll ---------- */
@@ -493,6 +721,10 @@ function showToast(msg){
   t.classList.add("show");
   clearTimeout(showToast._h);
   showToast._h = setTimeout(function(){ t.classList.remove("show"); }, 2200);
+}
+function nowStr(){
+  var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
+  return n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes());
 }
 function addLog(text){
   var n = new Date();
@@ -508,20 +740,24 @@ function onAiSubmit(id){
   var it = findItem(id);
   if(!it) return;
   var cmd = "请提交我的作业：" + it.name + "（" + it.course + "，截止 " + it.due + "）到学在城院";
+  var needsReview = false, routeLabel = "";
   if(typeof Laya !== "undefined"){
     /* Laya 决策结果写进指令：推荐 AI + 是否自动交付 / 需学生审核 */
     var d = Laya.analyze(it);
+    needsReview = d.review.needed;
+    routeLabel = d.route.label;
     cmd += "。Laya 决策：优先级 " + d.priority + "（" + d.urgency.label + "，" + d.complexity.label + "）"
       + "，建议由「" + d.route.label + "」完成（置信度 " + Math.round(d.route.confidence * 100) + "%）";
-    cmd += d.review.needed
+    cmd += needsReview
       ? "；该任务需要我先自查审核，请先生成草稿给我确认后再交付。"
       : "；该任务可直接自动交付，完成后回报结果。";
   }else{
     cmd += "，完成后回报结果。";
   }
-  /* 上下文简报：课件/作业要求/历史已提交任务（提高正确率 + 贴合文风） */
+  /* 上下文简报：材料库 + 平台采集库 + 同课程历史（提高正确率 + 贴合文风） */
   if(typeof ContextKit !== "undefined"){
-    var pack = ContextKit.pack(it, state.items, state.materials);
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    var pack = ContextKit.pack(it, state.items, state.materials.concat(caps));
     if(pack.brief) cmd += "\n\n" + pack.brief;
   }
   /* 去AI化要求：交付格式对应的润色指令 + 交付前自查 */
@@ -532,6 +768,13 @@ function onAiSubmit(id){
   copyText(cmd);
   showToast("指令已复制（含上下文与去AI化要求），去 WorkBuddy 粘贴发送即可");
   it.ai = true;
+  /* 交付记录：需自查 → pending（进审批队列）；否则直接 submitted */
+  if(typeof DB !== "undefined"){
+    DB.insert("submissions", {
+      itemId: it.id, name: it.name, course: it.course, ai: routeLabel || "-",
+      status: needsReview ? "pending" : "submitted", risk: null, time: nowStr()
+    });
+  }
   addLog("已复制 AI 提交指令：" + it.name + (typeof Laya !== "undefined" ? "（Laya 优先级 " + Laya.analyze(it).priority + "）" : ""));
   saveState();
   refreshAll();
@@ -541,7 +784,8 @@ function onLayaPlan(){
   if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
   var opts = {};
   if(typeof ContextKit !== "undefined"){
-    opts.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials).brief; };
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    opts.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials.concat(caps)).brief; };
   }
   if(typeof Humanize !== "undefined"){
     opts.humanizeFor = function(item){ return Humanize.checklist(item); };
@@ -553,6 +797,46 @@ function onLayaPlan(){
   addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
   saveState();
   refreshAll();
+}
+/* 平台采集：生成学在城院采集指令（课件/作业要求/历史作业） */
+function onCaptureGen(){
+  var course = el("capCourse").value;
+  var cmd = "【学在城院 · 数据采集】请登录学在城院，帮我采集以下内容并逐条回报摘要：\n"
+    + "课程：" + course + "\n"
+    + "1) 课件：该课程全部 PPT / Word 课件，逐个给出文件名与内容摘要（重点：参数要求、格式规范、老师强调的点）\n"
+    + "2) 作业要求：当前已发布作业的题目与要求原文\n"
+    + "3) 历史作业：我已提交过的作业清单（名称、提交时间、成绩与老师批语）\n"
+    + "采回后我会把摘要登记进工作台「数据获取」，供后续任务作答引用。";
+  copyText(cmd);
+  showToast("采集指令已复制，去 WorkBuddy 粘贴发送即可");
+  addLog("生成学在城院采集指令：" + course);
+  saveState(); refreshAll();
+}
+function onCaptureSave(){
+  var title = el("cTitle").value.trim();
+  if(!title){ showToast("请填写标题"); return; }
+  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  var n = new Date();
+  DB.insert("captures", {
+    kind: el("cKind").value,
+    course: el("cCourse").value === "通用（所有课程可用）" ? "通用" : el("cCourse").value,
+    title: title, note: el("cNote").value.trim(),
+    time: n.getFullYear() + "-" + (n.getMonth()+1) + "-" + n.getDate()
+  });
+  el("cTitle").value = ""; el("cNote").value = "";
+  el("capForm").classList.remove("open");
+  addLog("登记平台采集结果：" + title);
+  saveState(); refreshAll();
+  showToast("已存入采集库，任务决策将自动引用");
+}
+function onCaptureDelete(id){
+  if(typeof DB === "undefined") return;
+  var m = DB.find("captures", id);
+  if(!m) return;
+  if(!window.confirm("确定删除采集记录「" + m.title + "」吗？")) return;
+  DB.remove("captures", id);
+  addLog("删除采集记录：" + m.title);
+  saveState(); refreshAll();
 }
 /* 上下文库：添加 / 删除材料 */
 function onMatSave(){
@@ -579,6 +863,46 @@ function onMatDelete(id){
   state.materials = state.materials.filter(function(x){ return x.id !== id; });
   addLog("删除上下文材料：" + m.title);
   saveState(); refreshAll();
+}
+/* 审批：通过 / 退回 */
+function onApprove(id){
+  if(typeof DB === "undefined") return;
+  var s = DB.find("submissions", id);
+  if(!s || !DB.canTransition(s.status, "submitted")) return;
+  DB.update("submissions", id, { status: "submitted" });
+  DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
+  var it = findItem(s.itemId);
+  if(it && it.status === "todo"){ it.status = "submitted"; }
+  addLog("审批通过并交付：" + s.name);
+  saveState(); refreshAll();
+  showToast("已通过，任务交付学在城院");
+}
+function onRequestChanges(id){
+  if(typeof DB === "undefined") return;
+  var s = DB.find("submissions", id);
+  if(!s || !DB.canTransition(s.status, "changes")) return;
+  var note = window.prompt("退回原因（会写进给 AI 的修改指令）：", "第2段像AI写的，重写；数据要保留我实测的那组");
+  if(note === null) return;
+  DB.update("submissions", id, { status: "changes" });
+  DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "changes", note: note, time: nowStr() });
+  addLog("退回修改：" + s.name + "（" + note + "）");
+  saveState(); refreshAll();
+  showToast("已退回，可重新生成草稿后再提交审批");
+}
+/* 洞察：去AI化风险自查 */
+function onRiskCheck(){
+  if(typeof Humanize === "undefined"){ showToast("humanize.js 未加载"); return; }
+  var out = el("riskOut"), text = el("rText").value;
+  var r = Humanize.risk(text);
+  out.style.display = "block";
+  if(!r){ out.textContent = "（没有可评估的文本）"; return; }
+  var lines = ["检测风险：" + r.score + " / 100（" + r.label + "）", "句式节奏：" + r.rhythm];
+  lines.push("命中套话 " + r.hits.length + " 处" + (r.hits.length ? "：" + r.hits.join("、") : ""));
+  if(r.label !== "低风险") lines.push("建议：重写命中段落，打散句长节奏，补第一人称细节后再交付。");
+  else lines.push("✓ 可以交付。");
+  out.textContent = lines.join("\n");
+  addLog("去AI化风险自查：" + r.score + " 分（" + r.label + "）");
+  saveState();
 }
 function copyText(s){
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -623,7 +947,12 @@ function onSaveNew(){
   showToast("已添加");
 }
 function onExport(){
-  var blob = new Blob([JSON.stringify({ items: state.items, logs: state.logs, materials: state.materials }, null, 2)], { type: "application/json" });
+  var blob = new Blob([JSON.stringify({
+    items: state.items, logs: state.logs, materials: state.materials,
+    captures: (typeof DB!=="undefined"?DB.list("captures"):[]),
+    submissions: (typeof DB!=="undefined"?DB.list("submissions"):[]),
+    reviews: (typeof DB!=="undefined"?DB.list("reviews"):[])
+  }, null, 2)], { type: "application/json" });
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "作业工作台备份.json";
@@ -644,6 +973,11 @@ function onImport(file){
       });
       state.logs = Array.isArray(d.logs) ? d.logs : [];
       state.materials = Array.isArray(d.materials) ? d.materials : [];
+      if(typeof DB !== "undefined"){
+        if(Array.isArray(d.captures)){ DB.clear("captures"); d.captures.forEach(function(c){ DB.insert("captures", c); }); }
+        if(Array.isArray(d.submissions)){ DB.clear("submissions"); d.submissions.forEach(function(c){ DB.insert("submissions", c); }); }
+        if(Array.isArray(d.reviews)){ DB.clear("reviews"); d.reviews.forEach(function(c){ DB.insert("reviews", c); }); }
+      }
       addLog("导入备份成功，共 " + state.items.length + " 条作业、 " + state.materials.length + " 条上下文材料");
       saveState(); refreshAll();
       showToast("导入成功");
@@ -652,16 +986,23 @@ function onImport(file){
   r.readAsText(file);
 }
 function onClearDemo(){
-  if(!window.confirm("将清空全部数据（含示例），确定吗？")) return;
+  if(!window.confirm("将清空全部数据（含示例与采集/交付/审批库），确定吗？")) return;
   if(!window.confirm("再次确认：数据清空后无法恢复，建议先导出备份。确定清空？")) return;
   state.items = []; state.logs = []; state.materials = [];
   localStorage.removeItem(LS_SEED);
+  if(typeof DB !== "undefined"){ DB.clear("captures"); DB.clear("submissions"); DB.clear("reviews"); }
   saveState(); refreshAll();
   showToast("已清空");
 }
 
 /* ---------- 初始化 ---------- */
 function bind(){
+  /* 侧边栏视图切换 */
+  el("nav").addEventListener("click", function(e){
+    var b = e.target.closest("[data-view]");
+    if(b) switchView(b.getAttribute("data-view"));
+  });
+
   el("btnAdd").addEventListener("click", function(){ el("addForm").classList.toggle("open"); });
   el("btnCancel").addEventListener("click", function(){ el("addForm").classList.remove("open"); });
   el("btnSave").addEventListener("click", onSaveNew);
@@ -679,6 +1020,15 @@ function bind(){
     if(b) onAiSubmit(+b.getAttribute("data-laya"));   // 按方案执行 = 用 Laya 决策增强的指令
   });
 
+  el("btnCapGen").addEventListener("click", onCaptureGen);
+  el("btnCap").addEventListener("click", function(){ el("capForm").classList.toggle("open"); });
+  el("cCancel").addEventListener("click", function(){ el("capForm").classList.remove("open"); });
+  el("cSave").addEventListener("click", onCaptureSave);
+  el("capBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-cap-del]");
+    if(b) onCaptureDelete(+b.getAttribute("data-cap-del"));
+  });
+
   el("btnMat").addEventListener("click", function(){ el("matForm").classList.toggle("open"); });
   el("mCancel").addEventListener("click", function(){ el("matForm").classList.remove("open"); });
   el("mSave").addEventListener("click", onMatSave);
@@ -686,6 +1036,14 @@ function bind(){
     var b = e.target.closest("[data-mat-del]");
     if(b) onMatDelete(+b.getAttribute("data-mat-del"));
   });
+
+  el("approvalBox").addEventListener("click", function(e){
+    var a = e.target.closest("[data-appr]"), rj = e.target.closest("[data-reject]");
+    if(a) onApprove(+a.getAttribute("data-appr"));
+    else if(rj) onRequestChanges(+rj.getAttribute("data-reject"));
+  });
+
+  el("btnRisk").addEventListener("click", onRiskCheck);
 
   el("todayBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-ai]");
@@ -711,6 +1069,7 @@ document.addEventListener("DOMContentLoaded", function(){
   }
   bind();
   refreshAll();
+  switchView("overview");
 });
 </script>
 </body>
