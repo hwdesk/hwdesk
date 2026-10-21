@@ -66,7 +66,7 @@ textarea{resize:vertical;min-height:64px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:6px 13px;font-size:13px;cursor:pointer;min-height:36px}
 .chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* 统计 */
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
 .stat{padding:14px;text-align:center}
 .stat .num{font-size:24px;font-weight:700}
 .stat .lab{font-size:12px;color:var(--sub)}
@@ -82,9 +82,25 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .toast.show{opacity:.95}
 @media (max-width:640px){
   .grid2{grid-template-columns:1fr}
-  .stats{grid-template-columns:repeat(3,1fr)}
+  .stats{grid-template-columns:repeat(2,1fr)}
   .today-item .btn,.hw-actions .btn{flex:1}
 }
+/* Laya 决策中心 */
+.laya-item{padding:12px 14px;border-bottom:1px solid var(--line)}
+.laya-item:last-child{border-bottom:none}
+.laya-row{display:flex;align-items:center;gap:10px}
+.laya-rank{flex:none;width:26px;height:26px;border-radius:8px;background:var(--blue-weak);color:var(--blue);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+.laya-pbar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;flex:1;min-width:60px}
+.laya-pbar i{display:block;height:100%;background:var(--blue);border-radius:99px}
+.laya-pnum{flex:none;font-size:12px;font-weight:700;color:var(--blue);min-width:56px;text-align:right}
+.laya-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600}
+.tag.ai{background:var(--blue-weak);color:var(--blue)}
+.tag.cx{background:var(--orange-weak);color:var(--orange)}
+.tag.rv{background:var(--red-weak);color:var(--red)}
+.tag.ok{background:var(--green-weak);color:var(--green)}
+.laya-why{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.6}
+.laya-ops{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -105,9 +121,22 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <!-- 1) 今天要处理 -->
   <div class="section-title">
     <h2>今天要处理</h2>
-    <span class="hint">逾期标红 · 未完成自动顺延</span>
+    <span class="hint">逾期标红 · 按 Laya 优先级排序</span>
   </div>
   <div class="card"><div id="todayBox"></div></div>
+
+  <!-- 2) Laya 决策中心 -->
+  <div class="section-title">
+    <h2>Laya 决策中心</h2>
+    <span class="hint">System-1 决策 · 紧急度 / 复杂度 / AI 路由 / 自动交付</span>
+  </div>
+  <div class="card">
+    <div id="layaBox"></div>
+    <div class="laya-ops">
+      <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（复制给 WorkBuddy）</button>
+      <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核</span>
+    </div>
+  </div>
 
   <div class="section-title">
     <h2>作业看板</h2>
@@ -127,6 +156,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         <div><label class="f">截止日期</label><input type="date" id="fDue"></div>
         <div><label class="f">提交形式</label>
           <select id="fType"><option>文件上传</option><option>线上作答</option><option>附件+报告</option></select></div>
+        <div><label class="f">复杂程度（Laya 决策参考）</label>
+          <select id="fDiff"><option value="auto">自动判断</option><option value="easy">简单</option><option value="medium">中等</option><option value="hard">困难</option></select></div>
         <div class="full"><label class="f">备注 / AI 辅助要求</label><textarea id="fNote" placeholder="例：帮我完成课后思考3的推导，生成 PDF 后提交"></textarea></div>
         <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn" id="btnCancel">取消</button>
@@ -139,6 +170,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <div class="stats">
     <div class="card stat"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
     <div class="card stat"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内截止</div></div>
+    <div class="card stat"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
     <div class="card stat"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
   </div>
 
@@ -146,8 +178,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <div class="card"><div id="logBox"></div></div>
 
   <div class="card ai-note">
-    <b>AI 一键提交怎么用？</b><br>
-    ① 在看板里选一条作业 → 点「AI 代提交」，会自动复制一条指令；② 回到 WorkBuddy 对话粘贴发送，我会登录「学在城院」完成上传/作答并回报结果；③ 结果自动写进上方日志。真实密码只保存在你本机，不写入本页面、不部署上公网。
+    <b>AI 一键提交 & Laya 决策怎么用？</b><br>
+    ① 「Laya 决策中心」会自动按<b>交付时间 / 紧急度 / 复杂度</b>给待办排序，为每项任务推荐最合适的 AI（深度推理 / 写作 / 快速作答 / 代码 / 格式工具），并标记哪些任务<b>需要你本人自查审核</b>、哪些可以<b>直接自动交付</b>；② 点「生成执行计划」复制一条完整指令，回到 WorkBuddy 对话粘贴发送，我会按计划分派不同 AI 完成任务并自动提交到「学在城院」，需自查的任务会先出草稿等你确认；③ 结果自动写进上方日志。真实密码只保存在你本机，不写入本页面、不部署上公网。
   </div>
 
   <footer class="ops">
@@ -159,6 +191,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="laya.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
@@ -169,6 +202,8 @@ function loadState(){
   try{
     state.items = JSON.parse(localStorage.getItem(LS_KEY) || "null") || seedItems();
   }catch(e){ state.items = seedItems(); }
+  /* 数据迁移：旧数据补默认字段，Laya 引擎对缺字段同样有兜底 */
+  state.items.forEach(function(it){ if(!it.difficulty) it.difficulty = "auto"; });
   try{ state.logs = JSON.parse(localStorage.getItem(LS_LOG) || "[]"); }catch(e){ state.logs = []; }
 }
 function saveState(){
@@ -179,10 +214,10 @@ function seedItems(){
   var today = new Date();
   function d(offset){ var t=new Date(today); t.setDate(t.getDate()+offset); return t.toISOString().slice(0,10); }
   var seed = [
-    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false },
-    { id:2, name:"课后思考3",         course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true },
-    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false },
-    { id:4, name:"课堂练习-3",        course:"电机与拖动",          due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false }
+    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false, difficulty:"auto" },
+    { id:2, name:"课后思考3 推导题",  course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true, difficulty:"hard" },
+    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false, difficulty:"medium" },
+    { id:4, name:"课堂练习-3 选择填空", course:"电机与拖动",         due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false, difficulty:"easy" }
   ];
   localStorage.setItem(LS_SEED, "1");
   return seed;
@@ -217,7 +252,12 @@ function todayItems(){
       if(n !== null && n <= 3) out.push(it);           // 逾期、今天、3天内
     }
   });
-  out.sort(function(a,b){ return dayDiff(a.due) - dayDiff(b.due); });
+  if(typeof Laya !== "undefined"){
+    /* Laya 决策：紧急度 + 复杂度 + 时间压力综合排序（替代纯日期排序） */
+    out.sort(function(a,b){ return Laya.analyze(b).priority - Laya.analyze(a).priority; });
+  }else{
+    out.sort(function(a,b){ return dayDiff(a.due) - dayDiff(b.due); });
+  }
   return out;
 }
 function filteredItems(){
@@ -234,12 +274,13 @@ function filteredItems(){
   });
 }
 function stats(){
-  var s = { overdue:0, week:0, done:0 };
+  var s = { overdue:0, week:0, done:0, review:0 };
   state.items.forEach(function(it){
     if(it.status === "submitted"){ s.done++; return; }
     var n = dayDiff(it.due);
     if(n !== null && n < 0) s.overdue++;
     if(n !== null && n >= 0 && n <= 7) s.week++;
+    if(typeof Laya !== "undefined" && Laya.analyze(it).review.needed) s.review++;
   });
   return s;
 }
@@ -308,7 +349,40 @@ function renderStats(){
   var s = stats();
   el("stOverdue").textContent = s.overdue;
   el("stWeek").textContent = s.week;
+  el("stReview").textContent = s.review;
   el("stDone").textContent = s.done;
+}
+/* Laya 决策中心：待办 → 优先级排序 + AI 路由 + 自查标记 */
+function renderLaya(){
+  var box = el("layaBox");
+  if(typeof Laya === "undefined"){
+    box.innerHTML = '<div class="empty">laya.js 未加载，决策中心不可用</div>';
+    return;
+  }
+  var ranked = Laya.rank(state.items);
+  if(!ranked.length){ box.innerHTML = '<div class="empty">没有待决策的作业，添加后自动排优先级</div>'; return; }
+  var html = "";
+  ranked.forEach(function(d, i){
+    var urgCls = d.urgency.level >= 3 ? "rv" : (d.urgency.level === 2 ? "cx" : "ok");
+    html += '<div class="laya-item">'
+      + '<div class="laya-row">'
+      + '<span class="laya-rank">' + (i + 1) + '</span>'
+      + '<div class="t-info" style="flex:1;min-width:0"><div class="t-name">' + esc(d.item.name) + '</div>'
+      + '<div class="t-meta">' + esc(d.item.course) + ' · ' + dueText(d.item) + '</div></div>'
+      + '<div class="laya-pbar"><i style="width:' + d.priority + '%"></i></div>'
+      + '<span class="laya-pnum">' + d.priority + ' 分</span>'
+      + '<button class="btn sm primary" data-laya="' + d.item.id + '">按方案执行</button>'
+      + '</div>'
+      + '<div class="laya-tags">'
+      + '<span class="tag ' + urgCls + '">' + esc(d.urgency.label) + '</span>'
+      + '<span class="tag cx">' + esc(d.complexity.label) + '</span>'
+      + '<span class="tag ai">🤖 ' + esc(d.route.label) + ' · 置信度 ' + Math.round(d.route.confidence * 100) + '%</span>'
+      + (d.review.needed ? '<span class="tag rv">⛔ 需我自查</span>' : '<span class="tag ok">✅ 可自动交付</span>')
+      + '</div>'
+      + '<div class="laya-why">' + esc(d.reasons.join("；")) + '</div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
 }
 function renderLogs(){
   var box = el("logBox");
@@ -330,6 +404,7 @@ function esc(s){
 /* 统一刷新入口：按固定顺序调用各渲染函数，渲染函数之间零互调 */
 function refreshAll(){
   renderToday();
+  renderLaya();
   renderFilters();
   renderList();
   renderStats();
@@ -358,11 +433,33 @@ function findItem(id){
 function onAiSubmit(id){
   var it = findItem(id);
   if(!it) return;
-  var cmd = "请提交我的作业：" + it.name + "（" + it.course + "，截止 " + it.due + "）到学在城院，完成后回报结果。";
+  var cmd = "请提交我的作业：" + it.name + "（" + it.course + "，截止 " + it.due + "）到学在城院";
+  if(typeof Laya !== "undefined"){
+    /* Laya 决策结果写进指令：推荐 AI + 是否自动交付 / 需学生审核 */
+    var d = Laya.analyze(it);
+    cmd += "。Laya 决策：优先级 " + d.priority + "（" + d.urgency.label + "，" + d.complexity.label + "）"
+      + "，建议由「" + d.route.label + "」完成（置信度 " + Math.round(d.route.confidence * 100) + "%）";
+    cmd += d.review.needed
+      ? "；该任务需要我先自查审核，请先生成草稿给我确认后再交付。"
+      : "；该任务可直接自动交付，完成后回报结果。";
+  }else{
+    cmd += "，完成后回报结果。";
+  }
   copyText(cmd);
   showToast("指令已复制，去 WorkBuddy 对话粘贴发送即可");
   it.ai = true;
-  addLog("已复制 AI 提交指令：" + it.name);
+  addLog("已复制 AI 提交指令：" + it.name + (typeof Laya !== "undefined" ? "（Laya 优先级 " + Laya.analyze(it).priority + "）" : ""));
+  saveState();
+  refreshAll();
+}
+/* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排 */
+function onLayaPlan(){
+  if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
+  var plan = Laya.buildPlan(state.items);
+  if(!plan.queue.length){ showToast("没有待处理的作业"); return; }
+  copyText(plan.instruction);
+  showToast("Laya 执行计划已复制（" + plan.queue.length + " 项），去 WorkBuddy 粘贴发送即可");
+  addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
   saveState();
   refreshAll();
 }
@@ -398,7 +495,8 @@ function onSaveNew(){
   state.items.push({
     id: uid(), name: name, course: el("fCourse").value,
     due: el("fDue").value || "", type: el("fType").value,
-    note: el("fNote").value.trim(), status: "todo", ai: false
+    note: el("fNote").value.trim(), status: "todo", ai: false,
+    difficulty: el("fDiff").value || "auto"
   });
   el("fName").value = ""; el("fDue").value = ""; el("fNote").value = "";
   el("addForm").classList.remove("open");
@@ -451,6 +549,12 @@ function bind(){
     e.target.value = "";
   });
   el("btnClearDemo").addEventListener("click", onClearDemo);
+  el("btnLayaPlan").addEventListener("click", onLayaPlan);
+
+  el("layaBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-laya]");
+    if(b) onAiSubmit(+b.getAttribute("data-laya"));   // 按方案执行 = 用 Laya 决策增强的指令
+  });
 
   el("todayBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-ai]");
