@@ -46,6 +46,11 @@
       strengths: ["代码", "编程", "仿真", "PLC", "单片机", "调试", "嵌入式"],
       desc: "编程、仿真、嵌入式/PLC 实验"
     },
+    polisher: {
+      label: "润色AI",
+      strengths: ["润色", "改写", "降AI率", "文风"],
+      desc: "成稿去AI化润色、文风对齐（配合 Humanize 指令）"
+    },
     formatter: {
       label: "格式工具AI",
       strengths: ["排版", "转换", "PDF", "格式", "打印", "模板", "排版整理"],
@@ -278,9 +283,14 @@
     return out;
   };
 
-  /* ---------- 执行计划：决策 → 分派不同 AI → 自动交付编排 ---------- */
-  Laya.buildPlan = function (items, now) {
+  /* ---------- 执行计划：决策 → 分派不同 AI → 自动交付编排 ----------
+   * opts（可选，humanize.js 加载后由 UI 传入）：
+   *   contextFor(item)  -> string  每项任务的上下文简报（课件/历史作业）
+   *   humanizeFor(item) -> string  每项任务的去AI化要求（Humanize.checklist）
+   */
+  Laya.buildPlan = function (items, now, opts) {
     now = now || new Date();
+    opts = opts || {};
     var queue = Laya.rank(items, now);
     var auto = [], reviewList = [];
     queue.forEach(function (d) {
@@ -290,10 +300,18 @@
     function line(d, i) {
       var s = (i + 1) + ". 「" + d.item.name + "」（" + d.item.course + "，" +
         (d.daysLeft == null ? "无期限" : (d.daysLeft < 0 ? "已逾期" + (-d.daysLeft) + "天" : "剩" + d.daysLeft + "天")) +
-        "，优先级" + d.priority + "）";
+        "，优先级" + d.priority + "，交付格式" + (d.item.format || "文字") + "）";
       s += " → 使用「" + d.route.label + "」完成";
       if (d.item.note) s += "（要求：" + d.item.note + "）";
       s += d.autoDeliver ? " → 完成后直接自动交付" : " → 先生成草稿暂停，等我本人审核确认后再交付";
+      if (typeof opts.humanizeFor === "function") {
+        var h = opts.humanizeFor(d.item);
+        if (h) s += "\n" + h;
+      }
+      if (typeof opts.contextFor === "function") {
+        var c = opts.contextFor(d.item);
+        if (c) s += "\n" + c;
+      }
       return s;
     }
 
@@ -301,7 +319,11 @@
     if (queue.length) {
       instruction = "【Laya 执行计划 · 自动交付】请按以下优先级顺序处理我的作业并提交到学在城院：\n";
       queue.forEach(function (d, i) { instruction += line(d, i) + "\n"; });
-      instruction += "要求：每项任务由指定 AI 独立完成以保证正确率；需我审核的任务先出草稿；全部完成后逐项回报结果。";
+      instruction += "要求：每项任务由指定 AI 独立完成以保证正确率；需我审核的任务先出草稿；";
+      if (typeof opts.humanizeFor === "function") {
+        instruction += "所有成稿按各项「去AI化要求」润色并自查后再交付；";
+      }
+      instruction += "全部完成后逐项回报结果。";
     }
 
     return {

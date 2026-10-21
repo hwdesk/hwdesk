@@ -101,6 +101,16 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .tag.ok{background:var(--green-weak);color:var(--green)}
 .laya-why{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.6}
 .laya-ops{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
+/* 上下文库 */
+.mat-item{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.mat-item:last-child{border-bottom:none}
+.mat-kind{flex:none;font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600;background:var(--green-weak);color:var(--green)}
+.mat-main{flex:1;min-width:0}
+.mat-title{font-weight:600;font-size:14px;word-break:break-all}
+.mat-meta{font-size:12px;color:var(--sub);margin-top:2px}
+.mat-note{font-size:12px;color:var(--sub);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#matForm{display:none;padding:14px;margin-top:10px}
+#matForm.open{display:block}
 </style>
 </head>
 <body>
@@ -134,7 +144,34 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div id="layaBox"></div>
     <div class="laya-ops">
       <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（复制给 WorkBuddy）</button>
-      <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核</span>
+      <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核；成稿自动附去AI化要求与课程上下文</span>
+    </div>
+  </div>
+
+  <!-- 3) 上下文库 -->
+  <div class="section-title">
+    <h2>上下文库（课件 / 作业要求 / 范文）</h2>
+    <button class="btn sm" id="btnMat">＋ 添加材料</button>
+  </div>
+  <div class="card">
+    <div id="matBox"></div>
+    <div id="matForm">
+      <div class="grid2">
+        <div><label class="f">材料类型</label>
+          <select id="mKind"><option>课件</option><option>作业要求</option><option>范文</option><option>其他</option></select></div>
+        <div><label class="f">所属课程</label>
+          <select id="mCourse">
+            <option>通用（所有课程可用）</option>
+            <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+            <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+          </select></div>
+        <div class="full"><label class="f">标题</label><input type="text" id="mTitle" placeholder="如：第3章 Buck变换器课件 / 实验报告格式要求"></div>
+        <div class="full"><label class="f">内容摘要（供 AI 执行时参考）</label><textarea id="mNote" placeholder="如：讲义里要求开关频率取 20kHz，报告需含波形图与误差分析…"></textarea></div>
+        <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" id="mCancel">取消</button>
+          <button class="btn primary" id="mSave">保存材料</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -158,6 +195,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
           <select id="fType"><option>文件上传</option><option>线上作答</option><option>附件+报告</option></select></div>
         <div><label class="f">复杂程度（Laya 决策参考）</label>
           <select id="fDiff"><option value="auto">自动判断</option><option value="easy">简单</option><option value="medium">中等</option><option value="hard">困难</option></select></div>
+        <div><label class="f">交付格式（去AI化参考）</label>
+          <select id="fFormat"><option>文字</option><option>Word文档</option><option>PPT演示</option><option>PDF报告</option><option>其他</option></select></div>
         <div class="full"><label class="f">备注 / AI 辅助要求</label><textarea id="fNote" placeholder="例：帮我完成课后思考3的推导，生成 PDF 后提交"></textarea></div>
         <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn" id="btnCancel">取消</button>
@@ -179,7 +218,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 
   <div class="card ai-note">
     <b>AI 一键提交 & Laya 决策怎么用？</b><br>
-    ① 「Laya 决策中心」会自动按<b>交付时间 / 紧急度 / 复杂度</b>给待办排序，为每项任务推荐最合适的 AI（深度推理 / 写作 / 快速作答 / 代码 / 格式工具），并标记哪些任务<b>需要你本人自查审核</b>、哪些可以<b>直接自动交付</b>；② 点「生成执行计划」复制一条完整指令，回到 WorkBuddy 对话粘贴发送，我会按计划分派不同 AI 完成任务并自动提交到「学在城院」，需自查的任务会先出草稿等你确认；③ 结果自动写进上方日志。真实密码只保存在你本机，不写入本页面、不部署上公网。
+    ① 「Laya 决策中心」会自动按<b>交付时间 / 紧急度 / 复杂度</b>给待办排序，为每项任务推荐最合适的 AI（深度推理 / 写作 / 快速作答 / 代码 / 格式工具），并标记哪些任务<b>需要你本人自查审核</b>、哪些可以<b>直接自动交付</b>；② 「上下文库」里登记<b>学在城院的课件、作业要求、已认可的范文</b>，同时自动复用<b>同课程已提交过的任务</b>作为文风与深度参考，让 AI 按课程上下文作答以提高正确率；③ 点「生成执行计划」复制一条完整指令（含上下文简报 + 按交付格式定制的<b>去AI化润色要求</b>），回到 WorkBuddy 对话粘贴发送，我会按计划分派不同 AI 完成任务并自动提交到「学在城院」，需自查的任务会先出草稿等你确认；④ 结果自动写进上方日志。真实密码只保存在你本机，不写入本页面、不部署上公网。
   </div>
 
   <footer class="ops">
@@ -192,32 +231,38 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <div class="toast" id="toast"></div>
 
 <script src="laya.js"></script>
+<script src="humanize.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
-var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded";
-var state = { items: [], logs: [], filter: "all" };
+var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
+var state = { items: [], logs: [], materials: [], filter: "all" };
 
 function loadState(){
   try{
     state.items = JSON.parse(localStorage.getItem(LS_KEY) || "null") || seedItems();
   }catch(e){ state.items = seedItems(); }
   /* 数据迁移：旧数据补默认字段，Laya 引擎对缺字段同样有兜底 */
-  state.items.forEach(function(it){ if(!it.difficulty) it.difficulty = "auto"; });
+  state.items.forEach(function(it){
+    if(!it.difficulty) it.difficulty = "auto";
+    if(!it.format) it.format = "文字";
+  });
   try{ state.logs = JSON.parse(localStorage.getItem(LS_LOG) || "[]"); }catch(e){ state.logs = []; }
+  try{ state.materials = JSON.parse(localStorage.getItem(LS_MAT) || "[]") || []; }catch(e){ state.materials = []; }
 }
 function saveState(){
   localStorage.setItem(LS_KEY, JSON.stringify(state.items));
   localStorage.setItem(LS_LOG, JSON.stringify(state.logs));
+  localStorage.setItem(LS_MAT, JSON.stringify(state.materials));
 }
 function seedItems(){
   var today = new Date();
   function d(offset){ var t=new Date(today); t.setDate(t.getDate()+offset); return t.toISOString().slice(0,10); }
   var seed = [
-    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false, difficulty:"auto" },
-    { id:2, name:"课后思考3 推导题",  course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true, difficulty:"hard" },
-    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false, difficulty:"medium" },
-    { id:4, name:"课堂练习-3 选择填空", course:"电机与拖动",         due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false, difficulty:"easy" }
+    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false, difficulty:"auto", format:"Word文档" },
+    { id:2, name:"课后思考3 推导题",  course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true, difficulty:"hard", format:"PDF报告" },
+    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false, difficulty:"medium", format:"Word文档" },
+    { id:4, name:"课堂练习-3 选择填空", course:"电机与拖动",         due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false, difficulty:"easy", format:"文字" }
   ];
   localStorage.setItem(LS_SEED, "1");
   return seed;
@@ -364,11 +409,18 @@ function renderLaya(){
   var html = "";
   ranked.forEach(function(d, i){
     var urgCls = d.urgency.level >= 3 ? "rv" : (d.urgency.level === 2 ? "cx" : "ok");
+    /* 去AI化润色徽章（humanize.js 加载后可用） */
+    var hBadge = "";
+    if(typeof Humanize !== "undefined"){
+      var hv = Humanize.levelFor(d.item);
+      if(hv.level === "strict") hBadge = '<span class="tag rv">🧑‍🎓 需严格润色降AI率</span>';
+      else if(hv.level === "light") hBadge = '<span class="tag cx">✍️ 轻度润色</span>';
+    }
     html += '<div class="laya-item">'
       + '<div class="laya-row">'
       + '<span class="laya-rank">' + (i + 1) + '</span>'
       + '<div class="t-info" style="flex:1;min-width:0"><div class="t-name">' + esc(d.item.name) + '</div>'
-      + '<div class="t-meta">' + esc(d.item.course) + ' · ' + dueText(d.item) + '</div></div>'
+      + '<div class="t-meta">' + esc(d.item.course) + ' · ' + dueText(d.item) + ' · 交付 ' + esc(d.item.format || "文字") + '</div></div>'
       + '<div class="laya-pbar"><i style="width:' + d.priority + '%"></i></div>'
       + '<span class="laya-pnum">' + d.priority + ' 分</span>'
       + '<button class="btn sm primary" data-laya="' + d.item.id + '">按方案执行</button>'
@@ -377,9 +429,30 @@ function renderLaya(){
       + '<span class="tag ' + urgCls + '">' + esc(d.urgency.label) + '</span>'
       + '<span class="tag cx">' + esc(d.complexity.label) + '</span>'
       + '<span class="tag ai">🤖 ' + esc(d.route.label) + ' · 置信度 ' + Math.round(d.route.confidence * 100) + '%</span>'
+      + hBadge
       + (d.review.needed ? '<span class="tag rv">⛔ 需我自查</span>' : '<span class="tag ok">✅ 可自动交付</span>')
       + '</div>'
       + '<div class="laya-why">' + esc(d.reasons.join("；")) + '</div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 上下文库渲染 */
+function renderMaterials(){
+  var box = el("matBox");
+  if(!state.materials.length){
+    box.innerHTML = '<div class="empty">还没有材料。把学在城院上的课件、作业要求、已认可的范文摘要添加进来，AI 执行任务时会自动作为上下文参考</div>';
+    return;
+  }
+  var html = "";
+  state.materials.forEach(function(m){
+    html += '<div class="mat-item">'
+      + '<span class="mat-kind">' + esc(m.kind) + '</span>'
+      + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
+      + '<div class="mat-meta">' + esc(m.course) + ' · 添加于 ' + esc(m.time || "-") + '</div>'
+      + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
+      + '</div>'
+      + '<button class="btn sm danger-ghost" data-mat-del="' + m.id + '">删除</button>'
       + '</div>';
   });
   box.innerHTML = html;
@@ -405,6 +478,7 @@ function esc(s){
 function refreshAll(){
   renderToday();
   renderLaya();
+  renderMaterials();
   renderFilters();
   renderList();
   renderStats();
@@ -445,23 +519,66 @@ function onAiSubmit(id){
   }else{
     cmd += "，完成后回报结果。";
   }
+  /* 上下文简报：课件/作业要求/历史已提交任务（提高正确率 + 贴合文风） */
+  if(typeof ContextKit !== "undefined"){
+    var pack = ContextKit.pack(it, state.items, state.materials);
+    if(pack.brief) cmd += "\n\n" + pack.brief;
+  }
+  /* 去AI化要求：交付格式对应的润色指令 + 交付前自查 */
+  if(typeof Humanize !== "undefined"){
+    var cl = Humanize.checklist(it);
+    if(cl) cmd += "\n\n" + cl;
+  }
   copyText(cmd);
-  showToast("指令已复制，去 WorkBuddy 对话粘贴发送即可");
+  showToast("指令已复制（含上下文与去AI化要求），去 WorkBuddy 粘贴发送即可");
   it.ai = true;
   addLog("已复制 AI 提交指令：" + it.name + (typeof Laya !== "undefined" ? "（Laya 优先级 " + Laya.analyze(it).priority + "）" : ""));
   saveState();
   refreshAll();
 }
-/* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排 */
+/* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
 function onLayaPlan(){
   if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
-  var plan = Laya.buildPlan(state.items);
+  var opts = {};
+  if(typeof ContextKit !== "undefined"){
+    opts.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials).brief; };
+  }
+  if(typeof Humanize !== "undefined"){
+    opts.humanizeFor = function(item){ return Humanize.checklist(item); };
+  }
+  var plan = Laya.buildPlan(state.items, null, opts);
   if(!plan.queue.length){ showToast("没有待处理的作业"); return; }
   copyText(plan.instruction);
   showToast("Laya 执行计划已复制（" + plan.queue.length + " 项），去 WorkBuddy 粘贴发送即可");
   addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
   saveState();
   refreshAll();
+}
+/* 上下文库：添加 / 删除材料 */
+function onMatSave(){
+  var title = el("mTitle").value.trim();
+  if(!title){ showToast("请填写材料标题"); return; }
+  var n = new Date();
+  state.materials.push({
+    id: uid(), kind: el("mKind").value,
+    course: el("mCourse").value === "通用（所有课程可用）" ? "通用" : el("mCourse").value,
+    title: title, note: el("mNote").value.trim(),
+    time: n.getFullYear() + "-" + (n.getMonth() + 1) + "-" + n.getDate()
+  });
+  el("mTitle").value = ""; el("mNote").value = "";
+  el("matForm").classList.remove("open");
+  addLog("添加上下文材料：" + title);
+  saveState(); refreshAll();
+  showToast("材料已添加，AI 执行任务时自动引用");
+}
+function onMatDelete(id){
+  var m = null;
+  for(var i = 0; i < state.materials.length; i++) if(state.materials[i].id === id) m = state.materials[i];
+  if(!m) return;
+  if(!window.confirm("确定删除材料「" + m.title + "」吗？")) return;
+  state.materials = state.materials.filter(function(x){ return x.id !== id; });
+  addLog("删除上下文材料：" + m.title);
+  saveState(); refreshAll();
 }
 function copyText(s){
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -496,7 +613,8 @@ function onSaveNew(){
     id: uid(), name: name, course: el("fCourse").value,
     due: el("fDue").value || "", type: el("fType").value,
     note: el("fNote").value.trim(), status: "todo", ai: false,
-    difficulty: el("fDiff").value || "auto"
+    difficulty: el("fDiff").value || "auto",
+    format: el("fFormat").value || "文字"
   });
   el("fName").value = ""; el("fDue").value = ""; el("fNote").value = "";
   el("addForm").classList.remove("open");
@@ -505,7 +623,7 @@ function onSaveNew(){
   showToast("已添加");
 }
 function onExport(){
-  var blob = new Blob([JSON.stringify({ items: state.items, logs: state.logs }, null, 2)], { type: "application/json" });
+  var blob = new Blob([JSON.stringify({ items: state.items, logs: state.logs, materials: state.materials }, null, 2)], { type: "application/json" });
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "作业工作台备份.json";
@@ -520,8 +638,13 @@ function onImport(file){
       var d = JSON.parse(r.result);
       if(!d || !Array.isArray(d.items)) throw 0;
       state.items = d.items;
+      state.items.forEach(function(it){
+        if(!it.difficulty) it.difficulty = "auto";
+        if(!it.format) it.format = "文字";
+      });
       state.logs = Array.isArray(d.logs) ? d.logs : [];
-      addLog("导入备份成功，共 " + state.items.length + " 条作业");
+      state.materials = Array.isArray(d.materials) ? d.materials : [];
+      addLog("导入备份成功，共 " + state.items.length + " 条作业、 " + state.materials.length + " 条上下文材料");
       saveState(); refreshAll();
       showToast("导入成功");
     }catch(e){ showToast("备份文件格式不正确"); }
@@ -531,7 +654,7 @@ function onImport(file){
 function onClearDemo(){
   if(!window.confirm("将清空全部数据（含示例），确定吗？")) return;
   if(!window.confirm("再次确认：数据清空后无法恢复，建议先导出备份。确定清空？")) return;
-  state.items = []; state.logs = [];
+  state.items = []; state.logs = []; state.materials = [];
   localStorage.removeItem(LS_SEED);
   saveState(); refreshAll();
   showToast("已清空");
@@ -554,6 +677,14 @@ function bind(){
   el("layaBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-laya]");
     if(b) onAiSubmit(+b.getAttribute("data-laya"));   // 按方案执行 = 用 Laya 决策增强的指令
+  });
+
+  el("btnMat").addEventListener("click", function(){ el("matForm").classList.toggle("open"); });
+  el("mCancel").addEventListener("click", function(){ el("matForm").classList.remove("open"); });
+  el("mSave").addEventListener("click", onMatSave);
+  el("matBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-mat-del]");
+    if(b) onMatDelete(+b.getAttribute("data-mat-del"));
   });
 
   el("todayBox").addEventListener("click", function(e){
