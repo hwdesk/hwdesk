@@ -231,7 +231,7 @@ test("bridge /verify only logs in (no collection) and returns ok/error JSON", ()
 
 /* ---------- 8b. 登录链路对准真实平台：ZUCC CAS（学号直登）+ 学习通兜底 ---------- */
 test("syncserver logs in via the ZUCC unified-auth CAS, not just chaoxing", () => {
-  pyHas(/URL_CAS = "https:\/\/ca\.hzcu\.edu\.cn\/cas\/login"/, "CAS endpoint of ca.hzcu.edu.cn");
+  pyHas(/URL_CAS = \("http:\/\/ca\.hzcu\.edu\.cn\/cas\/login"/, "CAS endpoint of ca.hzcu.edu.cn");
   pyHas(/def zucc_login\(account, password\)/, "zucc_login() submits the CAS form");
   pyHas(/def platform_login\(account, password\)/, "platform_login() auto-picks CAS vs chaoxing fallback");
   pyHas(/"execution": execution, "_eventId": "submit"/, "CAS form carries execution/_eventId");
