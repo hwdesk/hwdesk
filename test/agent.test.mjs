@@ -139,5 +139,34 @@ test("extractDeliverable empty when no assistant message", () => {
   assert.equal(Agent.extractDeliverable([{ role: "user", content: "hi" }]), "");
 });
 
+/* ---------- CORS 标注 ---------- */
+test("every preset declares a cors mode (ok / proxy / custom)", () => {
+  for (const id of Agent.PRESET_ORDER) {
+    assert.ok(["ok", "proxy", "custom"].includes(Agent.PRESETS[id].cors), id + " cors missing");
+    assert.ok(Agent.corsLabel(id).length > 0, id + " label missing");
+  }
+});
+test("doubao is flagged as proxy-preferred, web presets as browser-direct", () => {
+  assert.equal(Agent.PRESETS.doubao.cors, "proxy");
+  assert.equal(Agent.PRESETS.deepseek.cors, "ok");
+  assert.equal(Agent.corsLabel("doubao"), "建议本地代理");
+});
+
+/* ---------- 定稿二次确认 ---------- */
+test("extractDeliverableInfo marks 【最终交付】 as confirmed", () => {
+  const r = Agent.extractDeliverableInfo([{ role: "assistant", content: "草稿…\n【最终交付】\n定稿 42" }]);
+  assert.equal(r.confirmed, true);
+  assert.equal(r.text, "定稿 42");
+});
+test("extractDeliverableInfo marks the fallback as NOT confirmed", () => {
+  const r = Agent.extractDeliverableInfo([{ role: "assistant", content: "好的已修改" }]);
+  assert.equal(r.confirmed, false);
+  assert.equal(r.text, "好的已修改");
+});
+test("extractDeliverable keeps its old string signature", () => {
+  assert.equal(Agent.extractDeliverable([{ role: "assistant", content: "【最终交付】x" }]), "x");
+  assert.equal(Agent.extractDeliverable([{ role: "user", content: "hi" }]), "");
+});
+
 console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");
 if (!process.exitCode) console.log("ALL PASS");

@@ -13,38 +13,57 @@
       baseUrl: "https://api.deepseek.com/v1",
       model: "deepseek-chat",
       keyUrl: "https://platform.deepseek.com/api_keys",
-      hint: "性价比高，推理 / 写作均衡"
+      hint: "性价比高，推理 / 写作均衡",
+      cors: "ok"
     },
     kimi: {
       label: "Kimi（月之暗面）",
       baseUrl: "https://api.moonshot.cn/v1",
       model: "moonshot-v1-8k",
       keyUrl: "https://platform.moonshot.cn/console/api-keys",
-      hint: "长上下文，适合带课件摘要的任务"
+      hint: "长上下文，适合带课件摘要的任务",
+      cors: "ok"
     },
     qwen: {
       label: "通义千问",
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       model: "qwen-plus",
       keyUrl: "https://bailian.console.aliyun.com/?apiKey=1",
-      hint: "代码 / 仿真类任务表现好"
+      hint: "代码 / 仿真类任务表现好",
+      cors: "ok"
     },
     doubao: {
       label: "豆包（火山方舟）",
       baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
       model: "",
       keyUrl: "https://console.volcengine.com/ark",
-      hint: "model 需填你在方舟创建的推理接入点 ID"
+      hint: "model 需填你在方舟创建的推理接入点 ID；方舟一般不允许浏览器直连，建议走本地代理",
+      cors: "proxy"
     },
     custom: {
       label: "自定义（OpenAI 兼容）",
       baseUrl: "",
       model: "",
       keyUrl: "",
-      hint: "任何兼容 /chat/completions 的服务（含本地网关）"
+      hint: "任何兼容 /chat/completions 的服务（含本地网关）",
+      cors: "custom"
     }
   };
   Agent.PRESET_ORDER = ["deepseek", "kimi", "qwen", "doubao", "custom"];
+
+  /* ---------- 浏览器直连（CORS）标注 ----------
+   * ok     = 该服务放行了跨域请求，浏览器可直连
+   * proxy  = 官方未放行跨域，建议填本地代理地址（如 http://127.0.0.1:8787/v1）
+   * custom = 取决于自建网关，由使用者自行判断 */
+  Agent.CORS_LABEL = {
+    ok: "可浏览器直连",
+    proxy: "建议本地代理",
+    custom: "取决于网关"
+  };
+  Agent.corsLabel = function (presetId) {
+    var p = Agent.PRESETS[presetId];
+    return Agent.CORS_LABEL[(p && p.cors) || "custom"] || Agent.CORS_LABEL.custom;
+  };
 
   /* ---------- 配置存取 ---------- */
   var LS_CFG = "wb_hwdesk_agent";
@@ -135,19 +154,28 @@
     return out;
   };
 
-  /* ---------- 结果提取：取【最终交付】之后的内容，缺省取最后一条助手消息 ---------- */
-  Agent.extractDeliverable = function (messages) {
+  /* ---------- 结果提取 ----------
+   * extractDeliverableInfo 额外返回 confirmed：
+   *   true  = 助手确实输出了【最终交付】定稿块，可放心提交
+   *   false = 只是 fallback 到最后一条回复（可能是「好的已修改」这类短句），
+   *           页面必须二次确认，不能当成定稿直接交付 */
+  Agent.extractDeliverableInfo = function (messages) {
     var last = null;
     for (var i = messages.length - 1; i >= 0; i--) {
       if (messages[i] && messages[i].role === "assistant") { last = messages[i].content || ""; break; }
     }
-    if (!last) return "";
+    if (!last) return { text: "", confirmed: false };
     var idx = last.indexOf("【最终交付】");
     if (idx !== -1) {
       var out = last.slice(idx + "【最终交付】".length);
-      return out.replace(/^\s*[:：]?\s*/, "").trim();
+      return { text: out.replace(/^\s*[:：]?\s*/, "").trim(), confirmed: true };
     }
-    return last.trim();
+    return { text: last.trim(), confirmed: false };
+  };
+
+  /* 取【最终交付】之后的内容，缺省取最后一条助手消息（保留旧签名，页面侧请用 Info 版拿 confirmed） */
+  Agent.extractDeliverable = function (messages) {
+    return Agent.extractDeliverableInfo(messages).text;
   };
 
   global.Agent = Agent;

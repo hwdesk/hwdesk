@@ -72,11 +72,13 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
-node test/bridge.test.mjs     # AI 直连桥：12 项
-node test/agent.test.mjs      # 作业 Agent 对话：15 项
+node test/bridge.test.mjs     # AI 直连桥：13 项
+node test/agent.test.mjs      # 作业 Agent 对话：20 项
 node test/sso.test.mjs        # 学在城院登录凭据：12 项
-node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + 初始化容错）：12 项
+node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + 初始化容错 + 流式恢复 + 交付二次确认）：17 项
 ```
+
+合计 **116 项**（db 10 / laya 22 / humanize 22 / bridge 13 / agent 20 / sso 12 / wiring 17），全绿。
 
 ## 学在城院登录（sso.js）
 
@@ -96,7 +98,11 @@ node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事�
 
 - 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；配置存 `wb_hwdesk_agent` 键，**Key 只存本机 localStorage**
 - 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
-- 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
+- 流式输出（SSE），**过程中约每 1 秒落盘一次**，中途关抽屉 / 刷新不丢已生成内容；请求失败会复位「发送」按钮（不会卡在「生成中…」）
+- 成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
+- **交付二次确认**：`Agent.extractDeliverableInfo()` 返回 `{ text, confirmed }`，只有助手真的输出了 `【最终交付】` 定稿块才算 `confirmed`；仅 fallback 到最后一条回复时（可能是「好的已修改」这类短句）提交前会弹确认，并在风险行提示「未检测到定稿块」
+- **状态一致**：需自查的作业提交后，卡片同步标 `🕓 待自查（审批队列中）`，审批通过或手动标已提交时自动清除，不再出现「列表是待完成 / 审批里是待审」的错位
+- **CORS 标注**：每个预设带 `cors` 字段（`ok` / `proxy` / `custom`），设置页下拉与提示行会显示「可浏览器直连 / 建议本地代理 / 取决于网关」；被浏览器 CORS 拦截时把 `baseUrl` 改填本地代理（如 `http://127.0.0.1:8787/v1`）即可
 
 ## AI 直连（bridge.js）
 

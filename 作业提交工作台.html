@@ -632,7 +632,8 @@ function renderList(){
     html += '<div class="hw-item">'
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
-      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span></div>'
+      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
+      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
   });
@@ -1001,9 +1002,15 @@ function onChatSend(){
   renderChat(chat);
   streamChat(chat);
 }
+function resetChatBtn(){
+  _chatBusy = false;
+  var b = el("chatSend");
+  if(b){ b.disabled = false; b.textContent = "发送"; }
+}
 function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
+  var _lastSave = Date.now();
   var cfg = Agent.config;
   var url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
   var body = JSON.stringify({
@@ -1030,7 +1037,12 @@ function streamChat(chat){
           try{
             var j = JSON.parse(payload);
             var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
-            if(d){ chat.messages[chat.messages.length - 1].content += d; renderChatTail(); }
+            if(d){
+            chat.messages[chat.messages.length - 1].content += d;
+            renderChatTail();
+            /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
+            if(Date.now() - _lastSave > 1000){ _lastSave = Date.now(); Agent.saveChat(_chatId, chat); }
+          }
           }catch(e){ /* 忽略半包 */ }
         });
         return pump();
@@ -1039,6 +1051,7 @@ function streamChat(chat){
     return pump();
   })
   .catch(function(err){
+    resetChatBtn();                       /* 失败一次后按钮不再永久卡死 */
     chat = Agent.loadChat(_chatId);
     if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
     Agent.saveChat(_chatId, chat);
@@ -1060,7 +1073,8 @@ function finishChat(){
   showChatRisk(chat);
 }
 function showChatRisk(chat){
-  var d = Agent.extractDeliverable(chat.messages);
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
   var out = el("chatRisk");
   if(!d){ out.style.display = "none"; _chatRiskScore = null; return; }
   _chatRiskScore = null;
@@ -1069,6 +1083,10 @@ function showChatRisk(chat){
     var r = Humanize.risk(d);
     if(r){ _chatRiskScore = r.score; text = "成稿检测风险：" + r.score + " / 100（" + r.label + "）" + (r.label !== "低风险" ? " · 建议退回 Agent 重写命中段落" : " · ✓ 可以交付"); }
   }
+  if(!info.confirmed){
+    text = "未检测到【最终交付】定稿块，当前只能取最后一条回复（" + d.length + " 字）作为交付内容，"
+      + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
+  }
   if(!text) text = "成稿已就绪（" + d.length + " 字），点「用最终结果提交」交付。";
   out.textContent = text;
   out.style.display = "block";
@@ -1076,8 +1094,15 @@ function showChatRisk(chat){
 function onChatSubmit(){
   if(_chatId === null) return;
   var chat = Agent.loadChat(_chatId);
-  var d = Agent.extractDeliverable(chat.messages);
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
+  if(!info.confirmed){
+    /* fallback 到「好的已修改」这类短句时不再直接当交付，先二次确认 */
+    var preview = d.length > 60 ? d.slice(0, 60) + "…" : d;
+    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把最后一条回复（" + d.length + " 字）作为交付内容：\n「"
+      + preview + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
+  }
   var it = findItem(_chatId);
   if(!it) return;
   var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
@@ -1090,11 +1115,17 @@ function onChatSubmit(){
     });
   }
   it.ai = true;
-  if(!needsReview) it.status = "submitted";
+  if(needsReview){
+    /* 进审批队列的作业，列表状态同步标为待自查，避免「列表是待完成 / 审批里是待审」不一致 */
+    it.reviewPending = true;
+  }else{
+    it.status = "submitted";
+    it.reviewPending = false;
+  }
   addLog("Agent 对话成稿" + (needsReview ? "送审" : "并提交") + "：" + it.name);
   saveState(); refreshAll();
   closeChat();
-  showToast(needsReview ? "草稿已进审批队列，自查通过后交付" : "已通过工作台提交");
+  showToast(needsReview ? "草稿已进审批队列（列表已标待自查），自查通过后交付" : "已通过工作台提交");
 }
 function onChatClear(){
   if(_chatId === null) return;
@@ -1111,6 +1142,10 @@ function onChatClear(){
   showToast("对话已清空");
 }
 function closeChat(){
+  if(_chatBusy && _chatId !== null && typeof Agent !== "undefined"){
+    var c = Agent.loadChat(_chatId);
+    Agent.saveChat(_chatId, c);          /* 生成中途关抽屉也保留已收到的内容 */
+  }
   el("chatPanel").style.display = "none";
   _chatId = null;
 }
@@ -1121,7 +1156,9 @@ function fillAgentSettings(){
   Agent.load();
   var sel = el("agPreset"), html = "";
   Agent.PRESET_ORDER.forEach(function(id){
-    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label) + '</option>';
+    var tag = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(id) : "";
+    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label)
+      + (tag ? '（' + esc(tag) + '）' : '') + '</option>';
   });
   sel.innerHTML = html;
   el("agPreset").value = Agent.config.preset;
@@ -1132,7 +1169,13 @@ function fillAgentSettings(){
 }
 function updateAgentHint(){
   var p = Agent.PRESETS[Agent.config.preset] || {};
-  el("agHint").textContent = p.hint || "";
+  var cors = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(Agent.config.preset) : "";
+  var txt = p.hint || "";
+  if(cors) txt += "｜浏览器直连：" + cors;
+  if(p.cors === "proxy" || p.cors === "custom"){
+    txt += "｜若被 CORS 拦截，baseUrl 改填本地代理（例如 http://127.0.0.1:8787/v1）。";
+  }
+  el("agHint").textContent = txt;
   el("agKeyLink").href = p.keyUrl || "#";
   el("agKeyLink").style.display = p.keyUrl ? "" : "none";
 }
@@ -1262,7 +1305,7 @@ function onApprove(id){
   DB.update("submissions", id, { status: "submitted" });
   DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
   var it = findItem(s.itemId);
-  if(it && it.status === "todo"){ it.status = "submitted"; }
+  if(it && it.status === "todo"){ it.status = "submitted"; it.reviewPending = false; }
   addLog("审批通过并交付：" + s.name);
   saveState(); refreshAll();
   showToast("已通过，任务交付学在城院");
@@ -1316,7 +1359,7 @@ function onDelete(id){
 function onToggleDone(id, toDone){
   var it = findItem(id);
   if(!it) return;
-  if(toDone){ it.status = "submitted"; addLog("标记已提交：" + it.name); }
+  if(toDone){ it.status = "submitted"; it.reviewPending = false; addLog("标记已提交：" + it.name); }
   else{ it.status = "todo"; addLog("撤回为待办：" + it.name); }
   saveState(); refreshAll();
 }
