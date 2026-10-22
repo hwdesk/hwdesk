@@ -59,8 +59,15 @@
       var raw = global.localStorage ? global.localStorage.getItem(LS_KEY) : null;
       var p = raw ? JSON.parse(raw) : null;
       if (p && typeof p === "object") {
-        Bridge.prefs.defaultAi = p.defaultAi || "";
-        Bridge.prefs.byCategory = p.byCategory || {};
+        /* 只接受注册表里真实存在的 id：旧数据指向已下线的 AI 时直接丢弃，
+         * 避免 localStorage 残留悄悄劫持派发目标 */
+        Bridge.prefs.defaultAi = known(p.defaultAi || "");
+        var byCat = {};
+        var stale = p.byCategory || {};
+        for (var k in stale) {
+          if (known(stale[k])) byCat[k] = stale[k];
+        }
+        Bridge.prefs.byCategory = byCat;
       }
     } catch (e) { /* 损坏即回默认 */ }
     return Bridge.prefs;
@@ -92,16 +99,19 @@
   function known(id) { return Bridge.AI[id] ? id : ""; }
 
   /* ---------- 挑选直连目标 ----------
-   * 优先级：类别指定 > 全局默认 > 注册表中第一个承接该类别的 AI。
+   * 优先级：全局默认 > 类别指定 > 注册表中第一个承接该类别的 AI。
+   * （默认优先修复：旧版本写进 localStorage 的 byCategory 残留会永久压住
+   *   用户后来设置的默认 AI —— 表现为“无论默认选谁，打开都是豆包”。
+   *   现在没有按类别指定的 UI，默认 AI 必须最优先，残留不许劫持。）
    * 未设默认且类别无匹配时返回 ""（调用方弹选择器）。 */
   Bridge.pick = function (category) {
     Bridge.load();
+    var def = known(Bridge.prefs.defaultAi);
+    if (def) return { ai: def, source: "default" };
     if (category) {
       var byCat = known(Bridge.prefs.byCategory[category]);
       if (byCat) return { ai: byCat, source: "category" };
     }
-    var def = known(Bridge.prefs.defaultAi);
-    if (def) return { ai: def, source: "default" };
     if (category) {
       for (var i = 0; i < Bridge.ORDER.length; i++) {
         var id = Bridge.ORDER[i];
