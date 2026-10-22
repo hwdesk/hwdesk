@@ -1426,6 +1426,9 @@ function onLogin(){
   /* 登录门禁真实验证：账号密码先交本机桥（syncserver.py /verify），
    * 由它代为登录 course.hzcu.edu.cn —— 只有真实登录成功的账号才放行进工作台。
    * 凭据仅随本次请求发给 127.0.0.1，不落盘、不写日志、不出本机。 */
+  /* 本机桥（syncserver.py）地址：main 侧已移除全局 DIRECT_URL 定义（48965e4），
+   * 这里局部声明，保证合并后登录验证仍指向 127.0.0.1:8765（wiring 断言不变）。 */
+  var DIRECT_URL = "http://127.0.0.1:8765";
   var err = el("loginErr"), btn = el("btnLogin");
   err.style.display = "none"; err.textContent = "";
   btn.disabled = true; btn.textContent = "正在向学在城院验证账号…";
