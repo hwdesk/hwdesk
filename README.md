@@ -13,7 +13,7 @@
 | **审批** | 需自查任务的草稿队列：通过并交付 / 退回修改（附修改指令），审批留痕入**审批库** |
 | **行动** | 执行计划说明 + **交付库**（每项任务 pending → submitted / changes 的完整记录，含执行 AI） |
 | **洞察** | 去AI化风险自查工具（粘贴成稿 → 套话密度 + 句式节奏评估）+ 操作日志 |
-| **设置** | JSON 导出 / 导入（含全部库）、清空、决策模型参数说明 |
+| **设置** | 默认执行 AI、Agent 对话 API 配置（预设 / Base URL / Key / 模型）、JSON 导出 / 导入（含全部库）、清空、决策模型参数说明 |
 
 ## 库管理（db.js）
 
@@ -74,7 +74,12 @@ node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
 node test/bridge.test.mjs     # AI 直连桥：12 项
 node test/agent.test.mjs      # 作业 Agent 对话：15 项
+node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + 初始化容错）：12 项
 ```
+
+`wiring.test.mjs` 静态解析 `作业提交工作台.html`，守住两类只在运行时才暴露的问题：
+`el("id")` 引用了页面里不存在的元素（会让 `bind()` 抛错、初始化半途而废），
+以及 DOM 与处理函数都在、却忘了接监听器（按钮点了没反应）。
 
 ## 作业 Agent 对话（agent.js）
 
@@ -88,7 +93,8 @@ node test/agent.test.mjs      # 作业 Agent 对话：15 项
 
 点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**），派发 = 自动复制指令（含上下文与去AI化要求）+ 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
 
-- 目标挑选优先级：按 Laya 路由类别的单独指定 > 设置页的「默认执行 AI」> 注册表自动匹配；两者都未设时弹出选择器（可在选择器里一键「设为默认」）
+- 目标挑选优先级：按 Laya 路由类别的单独指定 > 设置页的「默认执行 AI」> 注册表自动匹配；两者都未设时弹出选择器
+- 选择器操作：点一行 = 本次用它执行；点「设为默认」= 记住选择并派发；**Esc 或点弹窗外空白处 = 取消**（也支持 Enter / Space 选中聚焦行）
 - 「WorkBuddy（本地代理）」保留旧复制流程——只有它能代登录学在城院完成真正的平台提交
 - 偏好存 `wb_hwdesk_bridge` 键；`Bridge.pick(category)` / `Bridge.describe(pick)` 为纯计算 API，DOM 无关、可单测
 
