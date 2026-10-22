@@ -118,10 +118,10 @@
    *   action = "open+copy" → 复制指令并打开 url
    *          = "copy"      → 仅复制（workbuddy 旧流程） */
   Bridge.describe = function (pickResult) {
-    var id = pickResult && pickResult.ai ? pickResult.ai : "workbuddy";
-    var ai = Bridge.AI[id] || Bridge.AI.workbuddy;
+    var knownId = pickResult && Bridge.AI[pickResult.ai] ? pickResult.ai : "workbuddy";
+    var ai = Bridge.AI[knownId];
     return {
-      ai: id,
+      ai: knownId,
       label: ai.label,
       url: ai.url || "",
       action: ai.url ? "open+copy" : "copy"

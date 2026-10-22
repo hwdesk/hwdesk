@@ -382,6 +382,26 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         「WorkBuddy（本地代理）」保留旧流程：可代登录学在城院完成提交。
       </p>
     </div>
+    <div class="section-title"><h2>Agent 对话 API</h2><span class="hint">作业卡「💬 对话」用的直连接口；Key 只存本机 localStorage</span></div>
+    <div class="card" style="padding:14px">
+      <label class="f" style="max-width:280px">预设
+        <select id="agPreset" style="width:100%"></select>
+      </label>
+      <label class="f" style="max-width:420px">Base URL
+        <input id="agUrl" placeholder="https://api.deepseek.com/v1" style="width:100%">
+      </label>
+      <label class="f" style="max-width:420px">API Key
+        <input id="agKey" type="password" placeholder="sk-…" style="width:100%">
+      </label>
+      <label class="f" style="max-width:420px">模型
+        <input id="agModel" placeholder="deepseek-chat" style="width:100%">
+      </label>
+      <p class="hint" id="agHint" style="margin:8px 0 0"></p>
+      <p style="margin:6px 0 0"><a id="agKeyLink" target="_blank" rel="noopener" class="hint">申请 API Key →</a></p>
+      <footer class="ops" style="margin:10px 0 0">
+        <button class="btn sm primary" id="agSave">保存 Agent 配置</button>
+      </footer>
+    </div>
     <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
       <footer class="ops" style="margin:0">
@@ -524,7 +544,7 @@ function dueText(it){
 function todayItems(){
   var out = [];
   state.items.forEach(function(it){
-    if(it.status === "todo"){
+    if(it.status === "todo" || it.status === "review"){
       var n = dayDiff(it.due);
       if(n !== null && n <= 3) out.push(it);           // 逾期、今天、3天内
     }
@@ -540,13 +560,13 @@ function todayItems(){
 function filteredItems(){
   var f = state.filter;
   return state.items.slice().sort(function(a,b){
-    var da = a.status==="todo" ? (dayDiff(a.due)===null?9999:dayDiff(a.due)) : 99999;
-    var db = b.status==="todo" ? (dayDiff(b.due)===null?9999:dayDiff(b.due)) : 99999;
+    var da = a.status!=="submitted" ? (dayDiff(a.due)===null?9999:dayDiff(a.due)) : 99999;
+    var db = b.status!=="submitted" ? (dayDiff(b.due)===null?9999:dayDiff(b.due)) : 99999;
     return da - db;
   }).filter(function(it){
     if(f === "all") return true;
-    if(f === "todo") return it.status === "todo";
-    if(f === "overdue") return it.status === "todo" && dayDiff(it.due) < 0;
+    if(f === "todo") return it.status !== "submitted";
+    if(f === "overdue") return it.status !== "submitted" && dayDiff(it.due) < 0;
     return it.status === "submitted";
   });
 }
@@ -603,11 +623,11 @@ function renderList(){
   list.forEach(function(it){
     var ico = it.status==="submitted" ? ICO.sent : ICO.clock;
     var n = dayDiff(it.due);
-    var overdue = it.status==="todo" && n!==null && n<0;
+    var overdue = it.status!=="submitted" && n!==null && n<0;
     var dtext = dueText(it);
     if(overdue) dtext = '<span style="color:var(--red);font-weight:600">' + dtext + '</span>';
     var acts = "";
-    if(it.status === "todo"){
+    if(it.status !== "submitted"){
       acts += '<button class="btn sm primary" data-ai="' + it.id + '">AI 代提交</button>';
       acts += '<button class="btn sm" data-done="' + it.id + '">手动标已完成</button>';
     }else{
@@ -1001,6 +1021,7 @@ function streamChat(chat){
   })
   .then(function(body){
     var reader = body.getReader(), dec = new TextDecoder(), buf = "";
+    var lastSave = 0;
     function pump(){
       return reader.read().then(function(r){
         if(r.done){ finishChat(); return; }
@@ -1014,7 +1035,12 @@ function streamChat(chat){
           try{
             var j = JSON.parse(payload);
             var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
-            if(d){ chat.messages[chat.messages.length - 1].content += d; renderChatTail(); }
+            if(d){
+              chat.messages[chat.messages.length - 1].content += d;
+              renderChatTail();
+              var now = Date.now();
+              if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
+            }
           }catch(e){ /* 忽略半包 */ }
         });
         return pump();
@@ -1023,6 +1049,8 @@ function streamChat(chat){
     return pump();
   })
   .catch(function(err){
+    _chatBusy = false;
+    el("chatSend").disabled = false; el("chatSend").textContent = "发送";
     chat = Agent.loadChat(_chatId);
     if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
     Agent.saveChat(_chatId, chat);
@@ -1062,6 +1090,8 @@ function onChatSubmit(){
   var chat = Agent.loadChat(_chatId);
   var d = Agent.extractDeliverable(chat.messages);
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
+  var marked = (typeof Agent.deliverableMarked === "function") ? Agent.deliverableMarked(chat.messages) : true;
+  if(!marked && !window.confirm("最后一条回复没有【最终交付】标记（可能只是简短确认语，而非成稿）。\n确认把整条回复作为交付提交？")) return;
   var it = findItem(_chatId);
   if(!it) return;
   var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
@@ -1074,7 +1104,7 @@ function onChatSubmit(){
     });
   }
   it.ai = true;
-  if(!needsReview) it.status = "submitted";
+  it.status = needsReview ? "review" : "submitted";   // 送审时列表与审批队列状态一致
   addLog("Agent 对话成稿" + (needsReview ? "送审" : "并提交") + "：" + it.name);
   saveState(); refreshAll();
   closeChat();
@@ -1245,7 +1275,7 @@ function onApprove(id){
   DB.update("submissions", id, { status: "submitted" });
   DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
   var it = findItem(s.itemId);
-  if(it && it.status === "todo"){ it.status = "submitted"; }
+  if(it && it.status !== "submitted"){ it.status = "submitted"; }
   addLog("审批通过并交付：" + s.name);
   saveState(); refreshAll();
   showToast("已通过，任务交付学在城院");

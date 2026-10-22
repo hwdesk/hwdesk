@@ -138,6 +138,17 @@ test("extractDeliverable falls back to last assistant message", () => {
 test("extractDeliverable empty when no assistant message", () => {
   assert.equal(Agent.extractDeliverable([{ role: "user", content: "hi" }]), "");
 });
+test("deliverableMarked true when last assistant msg has 【最终交付】", () => {
+  assert.equal(Agent.deliverableMarked([{ role: "assistant", content: "【最终交付】\n成稿" }]), true);
+  assert.equal(Agent.deliverableMarked([
+    { role: "assistant", content: "旧成稿【最终交付】" },
+    { role: "user", content: "再改一下" },
+    { role: "assistant", content: "好的已修改" }
+  ]), false);
+});
+test("deliverableMarked false when no assistant message", () => {
+  assert.equal(Agent.deliverableMarked([{ role: "user", content: "hi" }]), false);
+});
 
 console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");
 if (!process.exitCode) console.log("ALL PASS");

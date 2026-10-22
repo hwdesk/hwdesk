@@ -72,8 +72,8 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
-node test/bridge.test.mjs     # AI 直连桥：12 项
-node test/agent.test.mjs      # 作业 Agent 对话：15 项
+node test/bridge.test.mjs     # AI 直连桥：13 项
+node test/agent.test.mjs      # 作业 Agent 对话：17 项
 node test/sso.test.mjs        # 学在城院登录凭据：12 项
 ```
 

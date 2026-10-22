@@ -96,6 +96,13 @@ test("describe falls back to workbuddy on empty pick", () => {
   assert.equal(plan.ai, "workbuddy");
   assert.equal(plan.action, "copy");
 });
+test("describe falls back to workbuddy on unknown id (fields stay consistent)", () => {
+  const plan = Bridge.describe({ ai: "chatgpt" });
+  assert.equal(plan.ai, "workbuddy");
+  assert.equal(plan.label, Bridge.AI.workbuddy.label);
+  assert.equal(plan.action, "copy");
+  assert.equal(plan.url, "");
+});
 
 /* ---------- 回执文案 ---------- */
 test("toast text mentions the target AI for open+copy", () => {

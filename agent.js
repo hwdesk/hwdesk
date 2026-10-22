@@ -13,21 +13,21 @@
       baseUrl: "https://api.deepseek.com/v1",
       model: "deepseek-chat",
       keyUrl: "https://platform.deepseek.com/api_keys",
-      hint: "性价比高，推理 / 写作均衡"
+      hint: "性价比高，推理 / 写作均衡；允许浏览器直连"
     },
     kimi: {
       label: "Kimi（月之暗面）",
       baseUrl: "https://api.moonshot.cn/v1",
       model: "moonshot-v1-8k",
       keyUrl: "https://platform.moonshot.cn/console/api-keys",
-      hint: "长上下文，适合带课件摘要的任务"
+      hint: "长上下文，适合带课件摘要的任务；允许浏览器直连"
     },
     qwen: {
       label: "通义千问",
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       model: "qwen-plus",
       keyUrl: "https://bailian.console.aliyun.com/?apiKey=1",
-      hint: "代码 / 仿真类任务表现好"
+      hint: "代码 / 仿真类任务表现好；允许浏览器直连"
     },
     doubao: {
       label: "豆包（火山方舟）",
@@ -136,6 +136,15 @@
   };
 
   /* ---------- 结果提取：取【最终交付】之后的内容，缺省取最后一条助手消息 ---------- */
+  Agent.deliverableMarked = function (messages) {
+    for (var i = (messages || []).length - 1; i >= 0; i--) {
+      if (messages[i] && messages[i].role === "assistant") {
+        return (messages[i].content || "").indexOf("【最终交付】") !== -1;
+      }
+    }
+    return false;
+  };
+
   Agent.extractDeliverable = function (messages) {
     var last = null;
     for (var i = messages.length - 1; i >= 0; i--) {
