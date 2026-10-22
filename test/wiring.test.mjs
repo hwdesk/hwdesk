@@ -41,6 +41,10 @@ function test(name, fn) {
 function has(re, what) {
   assert.ok(re.test(app), "inline script is missing: " + what);
 }
+const py = readFileSync(path.join(root, "syncserver.py"), "utf8");
+function pyHas(re, what) {
+  assert.ok(re.test(py), "syncserver.py is missing: " + what);
+}
 
 console.log("wiring | ids: " + ids.size + ", inline script: " + app.length + " chars");
 
@@ -133,6 +137,26 @@ test("needsReview keeps the card and the approval queue in sync", () => {
 test("preset dropdown is annotated with the browser-direct (CORS) status", () => {
   has(/Agent\.corsLabel\(id\)/, "corsLabel() used when rendering the preset options");
   has(/浏览器直连：/, "hint line carries the CORS status");
+});
+
+/* ---------- 8. 登录门禁真实验证（凭据先过本机桥 → course.hzcu.edu.cn） ---------- */
+test("login card has an error line and the bridge hint", () => {
+  assert.ok(ids.has("loginErr"), "#loginErr error line missing");
+  has(/连不上本机验证服务/, "catch path explains the bridge is required");
+  has(/python syncserver\.py/, "guidance names the exact command to run");
+});
+test("onLogin verifies credentials via the bridge /verify before SSO.set", () => {
+  has(/fetch\(DIRECT_URL \+ "\/verify"/, "onLogin POSTs to the local bridge /verify");
+  has(/JSON\.stringify\(\{\s*account:\s*acc,\s*password:\s*pw\s*\}\)/, "request body carries account+password");
+  has(/err = el\("loginErr"\)/, "error line element bound");
+  has(/if\(!res\.ok\)\{[\s\S]{0,300}err\.style\.display = "block";[\s\S]{0,160}return;/, "non-ok response blocks entry and shows the reason");
+  has(/if\(!res\.ok\)\{[\s\S]{0,300}return;[\s\S]{0,400}SSO\.set\(acc,\s*pw,/, "SSO.set only runs after the platform says ok");
+  has(/登录工作台（平台验证通过）/, "audit log marks the platform-verified login");
+});
+test("bridge /verify only logs in (no collection) and returns ok/error JSON", () => {
+  pyHas(/def do_POST[\s\S]{0,600}"\/verify"/, "syncserver handles POST /verify");
+  pyHas(/cx_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/, "/verify calls cx_login with the request creds");
+  pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
 });
 
 console.log("\n" + passed + " passed");
