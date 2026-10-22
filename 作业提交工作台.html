@@ -234,17 +234,33 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <span class="hint">由本地 AI 代理登录平台执行（凭据不经过本页面）</span>
     </div>
     <div class="card" style="padding:14px">
-      <div class="grid2">
-        <div><label class="f">采集课程</label>
-          <select id="capCourse">
-            <option>全部课程</option>
-            <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
-            <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
-          </select></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnCapGen" style="width:100%">📋 生成采集指令（复制给 WorkBuddy）</button></div>
-        <div class="full ai-note" style="margin:0">
-          <b>怎么用？</b> 点上方按钮复制采集指令 → 回到 WorkBuddy 对话粘贴发送 → 代理会登录学在城院拉取该课程的<b>课件（PPT / Word）、作业要求原文、历史作业与成绩</b>并回报摘要 → 你把摘要登记到下方「采集登记」，之后的任务决策就会自动引用这些平台数据。
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <button class="btn primary" id="btnSync" style="width:100%">🔄 一键同步学在城院（全部课程）</button>
+          <div class="hint" style="margin-top:6px" id="syncHint">上次同步：从未</div>
         </div>
+        <div style="flex:1;min-width:220px">
+          <div><label class="f">只拉某一门课（可选）</label>
+            <select id="capCourse">
+              <option>全部课程</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <button class="btn sm" id="btnCapGen" style="margin-top:6px;width:100%">📋 生成单课程采集指令（旧方式）</button>
+        </div>
+      </div>
+      <div class="ai-note full" style="margin:10px 0 0">
+        <b>怎么用？</b> 点「一键同步」→ 复制的是一份<b>全平台同步指令</b>（要求代理以 JSON 回报所有课程的课件、作业、成绩）→ 粘到 AI 代理对话发送 → 代理回报后，把 JSON 粘进下方「导入同步结果」→ 工作台自动批量入库：<b>课件/成绩进采集库、新作业自动建档、截止日期自动更新</b>，全程零手工登记。<br>
+        <span class="hint">说明：本页面是 file:// 本地应用，无法也不应直接登录学在城院（凭据不进页面）；登录平台这一步仍由持有凭据的 AI 代理执行，但只剩「点一下 → 粘一次」两个动作。</span>
+      </div>
+      <div id="syncImportBox" style="display:none;margin-top:12px">
+        <label class="f">粘贴代理回报的 JSON</label>
+        <textarea id="syncPayload" style="min-height:120px" placeholder='{"courseware":[...],"assignments":[...],"grades":[...]}'></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn sm primary" id="btnSyncImport">📥 导入同步结果</button>
+          <button class="btn sm" id="btnSyncCancel">取消</button>
+        </div>
+        <div id="syncOut" class="risk-out" style="display:none;margin:10px 0 0"></div>
       </div>
     </div>
 
@@ -424,6 +440,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <script src="humanize.js"></script>
 <script src="db.js"></script>
 <script src="agents.js"></script>
+<script src="sync.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
@@ -837,6 +854,7 @@ function refreshAll(){
   renderSubmissions();
   renderStats();
   renderLogs();
+  renderSyncHint();
   renderSync();
 }
 /* 视图切换（侧边栏多区块） */
@@ -933,7 +951,7 @@ function onLayaPlan(){
   saveState();
   refreshAll();
 }
-/* 平台采集：生成学在城院采集指令（课件/作业要求/历史作业） */
+/* 平台采集：生成单课程采集指令（旧方式，按需精拉） */
 function onCaptureGen(){
   var course = el("capCourse").value;
   var cmd = "【学在城院 · 数据采集】请登录学在城院，帮我采集以下内容并逐条回报摘要：\n"
@@ -946,6 +964,59 @@ function onCaptureGen(){
   showToast("采集指令已复制，去 WorkBuddy 粘贴发送即可");
   addLog("生成学在城院采集指令：" + course);
   saveState(); refreshAll();
+}
+/* 一键同步：全平台指令 + JSON 导入回填（零手工登记） */
+function onSync(){
+  if(typeof SyncKit === "undefined"){ showToast("sync.js 未加载"); return; }
+  copyText(SyncKit.buildInstruction());
+  var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
+  localStorage.setItem(SyncKit.LS_LAST, n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes()));
+  el("syncImportBox").style.display = "block";
+  el("syncOut").style.display = "none";
+  el("syncPayload").value = "";
+  renderSyncHint();
+  addLog("一键同步：已生成学在城院全平台同步指令");
+  showToast("同步指令已复制，粘给 AI 代理；回报后把 JSON 粘进下方导入框");
+}
+function renderSyncHint(){
+  var t = "";
+  try{ t = localStorage.getItem(SyncKit.LS_LAST) || ""; }catch(e){}
+  el("syncHint").textContent = "上次同步：" + (t || "从未");
+}
+function onSyncImport(){
+  if(typeof SyncKit === "undefined" || typeof DB === "undefined"){ showToast("sync.js / db.js 未加载"); return; }
+  var out = el("syncOut");
+  var p = SyncKit.parse(el("syncPayload").value);
+  out.style.display = "block";
+  if(!p.ok){
+    var msg = { empty: "（没有内容）", "no-json": "（没有找到 JSON，请确认粘贴的是代理回报）",
+      unbalanced: "（JSON 不完整，检查是否复制完整）", "invalid-json": "（JSON 格式错误）",
+      "not-object": "（应是一个 JSON 对象）", "no-valid-rows": "（JSON 里没有有效的课件/作业/成绩记录）" }[p.error] || p.error;
+    out.textContent = "导入失败：" + msg;
+    return;
+  }
+  var caps = DB.list("captures");
+  var plan = SyncKit.planMerge(p.data, caps, state.items);
+  var today = nowStr();
+  plan.capturesToAdd.forEach(function(c){ DB.insert("captures", { kind: c.kind, course: c.course, title: c.title, note: c.note, time: today }); });
+  plan.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
+  plan.itemsToUpdate.forEach(function(u){
+    var it = findItem(u.id);
+    if(it) it.due = u.to;
+  });
+  var s = plan.stats;
+  out.textContent = "✓ 同步完成：课件 " + s.courseware + " 条 · 作业 " + s.assignments + " 条 · 成绩 " + s.grades + " 条"
+    + "｜新增入库 " + s.newCaptures + " · 新建待办 " + s.newItems + " · 更新截止 " + s.updatedItems;
+  if(plan.itemsToUpdate.length){
+    out.textContent += "\n截止更新：" + plan.itemsToUpdate.map(function(u){
+      var it = findItem(u.id);
+      return it ? it.name + " " + u.from + " → " + u.to : "";
+    }).filter(Boolean).join("；");
+  }
+  addLog("一键同步导入：新增采集 " + s.newCaptures + " 条，新建待办 " + s.newItems + " 条，更新截止 " + s.updatedItems + " 条");
+  el("syncPayload").value = "";
+  saveState(); refreshAll();
+  showToast("同步结果已导入工作台");
 }
 function onCaptureSave(){
   var title = el("cTitle").value.trim();
@@ -1210,6 +1281,7 @@ function onClearDemo(){
   if(!window.confirm("再次确认：数据清空后无法恢复，建议先导出备份。确定清空？")) return;
   state.items = []; state.logs = []; state.materials = [];
   localStorage.removeItem(LS_SEED);
+  try{ localStorage.removeItem(SyncKit.LS_LAST); }catch(e){}
   if(typeof DB !== "undefined"){ DB.clear("captures"); DB.clear("submissions"); DB.clear("reviews"); DB.clear("chats"); }
   saveState(); refreshAll();
   showToast("已清空");
@@ -1241,6 +1313,12 @@ function bind(){
   });
 
   el("btnCapGen").addEventListener("click", onCaptureGen);
+  el("btnSync").addEventListener("click", onSync);
+  el("btnSyncImport").addEventListener("click", onSyncImport);
+  el("btnSyncCancel").addEventListener("click", function(){
+    el("syncImportBox").style.display = "none";
+    el("syncOut").style.display = "none";
+  });
   el("btnCap").addEventListener("click", function(){ el("capForm").classList.toggle("open"); });
   el("cCancel").addEventListener("click", function(){ el("capForm").classList.remove("open"); });
   el("cSave").addEventListener("click", onCaptureSave);
