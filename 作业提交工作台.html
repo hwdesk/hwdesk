@@ -1055,6 +1055,13 @@ function dispatchToAi(cmd, category, taskName, taskId){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
   if(pick.source === "none"){ openAiPicker(cmd, category, taskName, taskId); return { action: "picker" }; }
+  /* 默认/自动匹配到支持 API 直连的 AI 且带任务上下文：与选择器路径一致，转工作台内嵌对话，不跳网页 */
+  if(taskId && typeof Agent !== "undefined" && Agent.PRESETS[pick.ai]){
+    Agent.applyPreset(pick.ai);
+    addLog("Agent 直连对话：" + taskName + " → " + Agent.PRESETS[pick.ai].label);
+    onChatOpen(taskId);
+    return { action: "agent-chat" };
+  }
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
 function doDispatch(plan, cmd, taskName){
