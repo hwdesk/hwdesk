@@ -134,12 +134,14 @@ node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并�
 - 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
 - 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
 
-## AI 直连（bridge.js）
+## AI 直连（bridge.js + agent.js 内嵌对话）
 
-点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**），派发 = 自动复制指令（含上下文与去AI化要求）+ 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
+点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**）。
 
+- **支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）**：在选择器点选后**不再跳转网页**——自动切换到该 Agent 并打开工作台**内嵌对话抽屉**（`agent.js`，OpenAI 兼容 API 流式直连），Agent 直接在后台生成，聊出成稿后点「用最终结果提交」进审批队列交付
+- **元宝 / WorkBuddy**：无 API 预设（元宝）或走平台代理（WorkBuddy），保留旧流程 = 复制指令 + 打开对应网页 / 纯复制
 - 目标挑选优先级：按 Laya 路由类别的单独指定 > 设置页的「默认执行 AI」> 注册表自动匹配；两者都未设时弹出选择器
-- 选择器操作：点一行 = 本次用它执行；点「设为默认」= 记住选择并派发；**Esc 或点弹窗外空白处 = 取消**（也支持 Enter / Space 选中聚焦行）
+- 选择器操作：点一行 = 本次用它执行（API 直连 AI 转内嵌对话）；点「设为默认」= 记住选择并执行；**Esc 或点弹窗外空白处 = 取消**（也支持 Enter / Space 选中聚焦行）
 - 「WorkBuddy（本地代理）」保留旧复制流程——只有它能代登录学在城院完成真正的平台提交
 - 偏好存 `wb_hwdesk_bridge` 键；`Bridge.pick(category)` / `Bridge.describe(pick)` 为纯计算 API，DOM 无关、可单测
 
