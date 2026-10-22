@@ -252,4 +252,36 @@ test("default agent: ☆ 设默认 handled before the switch path, default wins 
   has(/var def = AgentHub\.getDefault\(\);/, "grid reads the default");
   has(/state\.chat\.agentId = def \|\| recs\[0\]\.id;/, "default wins over Laya recommendation on first entry");
 });
+
+/* ---------- 8. 登录后自动同步（autosync.js；回归：登录只存凭据、啥都不干） ---------- */
+test("autosync.js is loaded by the page", () => {
+  assert.ok(/<script src="autosync\.js"><\/script>/.test(html), 'missing <script src="autosync.js">');
+});
+test("login success kicks the auto-sync", () => {
+  /* onLogin 含 #29 的真实验证流程（远超 700 字符），锚定「凭据写入成功」到钩子的近邻更稳 */
+  has(/SSO\.set\(acc, pw, el\("lgMode"\)\.value\);[\s\S]{0,400}autoSyncAfterLogin\(\{ verbose: true \}\)/,
+      "onLogin() -> SSO.set ... autoSyncAfterLogin({verbose:true})");
+});
+test("boot with saved creds auto-syncs too (throttled by autosync.js)", () => {
+  has(/safe\("autoSyncOnBoot", function\(\)\{ setTimeout\(function\(\)\{ autoSyncAfterLogin\(\{\}\); \}, 600\); \}\)/,
+      'init step safe("autoSyncOnBoot", ...)');
+});
+test("manual and auto direct-sync share one fetch pipeline", () => {
+  has(/function runDirectSync\(opts\)\{[\s\S]{0,200}var auto = !!opts\.auto;/, "runDirectSync(opts) with auto flag");
+  has(/function onDirectSync\(\)\{ runDirectSync\(\{ auto: false \}\); \}/, "manual click goes through the shared pipeline");
+  has(/applyPlatformPayload\(res\.payload, auto\)/, "auto flag reaches applyPlatformPayload()");
+});
+test("settings expose the auto-sync toggle and last-run time", () => {
+  for (const id of ["asEnabled", "asLast"]) {
+    assert.ok(ids.has(id), "#" + id + " missing from the settings view");
+  }
+  has(/el\("asEnabled"\)\.checked = AutoSync\.isEnabled\(\)/, "checkbox reflects AutoSync state");
+  has(/AutoSync\.setEnabled\(el\("asEnabled"\)\.checked\)/, "checkbox writes back");
+  has(/renderAutoSyncHint\(\)/, "last-run hint is rendered");
+});
+test("auto run is marked before fetching (crash-safe throttle state)", () => {
+  has(/AutoSync\.markRun\(\);\s*renderAutoSyncHint\(\);[\s\S]{0,400}runDirectSync\(\{ auto: true \}\)/,
+      "markRun() happens before runDirectSync({auto:true})");
+});
+
 console.log("\n" + passed + " passed");
