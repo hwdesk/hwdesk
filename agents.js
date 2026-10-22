@@ -26,7 +26,7 @@
   "use strict";
 
   var AgentHub = {};
-  AgentHub.VERSION = "1.0.0";
+  AgentHub.VERSION = "1.1.0";
 
   /* ---------- Agent 注册表（roleweave AgentHostDescriptor 的本地版） ----------
    * archetypes: 覆盖 laya.js Laya.AI_REGISTRY 里的哪些原型
@@ -287,6 +287,28 @@
     var db = getDb();
     if (!db) return;
     db.remove("chats", "c" + itemId);
+  };
+
+  /* ---------- 我的默认 Agent（⭐ 是 Laya 自动推荐；这里是用户手动指定） ----------
+   * 打开「AI 对话」板块时优先选中默认项；存本机 localStorage，与业务数据分离。
+   * 非法 id 一律视为未设置；传空串清除。 */
+  var LS_DEF = "wb_hwdesk_default_agent";
+  AgentHub.setDefault = function (agentId) {
+    try {
+      if (!global.localStorage) return;
+      if (agentId && AgentHub.REGISTRY[agentId]) {
+        global.localStorage.setItem(LS_DEF, agentId);
+      } else if (!agentId) {
+        global.localStorage.removeItem(LS_DEF);   /* 显式清除（空串 / null） */
+      }
+      /* 非法 id：忽略，保留原默认 */
+    } catch (e) { /* 隐私模式等，静默 */ }
+  };
+  AgentHub.getDefault = function () {
+    try {
+      var id = global.localStorage ? global.localStorage.getItem(LS_DEF) : null;
+      return (id && AgentHub.REGISTRY[id]) ? id : "";
+    } catch (e) { return ""; }
   };
 
   /* UMD-lite */

@@ -227,4 +227,29 @@ test("bridge /verify only logs in (no collection) and returns ok/error JSON", ()
   pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
 });
 
+
+/* ---------- 8. AI 对话：默认 Agent + 切换二次确认 ---------- */
+test("confirm bar markup exists (agentConfirm / agentConfirmText / btnAgentConfirm / btnAgentCancel)", () => {
+  for (const id of ["agentConfirm", "agentConfirmText", "btnAgentConfirm", "btnAgentCancel"]) {
+    assert.ok(ids.has(id), "#" + id + " missing");
+  }
+});
+test("clicking a chip only marks pendingAgent; switching requires 确认切换", () => {
+  has(/state\.chat\.pendingAgent = id;/, "chip click marks pendingAgent instead of switching");
+  has(/state\.chat\.agentId = state\.chat\.pendingAgent;/, "commit happens only in the confirm handler");
+  assert.ok(!/state\.chat\.agentId = c\.getAttribute\("data-agent"\)/.test(app),
+      "regression: agentGrid click switches instantly again");
+  has(/el\("btnAgentConfirm"\)\.addEventListener\(\s*"click"/, "btnAgentConfirm wired");
+  has(/el\("btnAgentCancel"\)\.addEventListener\(\s*"click"/, "btnAgentCancel wired");
+});
+test("default agent: ☆ 设默认 handled before the switch path, default wins on first entry", () => {
+  has(/closest\(\s*"\[data-agdef\]"\s*\)/, 'closest("[data-agdef]")');
+  const idxDef = app.indexOf('closest("[data-agdef]")');
+  const idxSwitch = app.indexOf('closest("[data-agent]")');
+  assert.ok(idxDef !== -1 && idxSwitch !== -1 && idxDef < idxSwitch,
+      "data-agdef must be checked before data-agent (else setting default triggers a switch)");
+  has(/AgentHub\.setDefault\(did\)/, "setDefault called from the grid");
+  has(/var def = AgentHub\.getDefault\(\);/, "grid reads the default");
+  has(/state\.chat\.agentId = def \|\| recs\[0\]\.id;/, "default wins over Laya recommendation on first entry");
+});
 console.log("\n" + passed + " passed");

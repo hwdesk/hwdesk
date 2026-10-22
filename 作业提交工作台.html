@@ -138,6 +138,11 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .agent-chip .ag-name{font-weight:600}
 .agent-chip .ag-desc{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96px}
 .agent-chip .ag-star{color:var(--orange);font-size:12px;margin-left:auto;flex:none}
+.agent-chip.pending{border-color:var(--blue);box-shadow:0 0 0 2px rgba(47,107,255,.18)}
+.agent-chip .ag-def{flex:none;font-size:11px;padding:2px 7px;margin-left:auto}
+.agent-chip .ag-def.on{border-color:var(--green);color:var(--green);background:var(--green-weak)}
+.agent-chip .ag-def + .ag-star{margin-left:0}
+.agent-confirm{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding:10px 12px;background:var(--blue-weak);border:1px solid var(--line);border-radius:10px;font-size:13px}
 .chat-log{max-height:420px;overflow-y:auto;padding:12px}
 .chat-log .empty{padding:20px 8px}
 .bubble{max-width:86%;margin-bottom:10px;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
@@ -359,7 +364,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <section class="view" id="view-chat">
     <div class="section-title">
       <h2>AI 对话 · 多 Agent 协作</h2>
-      <span class="hint">选任务 → 选任意 AI（⭐ 为 Laya 推荐）→ 对话到满意 → 一键交付</span>
+      <span class="hint">选任务 → 选任意 AI（⭐ 为 Laya 推荐，📌 为我的默认）→ 对话到满意 → 一键交付</span>
     </div>
     <div class="card" style="padding:12px">
       <div class="chat-pickers">
@@ -367,8 +372,15 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
           <select id="chatTask"></select></div>
         <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
       </div>
-      <div class="f" style="margin:10px 0 6px">选择 AI Agent（可随时切换，对话跨 Agent 连续记录）</div>
+      <div class="f" style="margin:10px 0 6px">选择 AI Agent（点击候选 → 需点「确认切换」才生效；点「☆ 设默认」记住常用 AI）</div>
       <div id="agentGrid" class="agent-grid"></div>
+      <div id="agentConfirm" class="agent-confirm" style="display:none">
+        <span id="agentConfirmText" style="min-width:0"></span>
+        <span style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn sm primary" id="btnAgentConfirm">✅ 确认切换</button>
+          <button class="btn sm" id="btnAgentCancel">取消</button>
+        </span>
+      </div>
     </div>
     <div class="card" style="padding:0">
       <div id="chatLog" class="chat-log"></div>
@@ -615,7 +627,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 "use strict";
 /* ---------- 数据层 ---------- */
 var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
-var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null } };
+var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null, pendingAgent: null } };
 
 /* Agent Hub 钩子：页面把 laya/humanize 能力注入 agents.js（引擎间零依赖） */
 function agentHooks(){
@@ -899,25 +911,38 @@ function renderChatTasks(){
     state.chat.taskId = null;
   }
 }
-/* AI 对话：Agent 网格（⭐ = Laya 推荐） */
+/* AI 对话：Agent 网格（⭐ = Laya 推荐，📌 = 我的默认；切换需二次确认） */
 function renderAgentGrid(){
   if(typeof AgentHub === "undefined"){ el("agentGrid").innerHTML = '<div class="empty">agents.js 未加载</div>'; return; }
   var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
   var recs = it ? AgentHub.recommend(it, agentHooks()) : Object.keys(AgentHub.REGISTRY).map(function(k){
     return { id: k, agent: AgentHub.REGISTRY[k], score: 0, reasons: [], recommended: false };
   });
-  /* 默认选推荐位 */
-  if(!state.chat.agentId || !AgentHub.REGISTRY[state.chat.agentId]) state.chat.agentId = recs[0].id;
+  var def = AgentHub.getDefault();
+  /* 首次进入（还没选过）优先用我的默认，其次 Laya 推荐位 */
+  if(!state.chat.agentId || !AgentHub.REGISTRY[state.chat.agentId]){
+    state.chat.agentId = def || recs[0].id;
+  }
   var html = "";
   recs.forEach(function(r){
-    html += '<div class="agent-chip' + (r.id === state.chat.agentId ? " on" : "") + '" data-agent="' + r.id + '">'
+    html += '<div class="agent-chip' + (r.id === state.chat.agentId ? " on" : "") + (r.id === state.chat.pendingAgent ? " pending" : "") + '" data-agent="' + r.id + '">'
       + '<span class="ag-emoji">' + r.agent.emoji + '</span>'
       + '<div style="min-width:0"><div class="ag-name">' + esc(r.agent.label) + '</div>'
       + '<div class="ag-desc">' + esc(r.agent.desc) + '</div></div>'
-      + (r.recommended ? '<span class="ag-star">⭐</span>' : "")
+      + (r.recommended ? '<span class="ag-star" title="Laya 推荐">⭐</span>' : "")
+      + '<button class="btn sm ag-def' + (r.id === def ? " on" : "") + '" data-agdef="' + r.id + '" title="设为默认：打开 AI 对话时自动选中">'
+      + (r.id === def ? "📌 默认" : "☆ 设默认") + '</button>'
       + '</div>';
   });
   el("agentGrid").innerHTML = html;
+  /* 待确认切换条：点了别的 Agent 但还没确认 */
+  var bar = el("agentConfirm");
+  if(state.chat.pendingAgent && AgentHub.REGISTRY[state.chat.pendingAgent] && state.chat.pendingAgent !== state.chat.agentId){
+    el("agentConfirmText").textContent = "切换到「" + AgentHub.REGISTRY[state.chat.pendingAgent].label + "」？对话记录保留，跨 Agent 连续。";
+    bar.style.display = "flex";
+  }else{
+    bar.style.display = "none";
+  }
 }
 /* AI 对话：气泡对话记录（user 右 / ai 左，AI 回复可一键交付） */
 function renderChatLog(){
@@ -2225,8 +2250,43 @@ function bind(){
     refreshAll();
   });
   el("agentGrid").addEventListener("click", function(e){
+    /* ① 设默认（先于切换判断，避免触发候选） */
+    var d = e.target.closest("[data-agdef]");
+    if(d){
+      if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+      var did = d.getAttribute("data-agdef");
+      if(AgentHub.getDefault() === did){
+        AgentHub.setDefault("");
+        addLog("已取消默认 Agent：" + (AgentHub.REGISTRY[did] || { label: did }).label);
+        showToast("已取消默认");
+      }else{
+        AgentHub.setDefault(did);
+        addLog("已设默认 Agent：" + (AgentHub.REGISTRY[did] || { label: did }).label);
+        showToast("已设「" + (AgentHub.REGISTRY[did] || { label: did }).label + "」为默认，打开 AI 对话自动选中");
+      }
+      saveState(); refreshAll();
+      return;
+    }
+    /* ② 点卡片 = 标记候选，不立即切换；确认后才生效 */
     var c = e.target.closest("[data-agent]");
-    if(c){ state.chat.agentId = c.getAttribute("data-agent"); refreshAll(); }
+    if(!c) return;
+    var id = c.getAttribute("data-agent");
+    if(id === state.chat.agentId){ state.chat.pendingAgent = null; refreshAll(); return; }
+    state.chat.pendingAgent = id;
+    refreshAll();
+  });
+  el("btnAgentConfirm").addEventListener("click", function(){
+    if(typeof AgentHub === "undefined") return;
+    if(!state.chat.pendingAgent || !AgentHub.REGISTRY[state.chat.pendingAgent]) return;
+    state.chat.agentId = state.chat.pendingAgent;
+    state.chat.pendingAgent = null;
+    addLog("AI 对话：切换 Agent → " + AgentHub.REGISTRY[state.chat.agentId].label);
+    saveState(); refreshAll();
+    showToast("已切换到「" + AgentHub.REGISTRY[state.chat.agentId].label + "」");
+  });
+  el("btnAgentCancel").addEventListener("click", function(){
+    state.chat.pendingAgent = null;
+    refreshAll();
   });
   el("btnChatSend").addEventListener("click", onHubSend);
   el("btnChatReply").addEventListener("click", onChatReply);
