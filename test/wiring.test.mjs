@@ -238,23 +238,28 @@ test("onLogin verifies credentials via the bridge /verify before SSO.set", () =>
 });
 test("bridge /verify only logs in (no collection) and returns ok/error JSON", () => {
   pyHas(/def do_POST[\s\S]{0,600}"\/verify"/, "syncserver handles POST /verify");
-  pyHas(/_, scope = platform_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
-        "/verify calls platform_login with the request creds");
+  pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
+        "/verify calls hzcu_login with the request creds");
   pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
 });
 
-/* ---------- 8b. 登录链路对准真实平台：ZUCC CAS（学号直登）+ 学习通兜底 ---------- */
-test("syncserver logs in via the ZUCC unified-auth CAS, not just chaoxing", () => {
-  pyHas(/URL_CAS = \("http:\/\/ca\.hzcu\.edu\.cn\/cas\/login"/, "CAS endpoint of ca.hzcu.edu.cn");
-  pyHas(/def zucc_login\(account, password\)/, "zucc_login() submits the CAS form");
-  pyHas(/def platform_login\(account, password\)/, "platform_login() auto-picks CAS vs chaoxing fallback");
-  pyHas(/"execution": execution, "_eventId": "submit"/, "CAS form carries execution/_eventId");
-  pyHas(/class="errorMsg"/, "CAS error page is parsed for a readable reason");
-  pyHas(/统一身份认证已通过，但未取得学在城院会话/, "session probe rejects a logged-out shell");
+/* ---------- 8b. 登录链路对准真实平台：城院 CAS → courses.hzcu.edu.cn（Tronclass） ---------- */
+test("syncserver logs in via the ZUCC unified-auth CAS into the Tronclass LMS", () => {
+  pyHas(/URL_CAS = "https:\/\/ca\.hzcu\.edu\.cn"/, "CAS endpoint of ca.hzcu.edu.cn");
+  pyHas(/URL_LMS = "https:\/\/courses\.hzcu\.edu\.cn"/, "data lives on the Tronclass LMS host");
+  pyHas(/def hzcu_login\(account, password\)/, "hzcu_login() submits the CAS form");
+  pyHas(/"execution": form_info\["execution"\], "_eventId": "submit"/, "CAS form carries execution/_eventId");
+  pyHas(/CAS_AES_KEY = b"c6dda3852e2d4be2"/, "CAS password is AES-128-ECB encrypted with the page key");
+  pyHas(/class="\[\^"\]\*errorMsg/, "CAS error page is parsed for a readable reason");
+  pyHas(/登录后未能建立课程端会话/, "session probe rejects a logged-out shell");
+  assert.ok(!/chaoxing/.test(readFileSync(path.join(root, "syncserver.py"), "utf8")),
+            "syncserver must not target chaoxing anymore");
 });
-test("collection targets the school fanya domain (course.hzcu.edu.cn) by scope", () => {
-  pyHas(/ZUCC_URL_WORK = ZUCC_BASE \+ "\/mooc2\/work\/list"/, "work list on the school domain");
-  pyHas(/def cx_collect\(jar, scope="zucc"\)/, "cx_collect() switches domain by scope");
+test("collection targets the Tronclass JSON APIs on courses.hzcu.edu.cn", () => {
+  pyHas(/\/api\/my-courses/, "my-courses list API");
+  pyHas(/\/api\/todos\?no-intercept=true/, "todos API");
+  pyHas(/homework-activities/, "per-course homework API");
+  pyHas(/def hzcu_collect\(s\)/, "hzcu_collect() pulls courses/todos/homework");
 });
 test("login auto-config: verified credentials land in gitignored wb_local.json", () => {
   pyHas(/def save_creds\(account, password\)/, "save_creds() writes wb_local.json on success");

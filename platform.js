@@ -20,7 +20,7 @@
       var m = str(v).match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
       return m ? (m[1] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[3]).slice(-2)) : "";
     }
-    var out = { fetchedAt: str(p.fetchedAt), source: str(p.source) || "chaoxing", errors: arr(p.errors).map(str) };
+    var out = { fetchedAt: str(p.fetchedAt), source: str(p.source) || "hzcu-xzc", errors: arr(p.errors).map(str) };
     out.courses = arr(p.courses).map(function (c) {
       return { id: str(c && c.id), name: str(c && c.name) };
     }).filter(function (c) { return c.id || c.name; });
