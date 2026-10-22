@@ -469,6 +469,12 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 
   <!-- ========== 9) 设置 ========== -->
   <section class="view" id="view-settings">
+    <div class="section-title"><h2>数据同步</h2><span class="hint">登录 / 打开工作台后自动从学在城院拉取课程、作业与课件</span></div>
+    <div class="card" style="padding:14px">
+      <label style="font-size:12.5px"><input type="checkbox" id="asEnabled"> 登录后自动同步学在城院数据（30 分钟内不重复拉取，手动一键获取不受限）</label>
+      <p class="hint" id="asLast" style="margin:8px 0 0">上次自动同步：从未</p>
+      <p class="hint" style="margin:4px 0 0">需要本机同步服务：<b>python syncserver.py</b>（只监听 127.0.0.1:8765）。服务未启动时自动同步会跳过，其余功能不受影响。</p>
+    </div>
     <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
       <footer class="ops" style="margin:0">
@@ -591,7 +597,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
     <h2 style="text-align:center;font-size:18px">作业提交工作台 · 学在城院</h2>
-    <p class="hint" style="text-align:center;margin:6px 0 14px">请登录你的学在城院账号后进入；凭据只存你自己的浏览器本机，不进仓库、不上传</p>
+    <p class="hint" style="text-align:center;margin:6px 0 14px">请登录你的学在城院账号后进入；登录成功会<b>自动同步该账号的课业数据</b>（需本机同步服务）；凭据只存你自己的浏览器本机，不进仓库、不上传</p>
     <label class="f">学号 / 账号<input type="text" id="lgAccount" autocomplete="off" placeholder="学在城院登录账号"></label>
     <label class="f" style="margin-top:10px">密码<input type="password" id="lgPassword" autocomplete="new-password" placeholder="密码（只写进本机存储）"></label>
     <label class="f" style="margin-top:10px">保存方式
@@ -623,6 +629,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <script src="cloudai.js"></script>
 <script src="sync.js"></script>
 <script src="platform.js"></script>
+<script src="autosync.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
@@ -1725,6 +1732,7 @@ function onLogin(){
     refreshSsoStatus();
     addLog("登录工作台（平台验证通过）：" + SSO.mask(acc));
     showToast("已登录：" + SSO.mask(acc));
+    autoSyncAfterLogin({ verbose: true });   /* 登录即同步，不再只存凭据 */
   }).catch(function(e){
     if(timer) clearTimeout(timer);
     btn.disabled = false; btn.textContent = "登录进入工作台";
@@ -1818,7 +1826,9 @@ function onDirectHealth(){
     out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
   });
 }
-function onDirectSync(){
+function runDirectSync(opts){
+  opts = opts || {};
+  var auto = !!opts.auto;
   if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
   var out = directOut();
   out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
@@ -1834,17 +1844,22 @@ function onDirectSync(){
       if(!res.ok){
         out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
         showToast("获取失败：" + (res.error || "").slice(0, 40));
+        if(auto) addLog("自动同步失败：" + (res.error || "").slice(0, 60));
         return;
       }
-      applyPlatformPayload(res.payload);
+      applyPlatformPayload(res.payload, auto);
     })
     .catch(function(){
       out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
-      showToast("本机同步服务未启动");
+      showToast(auto ? "自动同步跳过：本机同步服务未启动" : "本机同步服务未启动");
+      if(auto) addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "python syncserver.py 未启动"));
+      if(auto) renderAutoSyncHint();
     });
 }
-function applyPlatformPayload(payload){
+function onDirectSync(){ runDirectSync({ auto: false }); }
+function applyPlatformPayload(payload, auto){
   if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  auto = !!auto;
   var ops = PlatformKit.mergeOps(payload, DB.list("captures"), state.items);
   ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
   ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
@@ -1853,16 +1868,49 @@ function applyPlatformPayload(payload){
       if([it.course, it.name].join("|") === u.key) Object.assign(it, u.patch);
     });
   });
-  addLog("学在城院一键获取：作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
-    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条");
+  var sum = (typeof AutoSync !== "undefined" && AutoSync.summarize)
+    ? AutoSync.summarize(ops.stats, payload.errors || [])
+    : "作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
+      + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+  addLog("学在城院" + (auto ? "自动同步" : "一键获取") + "：" + sum);
   saveState();
   refreshAll();
   var out = directOut();
-  out.textContent = "✓ " + (payload.fetchedAt || "") + "：课程 " + (payload.courses || []).length
-    + "，作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
-    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+  out.textContent = "✓ " + (payload.fetchedAt || "") + "：" + sum;
   if((payload.errors || []).length) out.textContent += "\n⚠ 部分内容未取到：" + payload.errors.join("；");
-  showToast("已从学在城院获取 " + ops.stats.items + " 项");
+  showToast((auto ? "自动同步完成：" : "已从学在城院获取 ") + ops.stats.items + " 项");
+  if(typeof AutoSync !== "undefined") renderAutoSyncHint();
+}
+/* ---------- 登录后自动同步（autosync.js）：登录即拉数，不再只存凭据 ---------- */
+function autoSyncAfterLogin(opts){
+  opts = opts || {};
+  if(typeof AutoSync === "undefined") return false;
+  var verdict = AutoSync.shouldRun({
+    enabled: AutoSync.isEnabled(),
+    hasCreds: (typeof SSO !== "undefined") && SSO.has(),
+    lastRun: AutoSync.lastRun(),
+    now: new Date().toISOString(),
+    minIntervalMinutes: AutoSync.DEFAULT_MIN_MINUTES,
+    force: !!opts.force
+  });
+  if(!verdict.run){
+    if(opts.verbose && verdict.reason === "throttled"){
+      addLog("自动同步跳过：" + verdict.detail);
+      showToast("最近已自动同步过，跳过（可手动一键获取）");
+    }
+    return false;
+  }
+  AutoSync.markRun();
+  renderAutoSyncHint();
+  addLog("登录后自动同步开始");
+  showToast("正在自动同步学在城院数据…");
+  runDirectSync({ auto: true });
+  return true;
+}
+function renderAutoSyncHint(){
+  if(typeof AutoSync === "undefined" || !el("asLast")) return;
+  var t = AutoSync.lastRun();
+  el("asLast").textContent = "上次自动同步：" + (t ? t.replace("T", " ").slice(0, 19) : "从未");
 }
 function onCaptureSave(){
   var title = el("cTitle").value.trim();
@@ -2172,6 +2220,17 @@ function bind(){
   el("btnDirectSync").addEventListener("click", onDirectSync);
   el("btnDirectHealth").addEventListener("click", onDirectHealth);
 
+  /* 数据同步设置（autosync.js）：登录后自动同步开关 + 上次同步时间 */
+  if(typeof AutoSync !== "undefined" && el("asEnabled")){
+    el("asEnabled").checked = AutoSync.isEnabled();
+    el("asEnabled").addEventListener("change", function(){
+      var on = AutoSync.setEnabled(el("asEnabled").checked);
+      addLog("登录后自动同步已" + (on ? "开启" : "关闭"));
+      showToast(on ? "登录后将自动同步学在城院数据" : "已关闭自动同步");
+    });
+    renderAutoSyncHint();
+  }
+
   /* 登录门禁 */
   el("btnLogin").addEventListener("click", onLogin);
   el("btnLogout").addEventListener("click", onLogout);
@@ -2391,6 +2450,8 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("initLoginGate", initLoginGate);
   safe("refreshAll", refreshAll);
   safe("switchView", function(){ switchView("overview"); });
+  /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
+  safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });
 </script>
 </body>
