@@ -14,7 +14,8 @@
 | **审批** | 需自查任务的草稿队列：通过并交付 / 退回修改（附修改指令），审批留痕入**审批库** |
 | **行动** | 执行计划说明 + **交付库**（每项任务 pending → submitted / changes 的完整记录，含执行 AI） |
 | **洞察** | 去AI化风险自查工具（粘贴成稿 → 套话密度 + 句式节奏评估）+ 操作日志 |
-| **设置** | 默认执行 AI、Agent 对话 API 配置（预设 / Base URL / Key / 模型）、JSON 导出 / 导入（含全部库）、清空、决策模型参数说明 |
+| **Agent** | 独立配置板块：Agent 对话 API（预设 / Key 按预设分存 / Base URL / 模型）+ 默认执行 AI；配好一次，作业卡点「💬 对话 / AI 代提交」直接开聊 |
+| **设置** | JSON 导出 / 导入（含全部库）、清空、决策模型参数说明 |
 
 ## 库管理（db.js）
 
@@ -107,9 +108,9 @@ node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
 node test/bridge.test.mjs     # AI 直连桥：13 项
-node test/agent.test.mjs      # 作业 Agent 对话：17 项
+node test/agent.test.mjs      # 作业 Agent 对话：23 项
 node test/sso.test.mjs        # 学在城院登录凭据：12 项
-node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + 初始化容错）：12 项
+node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + Agent 板块 + 初始化容错）：26 项
 node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：59 项
 node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
 ```
@@ -129,15 +130,17 @@ node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并�
 
 ## 作业 Agent 对话（agent.js）
 
-每个作业自带一个 **内嵌 Agent 对话抽屉**（作业卡上的「💬 对话」）：学生与 Agent 在工作台内交互成稿，点「📤 用最终结果提交」**直接通过工作台交付**——写入交付库并走交付状态机（需自查的进审批队列），全程不必离开页面。
+每个作业自带一个 **内嵌 Agent 对话抽屉**（作业卡上的「💬 对话」）：点按钮**直接开聊**（标题栏只显示作业与课程，不掺杂任何配置；未配置时一次性引导到「Agent」板块，配好以后不再打扰），学生与 Agent 在工作台内交互成稿，全程不打开浏览器。
 
-- 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；配置存 `wb_hwdesk_agent` 键，**Key 只存本机 localStorage**
+- **AI 代提交** = 极简选择 Agent（只列名字，带 ✓ 表示已配 Key）→ 自动发开工指令，Agent 直接产出 `【最终交付】` 成稿 → **提交预览**里删改后**选择性提交**（「✅ 确认提交」直接置已提交 /「送审批队列」走审批状态机）
+- 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；**Key 按预设分开保存**（`wb_hwdesk_agent` 键的 `keys` 表，旧单 Key 自动迁移），换 Agent 不丢 Key，**只存本机 localStorage**
+- 配置集中在侧边栏「🤖 Agent」独立板块（预设 / Key / Base URL / 模型 + 默认执行 AI）；对话界面零配置
 - 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
 - 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
 
 ## AI 直连（bridge.js + agent.js 内嵌对话）
 
-点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**）。
+`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**），**仅供「工作流 · 按方案执行」使用**：派发 = 自动复制指令（含上下文与去AI化要求）+ 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。作业卡上的「💬 对话 / AI 代提交」不再打开浏览器，一律走工作台内嵌对话。
 
 - **支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）**：在选择器点选后**不再跳转网页**——自动切换到该 Agent 并打开工作台**内嵌对话抽屉**（`agent.js`，OpenAI 兼容 API 流式直连），Agent 直接在后台生成，聊出成稿后点「用最终结果提交」进审批队列交付
 - **元宝 / WorkBuddy**：无 API 预设（元宝）或走平台代理（WorkBuddy），保留旧流程 = 复制指令 + 打开对应网页 / 纯复制

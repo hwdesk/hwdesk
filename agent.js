@@ -1,8 +1,8 @@
-/*! agent.js 1.0.0 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 1.1.0 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.0.0" };
+  var Agent = { version: "1.1.0" };
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
@@ -51,6 +51,8 @@
   };
   Agent.PRESET_ORDER = ["deepseek", "kimi", "qwen", "doubao", "custom"];
 
+  /* ---------- 配置存取 ----------
+   * keys = 按预设分存的 API Key（换 Agent 不丢 Key）；兼容旧的单 apiKey 字段。 */
   /* ---------- 浏览器直连（CORS）标注 ----------
    * ok     = 该服务放行了跨域请求，浏览器可直连
    * proxy  = 官方未放行跨域，建议填本地代理地址（如 http://127.0.0.1:8787/v1）
@@ -67,7 +69,7 @@
 
   /* ---------- 配置存取 ---------- */
   var LS_CFG = "wb_hwdesk_agent";
-  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7 };
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {} };
 
   Agent.load = function () {
     try {
@@ -77,6 +79,11 @@
         for (var k in Agent.config) if (k in c) Agent.config[k] = c[k];
       }
     } catch (e) { /* 损坏即回默认 */ }
+    if (!Agent.config.keys || typeof Agent.config.keys !== "object") Agent.config.keys = {};
+    /* 迁移：旧版只存单 apiKey → 归入当前预设名下 */
+    if (Agent.config.apiKey && !Agent.config.keys[Agent.config.preset]) {
+      Agent.config.keys[Agent.config.preset] = Agent.config.apiKey;
+    }
     return Agent.config;
   };
   Agent.save = function () {
@@ -91,7 +98,25 @@
     Agent.config.preset = presetId;
     Agent.config.baseUrl = p.baseUrl;
     Agent.config.model = p.model;
+    Agent.config.apiKey = Agent.config.keys[presetId] || "";
     Agent.save();
+  };
+  /* 一键切换到某个 Agent（含 Key 同步）；页面「选择 Agent」后调用 */
+  Agent.use = function (presetId) {
+    if (!Agent.PRESETS[presetId]) return false;
+    Agent.applyPreset(presetId);
+    return true;
+  };
+  Agent.setKey = function (presetId, key) {
+    Agent.load();
+    Agent.config.keys[presetId] = key;
+    if (presetId === Agent.config.preset) Agent.config.apiKey = key;
+    Agent.save();
+  };
+  /* 已配好 Key 的预设（「选择 Agent」列表只把这些标为可用） */
+  Agent.usablePresets = function () {
+    Agent.load();
+    return Agent.PRESET_ORDER.filter(function (id) { return !!Agent.config.keys[id]; });
   };
   Agent.ready = function () {
     Agent.load();
