@@ -63,12 +63,20 @@ test("global default overrides auto match", () => {
   assert.equal(r.ai, "yuanbao");
   assert.equal(r.source, "default");
 });
-test("category preference overrides global default", () => {
+test("global default overrides category preference (regression: stale byCategory hijacked the default)", () => {
   Bridge.reset();
   Bridge.setPref("defaultAi", "yuanbao");
   Bridge.setCategoryPref("reasoner", "deepseek");
-  assert.equal(Bridge.pick("reasoner").ai, "deepseek");
-  assert.equal(Bridge.pick("writer").ai, "yuanbao");
+  assert.equal(Bridge.pick("reasoner").ai, "yuanbao");
+  assert.equal(Bridge.pick("reasoner").source, "default");
+});
+test("stale byCategory pointing at doubao cannot override the default (issue: always opens 豆包)", () => {
+  Bridge.reset();
+  Bridge.setPref("defaultAi", "kimi");
+  Bridge.setCategoryPref("reasoner", "doubao");
+  const r = Bridge.pick("reasoner");
+  assert.equal(r.ai, "kimi");
+  assert.equal(r.source, "default");
 });
 test("unknown ids in prefs are ignored safely", () => {
   Bridge.reset();
