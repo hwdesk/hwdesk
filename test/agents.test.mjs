@@ -179,5 +179,35 @@ console.log("history in prompt:");
      "only the latest " + AgentHub.HISTORY_TURNS + " turns are carried");
 }
 
+
+/* ---------- 8) 我的默认 Agent（用户手动指定，区别于 Laya 自动推荐） ---------- */
+console.log("default agent:");
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k)
+  };
+  try {
+    ok(AgentHub.getDefault() === "", "no default initially");
+    AgentHub.setDefault("qoder");
+    ok(AgentHub.getDefault() === "qoder", "setDefault persists the choice");
+    AgentHub.setDefault("nope");
+    ok(AgentHub.getDefault() === "qoder", "invalid id is ignored (keeps previous)");
+    AgentHub.setDefault("");
+    ok(AgentHub.getDefault() === "", "empty string clears the default");
+    AgentHub.setDefault("workbuddy");
+    AgentHub.setDefault(undefined);
+    ok(AgentHub.getDefault() === "", "falsy id clears the default");
+    AgentHub.setDefault("kimi");
+    const raw = localStorage.getItem("wb_hwdesk_default_agent");
+    ok(raw === "kimi", "stored under wb_hwdesk_default_agent");
+    AgentHub.setDefault("qoder");
+    ok(AgentHub.getDefault() === "qoder", "re-setting works");
+  } finally {
+    delete globalThis.localStorage;   // 恢复无 LS 环境，不影响其他用例
+  }
+}
 console.log(pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);
