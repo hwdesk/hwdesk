@@ -1,6 +1,6 @@
 # 作业提交工作台（学在城院版）
 
-桌面级个人作业工作台：双击桌面图标即开的独立 App 窗口。多区块布局（参照团队 RoleWeave 工作台）：总览 / 数据获取 / 数据资产 / 工作流 / 审批 / 行动 / 洞察 / 设置，内建 Laya 智能决策、去AI化润色、平台数据采集、审批流与交付记录。
+桌面级个人作业工作台：双击桌面图标即开的独立 App 窗口。多区块布局（参照团队 RoleWeave 工作台）：总览 / 数据获取 / 数据资产 / 工作流 / **AI 对话** / 审批 / 行动 / 洞察 / 设置，内建 Laya 智能决策、多 AI Agent 对话、去AI化润色、平台数据采集、审批流与交付记录。
 
 ## 功能区块
 
@@ -10,6 +10,7 @@
 | **数据获取** | 一键生成「学在城院采集指令」（课件 PPT/Word、作业要求原文、历史作业与成绩），由本地 AI 代理登录平台执行；采集摘要登记入**采集库**，后续任务决策自动引用 |
 | **数据资产** | 上下文库：手工登记课件 / 作业要求 / 范文（与采集库一并进入任务上下文简报） |
 | **工作流** | Laya 决策中心：优先级排序、AI 路由（含置信度）、需自查标记、一键执行计划 |
+| **AI 对话** | 选任务 → 选任意 AI（⭐ 为 Laya 推荐）→ 逐轮对话 → 回复满意后 **一键交付**；对话记录入**对话库** |
 | **审批** | 需自查任务的草稿队列：通过并交付 / 退回修改（附修改指令），审批留痕入**审批库** |
 | **行动** | 执行计划说明 + **交付库**（每项任务 pending → submitted / changes 的完整记录，含执行 AI） |
 | **洞察** | 去AI化风险自查工具（粘贴成稿 → 套话密度 + 句式节奏评估）+ 操作日志 |
@@ -22,7 +23,8 @@
 - `captures` 采集库 — 从学在城院拉取的课件、作业要求、历史作业登记
 - `submissions` 交付库 — 每项任务的交付记录，状态机 `pending → submitted / changes`（changes 可重新提交回 pending，submitted 终态）
 - `reviews` 审批库 — 审批决定与退回原因留痕
-- 作业 / 日志 / 材料沿用原 `wb_hwdesk_*` 键（向后兼容）；导出备份包含全部六库
+- `chats` 对话库 — 每项任务与多个 AI Agent 的对话记录（每任务一条，含 turns；上限 60 轮）
+- 作业 / 日志 / 材料沿用原 `wb_hwdesk_*` 键（向后兼容）；导出备份包含全部七库
 
 **平台数据链路**：本页面不直接登录学在城院（`file://` 页面无法爬取，凭据也不进页面）——「数据获取」生成采集指令 → 本地 AI 代理登录平台拉取课件与历史作业并回报摘要 → 摘要登记进采集库 → `ContextKit` 在任务上下文简报中引用真实平台数据。
 
@@ -44,6 +46,38 @@
 6. **自动交付编排**：`Laya.buildPlan()` 生成分派计划——不同任务交给不同 AI，可自动交付的直接交付，需自查的先出草稿暂停等学生确认
 
 API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `Laya.buildPlan(items)` 执行计划与批量指令。
+
+## 多 AI Agent 对话（agents.js）
+
+框架参照 [bytefolk/roleweave](https://github.com/bytefolk/roleweave) 的三层结构，降维为本地零依赖实现：
+
+| RoleWeave | hwdesk |
+|---|---|
+| `apps/server/src/agent-registry.ts`（每个 AI 是一个 Agent Host） | `AgentHub.REGISTRY`（8 个 Agent：id / label / 能力原型 / 关键词 / 风格指令） |
+| `apps/server/src/model-selection.ts`（每引擎模型目录） | `AgentHub.recommend()`（复用 Laya choice 路由 + 关键词 + 交付格式先验打分排序） |
+| `apps/desktop/renderer/src/turns/*`（会话 turns） | `AgentHub.composePrompt()` / `addTurn()` / `chat()`（对话组装与留痕） |
+
+注册的 Agent（不局限于任何一家，可任意调动）：
+
+| Agent | 擅长 |
+|---|---|
+| 千问 Qwen | 写作、报告、PPT 文案与排版 |
+| WorkBuddy | 全流程执行代理（**唯一能登录学在城院完成提交的**） |
+| 即梦 Jimeng | 图像生成：PPT 配图、封面、示意图 |
+| DeepSeek | 数理推导、计算与分析 |
+| Kimi | 长文档阅读、综述与长文写作 |
+| 豆包 Doubao | 客观题、短作答，速度优先 |
+| Qoder | 编程、嵌入式/PLC、仿真调试 |
+| Claude | 深度推理、推导证明、长链分析 |
+
+对话流程（页面不起服务、不存凭据，符合零依赖约束）：
+
+1. 选任务 + 选 AI（⭐ 标记 Laya 推荐位，可随时切换）
+2. 「发送」→ `composePrompt()` 组装完整提示词：**任务卡 + Laya 决策 + ContextKit 上下文简报 + Humanize 交付要求 + 该 AI 的风格指令 + 你的要求** → 复制到该 AI 自己的窗口粘贴发送
+3. 「记录 AI 回复」→ 把回复粘回，存入对话气泡（跨 Agent、多轮连续）
+4. 满意的那条回复点「✅ 一键交付」→ `deliverCmd()` 生成 WorkBuddy 提交指令并复制，同时写入**交付库**（需自查的任务为 `pending` 进审批队列，否则 `submitted`）
+
+与 `bridge.js`（AI 直连桥）的分工：**bridge 管派发**（自动打开豆包 / 元宝 / DeepSeek / Kimi / 千问的网页并复制指令），**agents 管对话与交付**（多轮记录、跨 Agent 对比、满意后一键交付）。两者同时加载时，「发送」会顺带打开所选 AI 的网页；bridge 未加载时自动退回纯复制流程（`AgentHub.openUrl()` 返回 null）。
 
 2. **上下文摄取（提高正确率）**
 
@@ -72,11 +106,12 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
+node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：48 项
 ```
 
 ## 桌面安装（Windows）
 
-1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
+1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`agents.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
 2. 生成应用图标：仓库内 `hwdesk.ico` 可直接使用
 3. 生成桌面快捷方式（Chrome 应用模式）：
 
@@ -90,7 +125,8 @@ python make_lnk_com.py   # 需要 pywin32：pip install pywin32
 
 ## 技术要点
 
-- 主页面为单文件 HTML，零外部网络依赖（无 CDN / 字体 / 框架），全部 CSS/JS/图标内联；决策引擎 `laya.js`、去AI化/上下文引擎 `humanize.js`、库管理层 `db.js` 拆为同目录纯本地脚本（无网络请求），方便单测与后续接入真实 Laya 模型后端
+- 主页面为单文件 HTML，零外部网络依赖（无 CDN / 字体 / 框架），全部 CSS/JS/图标内联；决策引擎 `laya.js`、去AI化/上下文引擎 `humanize.js`、库管理层 `db.js`、多 Agent 中心 `agents.js` 拆为同目录纯本地脚本（无网络请求），方便单测与后续接入真实 Laya 模型后端
+- 引擎之间互不依赖：`agents.js` 通过页面注入的 `{ routeFor, analyzeFor, contextFor, humanizeFor }` 钩子使用其它引擎能力
 - 图标 `.ico` 为纯 Python 手工生成（48×48 32bpp）
 - `.lnk` 快捷方式提供两种生成方案：pywin32 COM 版（推荐）与纯二进制手工版
 - Chrome `--app` 模式实现类原生窗口体验
