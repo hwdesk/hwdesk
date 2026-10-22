@@ -253,8 +253,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
       <div class="full" style="margin-top:2px"><label style="font-size:12.5px"><input type="checkbox" id="ssoIncPw"> 采集指令中附带登录密码（仅发给本机代理时可见，默认只带账号）</label></div>
       <div class="ai-note full" style="margin:10px 0 0">
-        <b>怎么用？</b> 点「一键同步」→ 复制的是一份<b>全平台同步指令</b>（要求代理以 JSON 回报所有课程的课件、作业、成绩）→ 粘到 AI 代理对话发送 → 代理回报后，把 JSON 粘进下方「导入同步结果」→ 工作台自动批量入库：<b>课件/成绩进采集库、新作业自动建档、截止日期自动更新</b>，全程零手工登记。<br>
-        <span class="hint">说明：本页面是 file:// 本地应用，无法也不应直接登录学在城院（凭据不进页面）；登录平台这一步仍由持有凭据的 AI 代理执行，但只剩「点一下 → 粘一次」两个动作。</span>
+        点「一键同步」复制全平台同步指令 → 发给 AI 代理 → 把回报的 JSON 粘进「导入同步结果」，自动批量入库。
       </div>
       <div id="syncImportBox" style="display:none;margin-top:12px">
         <label class="f">粘贴代理回报的 JSON</label>
@@ -362,8 +361,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="card" style="padding:12px">
       <textarea id="hubInput" placeholder="给所选 AI 的要求（可空，会自动附任务卡、Laya 决策、课件上下文与交付格式要求）。粘贴 AI 的回复进来则点「记录 AI 回复」存入对话。"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI（复制完整提示词）</button>
-        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复（把上方粘贴的回复存入对话）</button>
+        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI</button>
+        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复</button>
       </div>
       <div class="hint" style="margin-top:8px">发送后到所选 AI 自己的窗口（网页版或客户端）粘贴发送；回复粘回上方输入框点「记录 AI 回复」。觉得效果满意时，点回复气泡上的「✅ 一键交付」。</div>
     </div>
@@ -471,7 +470,6 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div style="text-align:right;margin-top:10px">
       <button class="btn sm" id="aiPickerCancel">取消</button>
     </div>
-    <div class="hint" style="margin-top:8px;line-height:1.5">点一行 = 本次用它执行；「设为默认」= 记住选择并派发；Esc 或点弹窗外空白处 = 取消</div>
   </div>
 </div>
 <style>
@@ -496,7 +494,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-risk" id="chatRisk" style="display:none"></div>
     <div class="chat-foot">
-      <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）；认可后回复「请给最终交付」即可产出成稿"></textarea>
+      <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn sm primary" id="chatSubmit">📤 用最终结果提交</button>
         <button class="btn sm" id="chatSend">发送</button>
@@ -1034,24 +1032,29 @@ function onAiSubmit(id){
     var cl = Humanize.checklist(it);
     if(cl) cmd += "\n\n" + cl;
   }
-  /* AI 直连派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器） */
-  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name);
+  /* AI 派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器；带上任务 id 供内嵌对话直连） */
+  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name, it.id);
   it.ai = true;
   /* 交付记录：复制指令 ≠ 已提交 → 一律 pending。
    * stage：直连网页 AI / 需自查 → review（待自查），WorkBuddy copy 流程 → dispatched（待执行）；
    * 拿到平台回执后到「审批」点「确认已提交」才置 submitted */
-  var viaWebAi = !plan || plan.action !== "copy";
-  recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
-  addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
-    + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
+  if(plan && plan.action === "agent-chat"){
+    /* 选择器点了支持 API 直连的 AI：已转入工作台内嵌对话，
+       交付记录由对话抽屉「用最终结果提交」负责，这里不再重复记 */
+  }else{
+    var viaWebAi = !plan || plan.action !== "copy";
+    recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
+    addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
+      + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
+  }
   saveState();
   refreshAll();
 }
-/* ---------- AI 直连派发（bridge.js）：复制指令 + 打开对应 AI 网页 ---------- */
-function dispatchToAi(cmd, category, taskName){
+/* ---------- AI 派发（bridge.js）：API 直连的走工作台内嵌对话，其余复制指令 + 打开对应 AI 网页 ---------- */
+function dispatchToAi(cmd, category, taskName, taskId){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
-  if(pick.source === "none"){ openAiPicker(cmd, category, taskName); return { action: "picker" }; }
+  if(pick.source === "none"){ openAiPicker(cmd, category, taskName, taskId); return { action: "picker" }; }
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
 function doDispatch(plan, cmd, taskName){
@@ -1063,8 +1066,8 @@ function doDispatch(plan, cmd, taskName){
   return plan;
 }
 var _pickerCtx = null;
-function openAiPicker(cmd, category, taskName){
-  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "" };
+function openAiPicker(cmd, category, taskName, taskId){
+  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "", taskId: taskId || null };
   var catLabel = (category && typeof Laya !== "undefined" && Laya.AI_REGISTRY[category])
     ? Laya.AI_REGISTRY[category].label : "通用";
   el("aiPickerFor").textContent = "（" + catLabel + " · " + taskName + "）";
@@ -1088,6 +1091,14 @@ function confirmAiPick(id, makeDefault){
     addLog("已设默认执行 AI：" + Bridge.AI[id].label);
   }
   closeAiPicker();
+  /* 支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）：不再跳网页，
+     直接切到该 Agent 并打开工作台内嵌对话，聊出成稿后「用最终结果提交」 */
+  if(ctx.taskId && typeof Agent !== "undefined" && Agent.PRESETS[id]){
+    Agent.applyPreset(id);
+    addLog("Agent 直连对话：" + ctx.taskName + " → " + Agent.PRESETS[id].label);
+    onChatOpen(ctx.taskId);
+    return;
+  }
   doDispatch(Bridge.describe({ ai: id }), ctx.cmd, ctx.taskName);
 }
 /* 设置页：默认执行 AI 下拉（含「每次询问」） */
