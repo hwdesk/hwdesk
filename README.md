@@ -72,8 +72,26 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
-node test/bridge.test.mjs     # AI 直连桥：12 项
+node test/bridge.test.mjs     # AI 直连桥：13 项
+node test/agent.test.mjs      # 作业 Agent 对话：17 项
+node test/sso.test.mjs        # 学在城院登录凭据：12 项
 ```
+
+## 学在城院登录（sso.js）
+
+「数据获取」页内置**登录前端**：每个成员输入自己的学在城院账号密码（保存方式：仅本次 / 记住到本机），凭据经 `sso.js` 只写入**本人浏览器的 localStorage / sessionStorage**——仓库、页面源码、部署产物里永远没有任何账号密码。
+
+- 「生成采集指令」自动附带登录段落：默认**只带账号**（密码由学生向本机代理当面提供）；勾选「指令中附带密码」才写入，且附禁止外传提醒
+- 状态行打码显示（`3202****234`）；「清除凭据」一键抹掉全部三档存储
+- 旧流程不变：真正的平台登录 / 拉取 / 提交仍由各人本机的 AI 代理执行
+
+## 作业 Agent 对话（agent.js）
+
+每个作业自带一个 **内嵌 Agent 对话抽屉**（作业卡上的「💬 对话」）：学生与 Agent 在工作台内交互成稿，点「📤 用最终结果提交」**直接通过工作台交付**——写入交付库并走交付状态机（需自查的进审批队列），全程不必离开页面。
+
+- 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；配置存 `wb_hwdesk_agent` 键，**Key 只存本机 localStorage**
+- 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
+- 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
 
 ## AI 直连（bridge.js）
 
@@ -85,7 +103,7 @@ node test/bridge.test.mjs     # AI 直连桥：12 项
 
 ## 桌面安装（Windows）
 
-1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
+1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js`、`agent.js`、`sso.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
 2. 生成应用图标：仓库内 `hwdesk.ico` 可直接使用
 3. 生成桌面快捷方式（Chrome 应用模式）：
 
@@ -106,5 +124,6 @@ python make_lnk_com.py   # 需要 pywin32：pip install pywin32
 
 ## 隐私
 
-- 页面不含任何账号密码；数据只存本机 localStorage
-- 与学校平台的对接（登录、拉取作业、上传提交）由本地 AI 代理执行，凭据不进入页面与仓库
+- 页面源码与仓库不含任何账号密码；作业 / 材料 / 对话等业务数据只存本机 localStorage
+- 学在城院凭据由每个成员在「登录」卡片自行输入，`sso.js` 只写本人浏览器本机存储，可随时一键清除
+- 与学校平台的对接（登录、拉取作业、上传提交）由各人本机的 AI 代理执行，凭据不进入页面与仓库
