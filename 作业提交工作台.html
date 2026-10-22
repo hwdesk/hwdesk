@@ -177,6 +177,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <button data-view="settings"><span class="ico">⚙️</span>设置</button>
     </nav>
     <div class="sync" style="margin-top:16px"><span class="dot"></span><span id="syncText">本地模式</span></div>
+    <div class="hint" id="acctChip" style="text-align:center;margin-top:6px"></div>
+    <button class="btn sm danger-ghost" id="btnLogout" style="width:100%;margin-top:6px">🚪 退出登录</button>
   </aside>
 
   <main class="main">
@@ -231,28 +233,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <section class="view" id="view-capture">
     <div class="section-title">
       <h2>数据获取 · 学在城院平台采集</h2>
-      <span class="hint">代理用你在下方保存的本机凭据登录（每人自己的账号）</span>
-    </div>
-    <div class="section-title"><h2>学在城院登录</h2><span class="hint">凭据只存你自己的浏览器本机，不进仓库、不上传</span></div>
-    <div class="card" style="padding:14px">
-      <div class="grid2">
-        <div><label class="f">学号 / 账号</label><input type="text" id="ssoAccount" autocomplete="off" placeholder="学在城院登录账号"></div>
-        <div><label class="f">密码</label><input type="password" id="ssoPassword" autocomplete="new-password" placeholder="密码（只写进本机存储）"></div>
-        <div><label class="f">保存方式</label>
-          <select id="ssoMode">
-            <option value="session">仅本次（关页面即忘）</option>
-            <option value="local">记住到本机（下次免输）</option>
-          </select></div>
-        <div style="display:flex;align-items:flex-end;gap:8px">
-          <button class="btn primary" id="btnSsoSave" style="flex:1">保存凭据</button>
-          <button class="btn danger-ghost" id="btnSsoClear">清除凭据</button>
-        </div>
-        <div class="full" id="ssoStatus" style="display:none"></div>
-        <div class="full" style="margin-top:4px"><label style="font-size:12.5px"><input type="checkbox" id="ssoIncPw"> 采集指令中附带密码（仅发给本机代理时可见，默认只带账号）</label></div>
-        <div class="full ai-note" style="margin:0">
-          ⚠️ 密码只保存在<b>你自己电脑的这个浏览器</b>里（localStorage / sessionStorage），仓库与页面源码里永远没有凭据，团队每人登自己的账号。
-        </div>
-      </div>
+      <span class="hint">代理用你登录时保存的本机凭据（每人自己的账号）</span>
     </div>
     <div class="card" style="padding:14px">
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -270,6 +251,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
           <button class="btn sm" id="btnCapGen" style="margin-top:6px;width:100%">📋 生成单课程采集指令（旧方式）</button>
         </div>
       </div>
+      <div class="full" style="margin-top:2px"><label style="font-size:12.5px"><input type="checkbox" id="ssoIncPw"> 采集指令中附带登录密码（仅发给本机代理时可见，默认只带账号）</label></div>
       <div class="ai-note full" style="margin:10px 0 0">
         <b>怎么用？</b> 点「一键同步」→ 复制的是一份<b>全平台同步指令</b>（要求代理以 JSON 回报所有课程的课件、作业、成绩）→ 粘到 AI 代理对话发送 → 代理回报后，把 JSON 粘进下方「导入同步结果」→ 工作台自动批量入库：<b>课件/成绩进采集库、新作业自动建档、截止日期自动更新</b>，全程零手工登记。<br>
         <span class="hint">说明：本页面是 file:// 本地应用，无法也不应直接登录学在城院（凭据不进页面）；登录平台这一步仍由持有凭据的 AI 代理执行，但只剩「点一下 → 粘一次」两个动作。</span>
@@ -534,6 +516,33 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .chat-foot{border-top:1px solid #eef0f4;padding:12px 16px;background:#fff}
   .chat-foot textarea{width:100%;min-height:70px;resize:vertical}
   .chat-risk{margin:0 16px;padding:8px 12px;background:#fff8ec;border:1px solid #f2dfb6;border-radius:8px;font-size:12.5px;white-space:pre-wrap}
+</style>
+<!-- 登录门禁：未登录学在城院账号不能进入工作台 -->
+<div class="login-mask" id="loginGate" style="display:none">
+  <div class="login-card">
+    <div class="brand" style="justify-content:center;margin-bottom:6px">
+      <div class="logo" style="width:38px;height:38px;border-radius:10px;background:var(--blue);display:flex;align-items:center;justify-content:center">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="6" height="14" fill="#fff"/><rect x="13" y="5" width="6" height="14" fill="#fff"/><rect x="3" y="21" width="18" height="2" fill="#fff"/></svg>
+      </div>
+    </div>
+    <h2 style="text-align:center;font-size:18px">作业提交工作台 · 学在城院</h2>
+    <p class="hint" style="text-align:center;margin:6px 0 14px">请登录你的学在城院账号后进入；凭据只存你自己的浏览器本机，不进仓库、不上传</p>
+    <label class="f">学号 / 账号<input type="text" id="lgAccount" autocomplete="off" placeholder="学在城院登录账号"></label>
+    <label class="f" style="margin-top:10px">密码<input type="password" id="lgPassword" autocomplete="new-password" placeholder="密码（只写进本机存储）"></label>
+    <label class="f" style="margin-top:10px">保存方式
+      <select id="lgMode">
+        <option value="session">仅本次（关浏览器即忘）</option>
+        <option value="local">记住到本机（下次免登录）</option>
+      </select>
+    </label>
+    <button class="btn primary" id="btnLogin" style="width:100%;margin-top:14px">登录进入工作台</button>
+    <p class="hint" style="margin:10px 0 0">代理采集 / 提交时使用这份凭据登录学在城院；团队每人登自己的账号，退出登录即清除本机凭据。</p>
+  </div>
+</div>
+<style>
+  .login-mask{position:fixed;inset:0;background:var(--bg);z-index:200;display:flex;align-items:center;justify-content:center}
+  .login-card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(20,30,60,.10);padding:26px 24px;width:min(380px,92vw)}
+  .login-card .f input,.login-card .f select{width:100%}
 </style>
 <div class="toast" id="toast"></div>
 
@@ -1344,33 +1353,38 @@ function onCaptureGen(){
   addLog("生成学在城院采集指令：" + course);
   saveState(); refreshAll();
 }
-/* ---------- 学在城院登录（sso.js）：凭据只存本机 ---------- */
+/* ---------- 学在城院登录门禁（sso.js）：未登录不能进入工作台 ---------- */
 function refreshSsoStatus(){
-  var out = el("ssoStatus");
+  var chip = el("acctChip");
   var st = (typeof SSO !== "undefined") ? SSO.get() : null;
-  if(!st){ out.style.display = "none"; return; }
-  var where = st.where === "local" ? "记住到本机" : (st.where === "session" ? "仅本次会话" : "内存");
-  out.style.display = "block";
-  out.textContent = "✓ 已保存凭据：" + SSO.mask(st.creds.account) + "（" + where + "），采集指令将自动附带账号";
+  chip.textContent = st ? "当前账号：" + SSO.mask(st.creds.account) : "未登录";
 }
-function onSsoSave(){
+function initLoginGate(){
+  /* 记住到本机 / 仅本次 且凭据还在 → 直接放行；否则拦在登录页 */
+  if(typeof SSO !== "undefined" && SSO.has()){
+    el("loginGate").style.display = "none";
+  }else{
+    el("loginGate").style.display = "flex";
+    setTimeout(function(){ el("lgAccount").focus(); }, 50);
+  }
+  refreshSsoStatus();
+}
+function onLogin(){
   if(typeof SSO === "undefined"){ showToast("sso.js 未加载"); return; }
-  var acc = el("ssoAccount").value.trim(), pw = el("ssoPassword").value;
-  if(!acc || !pw){ showToast("账号和密码都要填"); return; }
-  SSO.set(acc, pw, el("ssoMode").value);
-  el("ssoPassword").value = "";
+  var acc = el("lgAccount").value.trim(), pw = el("lgPassword").value;
+  if(!acc || !pw){ showToast("输入学在城院账号和密码"); return; }
+  SSO.set(acc, pw, el("lgMode").value);
+  el("lgPassword").value = "";
+  el("loginGate").style.display = "none";
   refreshSsoStatus();
-  addLog("学在城院凭据已保存（" + el("ssoMode").value + "）：" + SSO.mask(acc));
-  showToast("凭据已存本机，采集指令会自动带上账号");
+  addLog("登录工作台：" + SSO.mask(acc));
+  showToast("已登录：" + SSO.mask(acc));
 }
-function onSsoClear(){
-  if(typeof SSO === "undefined") return;
-  if(!window.confirm("清除本机保存的学在城院凭据？")) return;
-  SSO.clear();
-  el("ssoAccount").value = ""; el("ssoPassword").value = "";
-  refreshSsoStatus();
-  addLog("已清除本机学在城院凭据");
-  showToast("已清除");}
+function onLogout(){
+  if(!window.confirm("退出登录并清除本机凭据？")) return;
+  if(typeof SSO !== "undefined") SSO.clear();
+  location.reload();
+}
 /* 一键同步：全平台指令 + JSON 导入回填（零手工登记） */
 function onSync(){
   if(typeof SyncKit === "undefined"){ showToast("sync.js 未加载"); return; }
@@ -1730,9 +1744,15 @@ function bind(){
 
   el("btnCapGen").addEventListener("click", onCaptureGen);
 
-  /* 学在城院登录 */
-  el("btnSsoSave").addEventListener("click", onSsoSave);
-  el("btnSsoClear").addEventListener("click", onSsoClear);
+  /* 登录门禁 */
+  el("btnLogin").addEventListener("click", onLogin);
+  el("btnLogout").addEventListener("click", onLogout);
+  el("lgPassword").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); onLogin(); }
+  });
+  el("lgAccount").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); el("lgPassword").focus(); }
+  });
   el("btnSync").addEventListener("click", onSync);
   el("btnSyncImport").addEventListener("click", onSyncImport);
   el("btnSyncCancel").addEventListener("click", function(){
@@ -1876,7 +1896,7 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("bind", bind);
   safe("refreshDefaultAiSelect", function(){ if(typeof Bridge !== "undefined") refreshDefaultAiSelect(); });
   safe("fillAgentSettings", function(){ if(typeof Agent !== "undefined") fillAgentSettings(); });
-  safe("refreshSsoStatus", function(){ if(typeof Sso !== "undefined") refreshSsoStatus(); });
+  safe("initLoginGate", initLoginGate);
   safe("refreshAll", refreshAll);
   safe("switchView", function(){ switchView("overview"); });
 });
