@@ -1,0 +1,2157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>作业提交工作台 · 学在城院</title>
+<!-- 本工作台由 WorkBuddy「小台」搭建：本地单页 + localStorage；多区块布局参照 RoleWeave 工作台 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%232f6bff'/%3E%3Crect x='10' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='26' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='8' y='38' width='32' height='3' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f4f6fa; --card:#ffffff; --line:#e6e9f0; --txt:#1f2430; --sub:#6b7280;
+  --blue:#2f6bff; --blue-weak:#eaf0ff; --red:#e5484d; --red-weak:#fdeced;
+  --green:#1a9e5c; --green-weak:#e7f6ee; --orange:#e08a00; --orange-weak:#fdf3e2;
+  --radius:14px; --shadow:0 1px 3px rgba(20,30,60,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);font-size:16px;line-height:1.5}
+/* ---------- 多区块布局（参照 RoleWeave 工作台） ---------- */
+.shell{display:flex;max-width:1120px;margin:0 auto;min-height:100vh}
+.side{flex:none;width:208px;padding:18px 12px;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
+.side .brand{display:flex;align-items:center;gap:10px;padding:2px 6px 16px}
+.side .brand .logo{width:38px;height:38px;border-radius:10px;background:var(--blue);display:flex;align-items:center;justify-content:center;flex:none}
+.side .brand h1{font-size:17px}
+.side .brand .sub{font-size:12px;color:var(--sub)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:transparent;color:var(--txt);font-size:15px;padding:11px 12px;border-radius:10px;cursor:pointer;text-align:left}
+.nav button:hover{background:#fff}
+.nav button.on{background:var(--blue-weak);color:var(--blue);font-weight:600}
+.nav .ico{width:20px;text-align:center;flex:none}
+.side .sync{margin-top:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:99px;padding:5px 12px;box-shadow:var(--shadow)}
+.side .sync .dot{width:8px;height:8px;border-radius:50%;background:var(--orange)}
+.main{flex:1;min-width:0;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+.view{display:none}
+.view.on{display:block}
+@media (max-width:800px){
+  .shell{flex-direction:column}
+  .side{width:100%;height:auto;position:static;padding:12px}
+  .nav{flex-direction:row;overflow-x:auto;gap:6px}
+  .nav button{flex:none;padding:8px 12px;font-size:14px}
+  .side .sync{display:none}
+  .main{padding:12px}
+}
+.section-title{display:flex;align-items:center;justify-content:space-between;margin:18px 2px 10px;gap:8px;flex-wrap:wrap}
+.section-title h2{font-size:15px}
+.section-title .hint{font-size:12px;color:var(--sub)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+/* 今天要处理 */
+#todayBox{padding:6px 0}
+.today-item{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.today-item:last-child{border-bottom:none}
+.badge{flex:none;font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600}
+.badge.overdue{background:var(--red-weak);color:var(--red)}
+.badge.today{background:var(--orange-weak);color:var(--orange)}
+.badge.soon{background:var(--blue-weak);color:var(--blue)}
+.today-item .t-info{flex:1;min-width:0}
+.today-item .t-name{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.today-item .t-meta{font-size:12px;color:var(--sub)}
+.btn{border:1px solid var(--line);background:#fff;color:var(--txt);border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;min-height:44px}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.sm{padding:7px 10px;min-height:36px;font-size:13px;border-radius:8px}
+.btn.danger-ghost{color:var(--red);border-color:#f3c6c8}
+.btn:active{transform:scale(.97)}
+.empty{padding:26px 14px;text-align:center;color:var(--sub);font-size:14px}
+/* 新建表单 */
+#addForm,#matForm,#capForm{display:none;padding:14px;margin-top:10px}
+#addForm.open,#matForm.open,#capForm.open{display:block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 .full{grid-column:1/-1}
+label.f{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+input[type=text],input[type=date],input[type=file],select,textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px;background:#fff;color:var(--txt);font-family:inherit}
+textarea{resize:vertical;min-height:64px}
+/* 作业列表 */
+.hw-item{display:flex;gap:12px;padding:14px;border-bottom:1px solid var(--line);align-items:flex-start}
+.hw-item:last-child{border-bottom:none}
+.status-ico{flex:none;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.st-todo{background:var(--orange-weak)} .st-done{background:var(--green-weak)} .st-submitted{background:var(--blue-weak)}
+.hw-main{flex:1;min-width:0}
+.hw-name{font-weight:600;font-size:15px;word-break:break-all}
+.hw-name.done{text-decoration:line-through;color:var(--sub)}
+.hw-meta{font-size:12px;color:var(--sub);margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.hw-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.filter-row{display:flex;gap:6px;padding:12px 12px 4px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:6px 13px;font-size:13px;cursor:pointer;min-height:36px}
+.chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+/* 统计 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
+.stat{padding:14px;text-align:center}
+.stat .num{font-size:24px;font-weight:700}
+.stat .lab{font-size:12px;color:var(--sub)}
+.num.red{color:var(--red)} .num.green{color:var(--green)} .num.blue{color:var(--blue)}
+/* 日志 / 记录 */
+.log-item{padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.log-item:last-child{border-bottom:none}
+.log-item .lt{color:var(--sub);font-size:12px}
+footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+.ai-note{margin-top:10px;padding:14px;font-size:13px;color:var(--sub)}
+.ai-note b{color:var(--txt)}
+.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#1f2430;color:#fff;padding:10px 18px;border-radius:99px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:99}
+.toast.show{opacity:.95}
+/* Laya 决策中心 */
+.laya-item{padding:12px 14px;border-bottom:1px solid var(--line)}
+.laya-item:last-child{border-bottom:none}
+.laya-row{display:flex;align-items:center;gap:10px}
+.laya-rank{flex:none;width:26px;height:26px;border-radius:8px;background:var(--blue-weak);color:var(--blue);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+.laya-pbar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;flex:1;min-width:60px}
+.laya-pbar i{display:block;height:100%;background:var(--blue);border-radius:99px}
+.laya-pnum{flex:none;font-size:12px;font-weight:700;color:var(--blue);min-width:56px;text-align:right}
+.laya-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600}
+.tag.ai{background:var(--blue-weak);color:var(--blue)}
+.tag.cx{background:var(--orange-weak);color:var(--orange)}
+.tag.rv{background:var(--red-weak);color:var(--red)}
+.tag.ok{background:var(--green-weak);color:var(--green)}
+.laya-why{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.6}
+.laya-ops{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
+/* 上下文库 / 采集库 */
+.mat-item{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.mat-item:last-child{border-bottom:none}
+.mat-kind{flex:none;font-size:12px;padding:2px 8px;border-radius:99px;font-weight:600;background:var(--green-weak);color:var(--green)}
+.mat-main{flex:1;min-width:0}
+.mat-title{font-weight:600;font-size:14px;word-break:break-all}
+.mat-meta{font-size:12px;color:var(--sub);margin-top:2px}
+.mat-note{font-size:12px;color:var(--sub);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 交付 / 审批记录 */
+.sub-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.sub-row:last-child{border-bottom:none}
+.sub-main{flex:1;min-width:0}
+.sub-name{font-weight:600;font-size:14px;word-break:break-all}
+.sub-meta{font-size:12px;color:var(--sub);margin-top:2px}
+.risk-out{margin:0 14px 14px;padding:12px;border-radius:10px;background:var(--blue-weak);font-size:13px;line-height:1.7;white-space:pre-wrap}
+/* AI 对话（多 Agent） */
+.chat-pickers{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.agent-chip{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1.5px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;font-size:14px;transition:border-color .15s}
+.agent-chip:hover{border-color:var(--blue)}
+.agent-chip.on{border-color:var(--blue);background:var(--blue-weak)}
+.agent-chip .ag-emoji{font-size:18px}
+.agent-chip .ag-name{font-weight:600}
+.agent-chip .ag-desc{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96px}
+.agent-chip .ag-star{color:var(--orange);font-size:12px;margin-left:auto;flex:none}
+.chat-log{max-height:420px;overflow-y:auto;padding:12px}
+.chat-log .empty{padding:20px 8px}
+.bubble{max-width:86%;margin-bottom:10px;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.bubble.ai{background:var(--blue-weak);border:1px solid var(--line)}
+.bubble.user{background:var(--green-weak);margin-left:auto}
+.bubble .b-meta{font-size:11px;color:var(--sub);margin-bottom:5px;display:flex;gap:8px;align-items:center}
+.bubble .b-ops{margin-top:8px;display:flex;gap:6px}
+@media (max-width:640px){
+  .grid2{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .today-item .btn,.hw-actions .btn{flex:1}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- ========== 侧边栏（参照 RoleWeave 区块） ========== -->
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v14.5a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 0 4 22V5.5Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8h8M8 12h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </div>
+      <div>
+        <h1>作业工作台</h1>
+        <div class="sub">学在城院 · hwdesk</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="overview" class="on"><span class="ico">🏠</span>总览</button>
+      <button data-view="capture"><span class="ico">📷</span>数据获取</button>
+      <button data-view="assets"><span class="ico">🗄️</span>数据资产</button>
+      <button data-view="workflow"><span class="ico">🧭</span>工作流</button>
+      <button data-view="chat"><span class="ico">💬</span>AI 对话</button>
+      <button data-view="approvals"><span class="ico">✅</span>审批</button>
+      <button data-view="actions"><span class="ico">⚡</span>行动</button>
+      <button data-view="insights"><span class="ico">📊</span>洞察</button>
+      <button data-view="settings"><span class="ico">⚙️</span>设置</button>
+    </nav>
+    <div class="sync" style="margin-top:16px"><span class="dot"></span><span id="syncText">本地模式</span></div>
+    <div class="hint" id="acctChip" style="text-align:center;margin-top:6px"></div>
+    <button class="btn sm danger-ghost" id="btnLogout" style="width:100%;margin-top:6px">🚪 退出登录</button>
+  </aside>
+
+  <main class="main">
+  <!-- ========== 1) 总览 ========== -->
+  <section class="view on" id="view-overview">
+    <div class="stats">
+      <div class="card stat"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
+      <div class="card stat"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内截止</div></div>
+      <div class="card stat"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
+      <div class="card stat"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
+    </div>
+
+    <div class="section-title">
+      <h2>今天要处理</h2>
+      <span class="hint">逾期标红 · 按 Laya 优先级排序</span>
+    </div>
+    <div class="card"><div id="todayBox"></div></div>
+
+    <div class="section-title">
+      <h2>作业看板</h2>
+      <button class="btn sm primary" id="btnAdd">＋ 添加作业</button>
+    </div>
+    <div class="card">
+      <div class="filter-row" id="filterRow"></div>
+      <div id="hwList"></div>
+      <div id="addForm">
+        <div class="grid2">
+          <div><label class="f">作业名称</label><input type="text" id="fName" placeholder="如：第二章作业"></div>
+          <div><label class="f">课程</label>
+            <select id="fCourse">
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div><label class="f">截止日期</label><input type="date" id="fDue"></div>
+          <div><label class="f">提交形式</label>
+            <select id="fType"><option>文件上传</option><option>线上作答</option><option>附件+报告</option></select></div>
+          <div><label class="f">复杂程度（Laya 决策参考）</label>
+            <select id="fDiff"><option value="auto">自动判断</option><option value="easy">简单</option><option value="medium">中等</option><option value="hard">困难</option></select></div>
+          <div><label class="f">交付格式（去AI化参考）</label>
+            <select id="fFormat"><option>文字</option><option>Word文档</option><option>PPT演示</option><option>PDF报告</option><option>其他</option></select></div>
+          <div class="full"><label class="f">备注 / AI 辅助要求</label><textarea id="fNote" placeholder="例：帮我完成课后思考3的推导，生成 PDF 后提交"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="btnCancel">取消</button>
+            <button class="btn primary" id="btnSave">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 2) 数据获取（学在城院平台采集） ========== -->
+  <section class="view" id="view-capture">
+    <div class="section-title">
+      <h2>数据获取 · 学在城院平台采集</h2>
+      <span class="hint">代理用你登录时保存的本机凭据（每人自己的账号）</span>
+    </div>
+    <div class="section-title"><h2>本机直连获取</h2><span class="hint">不用复制指令，一键把学在城院数据拉进工作台</span></div>
+    <div class="card" style="padding:14px">
+      <div class="grid2">
+        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnDirectSync" style="width:100%">⚡ 从学在城院一键获取</button></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn" id="btnDirectHealth" style="width:100%">检查本机服务状态</button></div>
+        <div class="full ai-note" id="directOut" style="display:none;margin:0;white-space:pre-wrap"></div>
+        <div class="full ai-note" style="margin:0">
+          <b>首次使用：</b>在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着），再点上面的按钮。
+          服务只监听本机 127.0.0.1:8765；页面用<b>登录门禁</b>保存的账号密码向<b>本机服务</b>发起登录采集，
+          密码不落盘、不写日志、不出本机。拉到的待办作业自动进作业库、已提交的自动进采集库留档，
+          之后的 Laya 决策与上下文简报会自动引用。服务没开时，仍可用下方「生成采集指令」由 AI 代理代采。
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:14px">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <button class="btn primary" id="btnSync" style="width:100%">🔄 一键同步学在城院（全部课程）</button>
+          <div class="hint" style="margin-top:6px" id="syncHint">上次同步：从未</div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div><label class="f">只拉某一门课（可选）</label>
+            <select id="capCourse">
+              <option>全部课程</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <button class="btn sm" id="btnCapGen" style="margin-top:6px;width:100%">📋 生成单课程采集指令（旧方式）</button>
+        </div>
+      </div>
+      <div class="full" style="margin-top:2px"><label style="font-size:12.5px"><input type="checkbox" id="ssoIncPw"> 采集指令中附带登录密码（仅发给本机代理时可见，默认只带账号）</label></div>
+      <div class="ai-note full" style="margin:10px 0 0">
+        点「一键同步」复制全平台同步指令 → 发给 AI 代理 → 把回报的 JSON 粘进「导入同步结果」，自动批量入库。
+      </div>
+      <div id="syncImportBox" style="display:none;margin-top:12px">
+        <label class="f">粘贴代理回报的 JSON</label>
+        <textarea id="syncPayload" style="min-height:120px" placeholder='{"courseware":[...],"assignments":[...],"grades":[...]}'></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn sm primary" id="btnSyncImport">📥 导入同步结果</button>
+          <button class="btn sm" id="btnSyncCancel">取消</button>
+        </div>
+        <div id="syncOut" class="risk-out" style="display:none;margin:10px 0 0"></div>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <h2>采集登记</h2>
+      <button class="btn sm" id="btnCap">＋ 登记采集结果</button>
+    </div>
+    <div class="card">
+      <div id="capBox"></div>
+      <div id="capForm">
+        <div class="grid2">
+          <div><label class="f">材料类型</label>
+            <select id="cKind"><option>课件</option><option>作业要求</option><option>历史作业</option><option>成绩单</option><option>其他</option></select></div>
+          <div><label class="f">所属课程</label>
+            <select id="cCourse">
+              <option>通用（所有课程可用）</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div class="full"><label class="f">标题</label><input type="text" id="cTitle" placeholder="如：第3章 Buck变换器课件（PPT）"></div>
+          <div class="full"><label class="f">内容摘要（代理回报的平台数据，供 AI 执行时参考）</label><textarea id="cNote" placeholder="如：讲义要求开关频率取 20kHz；历史作业《实验1》得了 95 分，老师批语强调误差分析…"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="cCancel">取消</button>
+            <button class="btn primary" id="cSave">保存到采集库</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 3) 数据资产（上下文库） ========== -->
+  <section class="view" id="view-assets">
+    <div class="section-title">
+      <h2>数据资产 · 上下文库（课件 / 作业要求 / 范文）</h2>
+      <button class="btn sm" id="btnMat">＋ 添加材料</button>
+    </div>
+    <div class="card">
+      <div id="matBox"></div>
+      <div id="matForm">
+        <div class="grid2">
+          <div><label class="f">材料类型</label>
+            <select id="mKind"><option>课件</option><option>作业要求</option><option>范文</option><option>其他</option></select></div>
+          <div><label class="f">所属课程</label>
+            <select id="mCourse">
+              <option>通用（所有课程可用）</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <div class="full"><label class="f">标题</label><input type="text" id="mTitle" placeholder="如：第3章 Buck变换器课件 / 实验报告格式要求"></div>
+          <div class="full"><label class="f">内容摘要（供 AI 执行时参考）</label><textarea id="mNote" placeholder="如：讲义里要求开关频率取 20kHz，报告需含波形图与误差分析…"></textarea></div>
+          <div class="full" style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="mCancel">取消</button>
+            <button class="btn primary" id="mSave">保存材料</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card ai-note" style="padding:14px;margin-top:10px">
+      <b>提示：</b>「数据获取」区块从学在城院采回的课件 / 历史作业摘要在任务决策中同样生效；此处适合登记你手工整理的材料。两处数据都会进入任务上下文简报。
+    </div>
+  </section>
+
+  <!-- ========== 4) 工作流（Laya 决策中心） ========== -->
+  <section class="view" id="view-workflow">
+    <div class="section-title">
+      <h2>工作流 · Laya 决策中心</h2>
+      <span class="hint">System-1 决策 · 紧急度 / 复杂度 / AI 路由 / 自动交付</span>
+    </div>
+    <div class="card">
+      <div id="layaBox"></div>
+      <div class="laya-ops">
+        <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划（直连 AI 执行）</button>
+        <span class="hint" id="layaPlanHint" style="align-self:center">决策后由不同 AI 分派执行，需自查的任务会暂停等你审核；成稿自动附去AI化要求与课程上下文</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 4.5) AI 对话（多 Agent） ========== -->
+  <section class="view" id="view-chat">
+    <div class="section-title">
+      <h2>AI 对话 · 多 Agent 协作</h2>
+      <span class="hint">选任务 → 选任意 AI（⭐ 为 Laya 推荐）→ 对话到满意 → 一键交付</span>
+    </div>
+    <div class="card" style="padding:12px">
+      <div class="chat-pickers">
+        <div style="flex:1;min-width:180px"><label class="f">任务</label>
+          <select id="chatTask"></select></div>
+        <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
+      </div>
+      <div class="f" style="margin:10px 0 6px">选择 AI Agent（可随时切换，对话跨 Agent 连续记录）</div>
+      <div id="agentGrid" class="agent-grid"></div>
+    </div>
+    <div class="card" style="padding:0">
+      <div id="chatLog" class="chat-log"></div>
+    </div>
+    <div class="card" style="padding:12px">
+      <textarea id="hubInput" placeholder="给所选 AI 的要求（可空，会自动附任务卡、Laya 决策、课件上下文与交付格式要求）。粘贴 AI 的回复进来则点「记录 AI 回复」存入对话。"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI</button>
+        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复</button>
+      </div>
+      <div class="hint" style="margin-top:8px">发送后到所选 AI 自己的窗口（网页版或客户端）粘贴发送；回复粘回上方输入框点「记录 AI 回复」。觉得效果满意时，点回复气泡上的「✅ 一键交付」。</div>
+    </div>
+  </section>
+
+  <!-- ========== 5) 审批 ========== -->
+  <section class="view" id="view-approvals">
+    <div class="section-title">
+      <h2>审批 · 待我自查的任务</h2>
+      <span class="hint">AI 出草稿 → 我审批 → 通过后自动交付</span>
+    </div>
+    <div class="card"><div id="approvalBox"></div></div>
+
+    <div class="section-title"><h2>审批记录</h2></div>
+    <div class="card"><div id="reviewBox"></div></div>
+  </section>
+
+  <!-- ========== 6) 行动 ========== -->
+  <section class="view" id="view-actions">
+    <div class="section-title">
+      <h2>行动 · 执行与交付</h2>
+      <span class="hint">按 Laya 执行计划分派 AI，完成后自动交付</span>
+    </div>
+    <div class="card ai-note" style="margin:0 0 10px">
+      <b>AI 一键提交 & Laya 决策怎么用？</b><br>
+      ① 「工作流」区块按<b>交付时间 / 紧急度 / 复杂度</b>排序待办并为每项任务推荐最合适的 AI，标记需你自查的任务；② 「数据获取 / 数据资产」登记<b>学在城院的课件、作业要求、历史作业</b>作为上下文，提高正确率；③ 「AI 对话」可跟<b>任意 AI（千问 / DeepSeek / Kimi / 豆包 / 即梦 / Qoder / Claude / WorkBuddy）</b>逐项讨论，回复满意后点气泡上「一键交付」；④ 点「生成执行计划」复制完整指令（含上下文简报 + <b>去AI化润色要求</b>）粘贴给 WorkBuddy，按计划分派执行并自动提交；⑤ 需自查的任务先出草稿，到「审批」区块确认后交付。
+    </div>
+    <div class="section-title"><h2>交付记录</h2><span class="hint">AI 代提交后自动写入</span></div>
+    <div class="card"><div id="subBox"></div></div>
+  </section>
+
+  <!-- ========== 7) 洞察 ========== -->
+  <section class="view" id="view-insights">
+    <div class="section-title">
+      <h2>洞察 · 去AI化风险自查</h2>
+      <span class="hint">交付前粘贴成稿，评估 AI 检测风险</span>
+    </div>
+    <div class="card" style="padding:14px">
+      <textarea id="rText" style="min-height:120px" placeholder="把 AI 生成的报告 / 答案粘贴到这里，检查套话密度与句式节奏…"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm primary" id="btnRisk">🔍 评估检测风险</button>
+      </div>
+      <div id="riskOut" class="risk-out" style="display:none"></div>
+    </div>
+
+    <div class="section-title"><h2>操作日志</h2></div>
+    <div class="card"><div id="logBox"></div></div>
+  </section>
+
+  <!-- ========== 8) 设置 ========== -->
+  <section class="view" id="view-settings">
+    <div class="section-title"><h2>AI 直连</h2><span class="hint">点「AI 代提交」直接派发给下面的 AI，不再经过 WorkBuddy</span></div>
+    <div class="card" style="padding:14px">
+      <label class="f" style="max-width:280px">默认执行 AI
+        <select id="selDefaultAi" style="width:100%"></select>
+      </label>
+      <p class="hint" style="margin:8px 0 0">
+        选「每次询问」时会弹出选择器；在弹出选择器里也可以点「设为默认」。
+        直连方式 = 自动复制指令 + 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
+        「WorkBuddy（本地代理）」保留旧流程：可代登录学在城院完成提交。
+      </p>
+    </div>
+    <div class="section-title"><h2>Agent 对话 API</h2><span class="hint">作业卡「💬 对话」直连大模型，Key 只存本机 localStorage</span></div>
+    <div class="card" style="padding:14px">
+      <div style="display:grid;gap:10px;max-width:520px">
+        <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
+          <span class="hint" id="agHint"></span></div>
+        <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
+        <div><label class="f">API Key（只写本机，不进页面源码、不上传）</label><input type="password" id="agKey" placeholder="sk-...">
+          <span class="hint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
+        <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
+      </div>
+      <p class="hint" style="margin:8px 0 0">浏览器直连第三方接口可能被 CORS 拦；被拦时改用本机代理网关，或在设置里填自建网关地址。</p>
+      <footer class="ops" style="margin:12px 0 0">
+        <button class="btn sm primary" id="agSave">保存配置</button>
+      </footer>
+    </div>
+    <div class="section-title"><h2>数据管理</h2></div>
+    <div class="card" style="padding:14px">
+      <footer class="ops" style="margin:0">
+        <button class="btn sm" id="btnExport">导出 JSON 备份</button>
+        <button class="btn sm" id="btnImportBtn">导入恢复</button>
+        <input type="file" id="btnImport" accept=".json" style="display:none">
+        <button class="btn sm danger-ghost" id="btnClearDemo">清空全部数据</button>
+      </footer>
+    </div>
+    <div class="section-title"><h2>关于决策模型</h2></div>
+    <div class="card ai-note" style="margin:0">
+      <b>Laya 决策参数</b>（详见 README 与 laya.js）：<br>
+      · 优先级 = 45% 紧急度 + 25% 时间压力 + 18% 复杂度 + 12% 交付物风险，逾期 +8<br>
+      · 行动阈值 act = 0.625（与 Laya act/escalate 头一致），路由置信度低于阈值强制升级学生自查<br>
+      · AI 注册表：深度推理 / 写作 / 快速作答 / 代码 / 润色 / 格式工具<br>
+      · Agent Hub（agents.js）：千问 / WorkBuddy / 即梦 / DeepSeek / Kimi / 豆包 / Qoder / Claude 任意选择，对话到满意后一键交付<br>
+      · 数据库：作业库 / 材料库（旧键兼容）+ 采集库 / 交付库 / 审批库 / 对话库（db.js 管理）<br>
+      · 页面不含任何账号密码；真实凭据只在你本机的 AI 代理里，不写入本页面、不部署上公网。
+    </div>
+  </section>
+  </main>
+</div>
+<!-- AI 直连选择器（点「AI 代提交」且未设默认时弹出） -->
+<div class="ai-picker-mask" id="aiPicker" style="display:none">
+  <div class="ai-picker">
+    <div class="ai-picker-title">选择执行 AI <span class="hint" id="aiPickerFor"></span></div>
+    <div id="aiPickerList"></div>
+    <div style="text-align:right;margin-top:10px">
+      <button class="btn sm" id="aiPickerCancel">取消</button>
+    </div>
+  </div>
+</div>
+<style>
+  .ai-picker-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:flex;align-items:center;justify-content:center}
+  .ai-picker{background:#fff;border-radius:12px;padding:18px;width:min(420px,92vw);max-height:80vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .ai-picker-title{font-weight:600;margin-bottom:10px}
+  .ai-pick-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+  .ai-pick-item:hover{border-color:var(--pri,#6c5ce7);background:#f4f1ff}
+  .ai-pick-item b{font-size:14px}
+  .ai-pick-item .hint{display:block}
+</style>
+<!-- 作业 Agent 对话抽屉：每个作业独立对话，成稿后直接通过工作台提交 -->
+<div class="chat-mask" id="chatPanel" style="display:none">
+  <div class="chat-drawer">
+    <div class="chat-head">
+      <div style="min-width:0"><b id="chatTitle">作业</b><div class="hint" id="chatSub"></div></div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn sm" id="chatClear">清空对话</button>
+        <button class="btn sm" id="chatClose">关闭</button>
+      </div>
+    </div>
+    <div id="chatSetup" style="display:none;padding:12px 16px;border-bottom:1px solid #eef0f4;background:#fffdf5">
+      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认走云端通道（免配置，点开即聊）。想用你自己的模型服务时才填这里：选接口 → 填 API Key（只存本机 localStorage，不上传），保存后这里会消失</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:1;min-width:130px">接口<select id="csPreset"></select></label>
+        <label class="f" style="flex:2;min-width:190px">API Key<input type="password" id="csKey" autocomplete="off" placeholder="sk-…"></label>
+        <label class="f" style="flex:1;min-width:150px">模型<input type="text" id="csModel"></label>
+        <button class="btn sm primary" id="csSave">保存并开聊</button>
+      </div>
+    </div>
+    <div class="chat-msgs" id="chatMsgs"></div>
+    <div class="chat-risk" id="chatRisk" style="display:none"></div>
+    <div class="chat-foot">
+      <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn sm primary" id="chatSubmit">📤 用最终结果提交</button>
+        <button class="btn sm" id="chatSend">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .chat-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80;display:flex;justify-content:flex-end}
+  .chat-drawer{background:#fff;width:min(560px,96vw);height:100vh;display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,.25)}
+  .chat-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #eef0f4}
+  .chat-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fb}
+  .chat-b{max-width:86%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+  .chat-b.user{align-self:flex-end;background:var(--pri,#2f6bff);color:#fff;border-bottom-right-radius:4px}
+  .chat-b.assistant{align-self:flex-start;background:#fff;border:1px solid #e8eaf0;border-bottom-left-radius:4px}
+  .chat-b.assistant.thinking{color:#98a0b3}
+  .chat-foot{border-top:1px solid #eef0f4;padding:12px 16px;background:#fff}
+  .chat-foot textarea{width:100%;min-height:70px;resize:vertical}
+  .chat-risk{margin:0 16px;padding:8px 12px;background:#fff8ec;border:1px solid #f2dfb6;border-radius:8px;font-size:12.5px;white-space:pre-wrap}
+</style>
+<!-- 登录门禁：未登录学在城院账号不能进入工作台 -->
+<div class="login-mask" id="loginGate" style="display:none">
+  <div class="login-card">
+    <div class="brand" style="justify-content:center;margin-bottom:6px">
+      <div class="logo" style="width:38px;height:38px;border-radius:10px;background:var(--blue);display:flex;align-items:center;justify-content:center">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="6" height="14" fill="#fff"/><rect x="13" y="5" width="6" height="14" fill="#fff"/><rect x="3" y="21" width="18" height="2" fill="#fff"/></svg>
+      </div>
+    </div>
+    <h2 style="text-align:center;font-size:18px">作业提交工作台 · 学在城院</h2>
+    <p class="hint" style="text-align:center;margin:6px 0 14px">请登录你的学在城院账号后进入；凭据只存你自己的浏览器本机，不进仓库、不上传</p>
+    <label class="f">学号 / 账号<input type="text" id="lgAccount" autocomplete="off" placeholder="学在城院登录账号"></label>
+    <label class="f" style="margin-top:10px">密码<input type="password" id="lgPassword" autocomplete="new-password" placeholder="密码（只写进本机存储）"></label>
+    <label class="f" style="margin-top:10px">保存方式
+      <select id="lgMode">
+        <option value="session">仅本次（关浏览器即忘）</option>
+        <option value="local">记住到本机（下次免登录）</option>
+      </select>
+    </label>
+    <button class="btn primary" id="btnLogin" style="width:100%;margin-top:14px">登录进入工作台</button>
+    <p class="hint" style="margin:10px 0 0">代理采集 / 提交时使用这份凭据登录学在城院；团队每人登自己的账号，退出登录即清除本机凭据。</p>
+  </div>
+</div>
+<style>
+  .login-mask{position:fixed;inset:0;background:var(--bg);z-index:200;display:flex;align-items:center;justify-content:center}
+  .login-card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(20,30,60,.10);padding:26px 24px;width:min(380px,92vw)}
+  .login-card .f input,.login-card .f select{width:100%}
+</style>
+<div class="toast" id="toast"></div>
+
+<script src="bridge.js"></script>
+<script src="agent.js"></script>
+<script src="laya.js"></script>
+<script src="humanize.js"></script>
+<script src="db.js"></script>
+<script src="sso.js"></script>
+<script src="agents.js"></script>
+<script src="workbuddy-cloud.js"></script>
+<script src="cloudai.js"></script>
+<script src="sync.js"></script>
+<script src="platform.js"></script>
+<script>
+"use strict";
+/* ---------- 数据层 ---------- */
+var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
+var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null } };
+
+/* Agent Hub 钩子：页面把 laya/humanize 能力注入 agents.js（引擎间零依赖） */
+function agentHooks(){
+  var hooks = {};
+  if(typeof Laya !== "undefined"){
+    hooks.routeFor = function(item){ return Laya.routeAI(item); };
+    hooks.analyzeFor = function(item){ return Laya.analyze(item); };
+  }
+  if(typeof ContextKit !== "undefined"){
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    hooks.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials.concat(caps)).brief; };
+  }
+  if(typeof Humanize !== "undefined"){
+    hooks.humanizeFor = function(item){ return Humanize.checklist(item); };
+  }
+  return hooks;
+}
+
+function loadState(){
+  try{
+    state.items = JSON.parse(localStorage.getItem(LS_KEY) || "null") || seedItems();
+  }catch(e){ state.items = seedItems(); }
+  /* 数据迁移：旧数据补默认字段，Laya 引擎对缺字段同样有兜底 */
+  state.items.forEach(function(it){
+    if(!it.difficulty) it.difficulty = "auto";
+    if(!it.format) it.format = "文字";
+  });
+  try{ state.logs = JSON.parse(localStorage.getItem(LS_LOG) || "[]"); }catch(e){ state.logs = []; }
+  try{ state.materials = JSON.parse(localStorage.getItem(LS_MAT) || "[]") || []; }catch(e){ state.materials = []; }
+}
+function saveState(){
+  localStorage.setItem(LS_KEY, JSON.stringify(state.items));
+  localStorage.setItem(LS_LOG, JSON.stringify(state.logs));
+  localStorage.setItem(LS_MAT, JSON.stringify(state.materials));
+}
+function seedItems(){
+  var today = new Date();
+  function d(offset){ var t=new Date(today); t.setDate(t.getDate()+offset); return t.toISOString().slice(0,10); }
+  var seed = [
+    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false, difficulty:"auto", format:"Word文档" },
+    { id:2, name:"课后思考3 推导题",  course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true, difficulty:"hard", format:"PDF报告" },
+    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false, difficulty:"medium", format:"Word文档" },
+    { id:4, name:"课堂练习-3 选择填空", course:"电机与拖动",         due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false, difficulty:"easy", format:"文字" }
+  ];
+  localStorage.setItem(LS_SEED, "1");
+  return seed;
+}
+function uid(){ return Date.now() % 100000000 + Math.floor(Math.random()*1000); }
+function fmtDate(s){
+  if(!s) return "无期限";
+  var p = s.split("-");
+  return p[1] + "月" + parseInt(p[2],10) + "日";
+}
+function dayDiff(due){
+  var t = new Date(); t.setHours(0,0,0,0);
+  var p = (due||"").split("-"); if(p.length!==3) return null;
+  var d2 = new Date(+p[0], +p[1]-1, +p[2]);
+  return Math.round((d2 - t) / 86400000);
+}
+function dueText(it){
+  var n = dayDiff(it.due);
+  if(n === null) return "无期限";
+  if(n < 0)  return "逾期 " + (-n) + " 天";
+  if(n === 0) return "今天截止";
+  if(n === 1) return "明天截止";
+  return "还剩 " + n + " 天";
+}
+
+/* ---------- 计算层（纯函数，不碰 DOM） ---------- */
+function todayItems(){
+  var out = [];
+  state.items.forEach(function(it){
+    if(it.status === "todo" || it.status === "review"){
+      var n = dayDiff(it.due);
+      if(n !== null && n <= 3) out.push(it);           // 逾期、今天、3天内
+    }
+  });
+  if(typeof Laya !== "undefined"){
+    /* Laya 决策：紧急度 + 复杂度 + 时间压力综合排序（替代纯日期排序） */
+    out.sort(function(a,b){ return Laya.analyze(b).priority - Laya.analyze(a).priority; });
+  }else{
+    out.sort(function(a,b){ return dayDiff(a.due) - dayDiff(b.due); });
+  }
+  return out;
+}
+function filteredItems(){
+  var f = state.filter;
+  return state.items.slice().sort(function(a,b){
+    var da = a.status!=="submitted" ? (dayDiff(a.due)===null?9999:dayDiff(a.due)) : 99999;
+    var db = b.status!=="submitted" ? (dayDiff(b.due)===null?9999:dayDiff(b.due)) : 99999;
+    return da - db;
+  }).filter(function(it){
+    if(f === "all") return true;
+    if(f === "todo") return it.status !== "submitted";
+    if(f === "overdue") return it.status !== "submitted" && dayDiff(it.due) < 0;
+    return it.status === "submitted";
+  });
+}
+function stats(){
+  var s = { overdue:0, week:0, done:0, review:0 };
+  state.items.forEach(function(it){
+    if(it.status === "submitted"){ s.done++; return; }
+    var n = dayDiff(it.due);
+    if(n !== null && n < 0) s.overdue++;
+    if(n !== null && n >= 0 && n <= 7) s.week++;
+    if(typeof Laya !== "undefined" && Laya.analyze(it).review.needed) s.review++;
+  });
+  return s;
+}
+
+/* ---------- 渲染层（只渲染，不互相调用） ---------- */
+var ICO = {
+  clock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="#e08a00" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="#e08a00" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  check: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="#1a9e5c" stroke-width="1.8"/><path d="M8.5 12.2l2.4 2.4 4.6-5" stroke="#1a9e5c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  sent:  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-7-4 14-5-4-3 3-1-6z" stroke="#2f6bff" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  spark: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5 12 3z" fill="#2f6bff"/></svg>'
+};
+function el(id){ return document.getElementById(id); }
+function renderToday(){
+  var box = el("todayBox"), list = todayItems();
+  if(!list.length){ box.innerHTML = '<div class="empty">最近 3 天没有要处理的作业，安心自习 ✓</div>'; return; }
+  var html = "";
+  list.forEach(function(it){
+    var n = dayDiff(it.due);
+    var cls = n < 0 ? "overdue" : (n === 0 ? "today" : "soon");
+    var lab = n < 0 ? "逾期" : (n === 0 ? "今天" : "临期");
+    html += '<div class="today-item">'
+      + '<span class="badge ' + cls + '">' + lab + '</span>'
+      + '<div class="t-info"><div class="t-name">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
+      + '<div class="t-meta">' + esc(it.course) + ' · ' + dueText(it) + '</div></div>'
+      + '<button class="btn sm" data-chat="' + it.id + '">💬 对话</button>'
+      + '<button class="btn sm primary" data-ai="' + it.id + '">AI 代提交</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+function renderFilters(){
+  var defs = [["all","全部"],["todo","待完成"],["overdue","逾期"],["submitted","已提交"]];
+  var html = "";
+  defs.forEach(function(d){
+    html += '<button class="chip' + (state.filter===d[0]?" on":"") + '" data-f="' + d[0] + '">' + d[1] + '</button>';
+  });
+  el("filterRow").innerHTML = html;
+}
+function renderList(){
+  var box = el("hwList"), list = filteredItems();
+  if(!list.length){ box.innerHTML = '<div class="empty">暂无作业，点右上角「＋ 添加作业」</div>'; return; }
+  var html = "";
+  list.forEach(function(it){
+    var ico = it.status==="submitted" ? ICO.sent : ICO.clock;
+    var n = dayDiff(it.due);
+    var overdue = it.status!=="submitted" && n!==null && n<0;
+    var dtext = dueText(it);
+    if(overdue) dtext = '<span style="color:var(--red);font-weight:600">' + dtext + '</span>';
+    var acts = "";
+    if(it.status !== "submitted"){
+      acts += '<button class="btn sm primary" data-ai="' + it.id + '">AI 代提交</button>';
+      acts += '<button class="btn sm" data-done="' + it.id + '">手动标已完成</button>';
+    }else{
+      acts += '<button class="btn sm" data-undo="' + it.id + '">撤回为待办</button>';
+    }
+    acts += '<button class="btn sm danger-ghost" data-del="' + it.id + '">删除</button>';
+    html += '<div class="hw-item">'
+      + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
+      + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
+      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
+      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
+      + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
+      + '<div class="hw-actions">' + acts + '</div></div></div>';
+  });
+  box.innerHTML = html;
+}
+function renderStats(){
+  var s = stats();
+  el("stOverdue").textContent = s.overdue;
+  el("stWeek").textContent = s.week;
+  el("stReview").textContent = s.review;
+  el("stDone").textContent = s.done;
+}
+/* Laya 决策中心：待办 → 优先级排序 + AI 路由 + 自查标记 */
+function renderLaya(){
+  var box = el("layaBox");
+  if(typeof Laya === "undefined"){
+    box.innerHTML = '<div class="empty">laya.js 未加载，决策中心不可用</div>';
+    return;
+  }
+  var ranked = Laya.rank(state.items);
+  if(!ranked.length){ box.innerHTML = '<div class="empty">没有待决策的作业，添加后自动排优先级</div>'; return; }
+  var html = "";
+  ranked.forEach(function(d, i){
+    var urgCls = d.urgency.level >= 3 ? "rv" : (d.urgency.level === 2 ? "cx" : "ok");
+    /* 去AI化润色徽章（humanize.js 加载后可用） */
+    var hBadge = "";
+    if(typeof Humanize !== "undefined"){
+      var hv = Humanize.levelFor(d.item);
+      if(hv.level === "strict") hBadge = '<span class="tag rv">🧑‍🎓 需严格润色降AI率</span>';
+      else if(hv.level === "light") hBadge = '<span class="tag cx">✍️ 轻度润色</span>';
+    }
+    html += '<div class="laya-item">'
+      + '<div class="laya-row">'
+      + '<span class="laya-rank">' + (i + 1) + '</span>'
+      + '<div class="t-info" style="flex:1;min-width:0"><div class="t-name">' + esc(d.item.name) + '</div>'
+      + '<div class="t-meta">' + esc(d.item.course) + ' · ' + dueText(d.item) + ' · 交付 ' + esc(d.item.format || "文字") + '</div></div>'
+      + '<div class="laya-pbar"><i style="width:' + d.priority + '%"></i></div>'
+      + '<span class="laya-pnum">' + d.priority + ' 分</span>'
+      + '<button class="btn sm primary" data-laya="' + d.item.id + '">按方案执行</button>'
+      + '</div>'
+      + '<div class="laya-tags">'
+      + '<span class="tag ' + urgCls + '">' + esc(d.urgency.label) + '</span>'
+      + '<span class="tag cx">' + esc(d.complexity.label) + '</span>'
+      + '<span class="tag ai">🤖 ' + esc(d.route.label) + ' · 置信度 ' + Math.round(d.route.confidence * 100) + '%</span>'
+      + hBadge
+      + (d.review.needed ? '<span class="tag rv">⛔ 需我自查</span>' : '<span class="tag ok">✅ 可自动交付</span>')
+      + '</div>'
+      + '<div class="laya-why">' + esc(d.reasons.join("；")) + '</div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 上下文库渲染 */
+function renderMaterials(){
+  var box = el("matBox");
+  if(!state.materials.length){
+    box.innerHTML = '<div class="empty">还没有材料。把学在城院上的课件、作业要求、已认可的范文摘要添加进来，AI 执行任务时会自动作为上下文参考</div>';
+    return;
+  }
+  var html = "";
+  state.materials.forEach(function(m){
+    html += '<div class="mat-item">'
+      + '<span class="mat-kind">' + esc(m.kind) + '</span>'
+      + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
+      + '<div class="mat-meta">' + esc(m.course) + ' · 添加于 ' + esc(m.time || "-") + '</div>'
+      + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
+      + '</div>'
+      + '<button class="btn sm danger-ghost" data-mat-del="' + m.id + '">删除</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 采集库渲染 */
+function renderCaptures(){
+  var box = el("capBox");
+  var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+  if(!caps.length){
+    box.innerHTML = '<div class="empty">还没有采集记录。点上方「生成采集指令」让 AI 代理从学在城院拉取课件与历史作业，再把摘要登记进来</div>';
+    return;
+  }
+  var html = "";
+  caps.forEach(function(m){
+    html += '<div class="mat-item">'
+      + '<span class="mat-kind">' + esc(m.kind) + '</span>'
+      + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
+      + '<div class="mat-meta">' + esc(m.course) + ' · 采集于 ' + esc(m.time || "-") + '</div>'
+      + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
+      + '</div>'
+      + '<button class="btn sm danger-ghost" data-cap-del="' + m.id + '">删除</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* AI 对话：任务下拉 */
+function renderChatTasks(){
+  if(typeof AgentHub === "undefined") return;
+  var sel = el("chatTask");
+  var todos = state.items.filter(function(it){ return it.status === "todo"; });
+  var html = "";
+  if(!todos.length){
+    html = '<option value="">（没有待办任务，先添加作业）</option>';
+  }else{
+    todos.forEach(function(it){
+      html += '<option value="' + it.id + '">' + esc(it.name) + '（' + esc(it.course) + '）</option>';
+    });
+  }
+  sel.innerHTML = html;
+  /* 保持选择；失效则选第一项 */
+  if(todos.length){
+    var has = todos.some(function(it){ return it.id === state.chat.taskId; });
+    if(!has) state.chat.taskId = todos[0].id;
+    sel.value = String(state.chat.taskId);
+  }else{
+    state.chat.taskId = null;
+  }
+}
+/* AI 对话：Agent 网格（⭐ = Laya 推荐） */
+function renderAgentGrid(){
+  if(typeof AgentHub === "undefined"){ el("agentGrid").innerHTML = '<div class="empty">agents.js 未加载</div>'; return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  var recs = it ? AgentHub.recommend(it, agentHooks()) : Object.keys(AgentHub.REGISTRY).map(function(k){
+    return { id: k, agent: AgentHub.REGISTRY[k], score: 0, reasons: [], recommended: false };
+  });
+  /* 默认选推荐位 */
+  if(!state.chat.agentId || !AgentHub.REGISTRY[state.chat.agentId]) state.chat.agentId = recs[0].id;
+  var html = "";
+  recs.forEach(function(r){
+    html += '<div class="agent-chip' + (r.id === state.chat.agentId ? " on" : "") + '" data-agent="' + r.id + '">'
+      + '<span class="ag-emoji">' + r.agent.emoji + '</span>'
+      + '<div style="min-width:0"><div class="ag-name">' + esc(r.agent.label) + '</div>'
+      + '<div class="ag-desc">' + esc(r.agent.desc) + '</div></div>'
+      + (r.recommended ? '<span class="ag-star">⭐</span>' : "")
+      + '</div>';
+  });
+  el("agentGrid").innerHTML = html;
+}
+/* AI 对话：气泡对话记录（user 右 / ai 左，AI 回复可一键交付） */
+function renderChatLog(){
+  var box = el("chatLog");
+  if(typeof AgentHub === "undefined"){ box.innerHTML = ""; return; }
+  if(!state.chat.taskId){ box.innerHTML = '<div class="empty">选择任务后开始与 AI 对话</div>'; return; }
+  var rec = AgentHub.chat(state.chat.taskId);
+  if(!rec || !rec.turns.length){
+    box.innerHTML = '<div class="empty">还没有对话。选好 AI，输入要求点「发送」，把提示词粘到该 AI 的窗口，回复粘回来记录</div>';
+    return;
+  }
+  var html = "";
+  rec.turns.forEach(function(t, i){
+    var who = t.role === "user"
+      ? '<span class="b-meta">🙋 我 → ' + esc(t.agentLabel || t.agent || "AI") + ' · ' + esc(t.time || "") + '</span>'
+      : '<span class="b-meta">🤖 ' + esc(t.agentLabel || t.agent || "AI") + ' 回复 · ' + esc(t.time || "") + '</span>';
+    var ops = t.role === "ai"
+      ? '<div class="b-ops"><button class="btn sm primary" data-deliver="' + i + '">✅ 一键交付（满意后用）</button></div>'
+      : "";
+    html += '<div class="bubble ' + (t.role === "user" ? "user" : "ai") + '">'
+      + who + esc(t.text) + ops + '</div>';
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+/* 审批队列 + 审批记录 */
+function renderApprovals(){
+  var box = el("approvalBox");
+  var pend = (typeof DB !== "undefined") ? DB.list("submissions").filter(function(s){ return s.status === "pending"; }) : [];
+  if(!pend.length){
+    box.innerHTML = '<div class="empty">没有待审批的交付。AI 完成需自查的任务后，草稿会出现在这里等你确认</div>';
+    return;
+  }
+  var html = "";
+  pend.forEach(function(s){
+    var dispatched = s.stage === "dispatched";
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:var(--red-weak);color:var(--red)">' + (dispatched ? "待执行" : "待审") + '</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
+      + '<div class="sub-meta">' + esc(s.course) + ' · 执行AI：' + esc(s.ai || "-") + (s.risk != null ? ' · 检测风险 ' + s.risk : '') + ' · ' + esc(s.time || "-") + '</div></div>'
+      + '<button class="btn sm primary" data-appr="' + s.id + '">' + (dispatched ? "确认已提交" : "通过并交付") + '</button>'
+      + '<button class="btn sm danger-ghost" data-reject="' + s.id + '">退回修改</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+function renderReviews(){
+  var box = el("reviewBox");
+  var revs = (typeof DB !== "undefined") ? DB.list("reviews") : [];
+  if(!revs.length){ box.innerHTML = '<div class="empty">还没有审批记录</div>'; return; }
+  var html = "";
+  revs.forEach(function(r){
+    var ok = r.decision === "approved";
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:' + (ok?"var(--green-weak);color:var(--green)":"var(--red-weak);color:var(--red)") + '">' + (ok?"通过":"退回") + '</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(r.name) + '</div>'
+      + '<div class="sub-meta">' + (r.note ? esc(r.note) + " · " : "") + esc(r.time || "-") + '</div></div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+/* 交付记录 */
+function renderSubmissions(){
+  var box = el("subBox");
+  var subs = (typeof DB !== "undefined") ? DB.list("submissions") : [];
+  if(!subs.length){ box.innerHTML = '<div class="empty">还没有交付记录</div>'; return; }
+  var stMap = { pending: ["待审","var(--orange-weak)","var(--orange)"], submitted: ["已交付","var(--green-weak)","var(--green)"], changes: ["已退回","var(--red-weak)","var(--red)"] };
+  var html = "";
+  subs.forEach(function(s){
+    var st = stMap[s.status] || stMap.pending;
+    if(s.status === "pending" && s.stage === "dispatched") st = ["待执行", st[1], st[2]];
+    html += '<div class="sub-row">'
+      + '<span class="mat-kind" style="background:' + st[1] + ';color:' + st[2] + '">' + st[0] + '</span>'
+      + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
+      + '<div class="sub-meta">' + esc(s.course) + ' · 执行AI：' + esc(s.ai || "-") + ' · ' + esc(s.time || "-") + '</div></div>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+function renderLogs(){
+  var box = el("logBox");
+  if(!state.logs.length){ box.innerHTML = '<div class="empty">还没有操作记录</div>'; return; }
+  var html = "";
+  state.logs.forEach(function(lg){
+    html += '<div class="log-item"><div>' + esc(lg.text) + '</div><div class="lt">' + esc(lg.time) + '</div></div>';
+  });
+  box.innerHTML = html;
+}
+function renderSync(){
+  el("syncText").textContent = "本地模式 · 数据存本机";
+}
+function esc(s){
+  return String(s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];
+  });
+}
+/* 统一刷新入口：按固定顺序调用各渲染函数，渲染函数之间零互调 */
+function refreshAll(){
+  renderToday();
+  renderLaya();
+  renderChatTasks();
+  renderAgentGrid();
+  renderChatLog();
+  renderMaterials();
+  renderCaptures();
+  renderApprovals();
+  renderReviews();
+  renderSubmissions();
+  renderStats();
+  renderLogs();
+  renderSyncHint();
+  renderSync();
+}
+/* 视图切换（侧边栏多区块） */
+function switchView(v){
+  state.view = v;
+  var btns = el("nav").querySelectorAll("button");
+  for(var i=0;i<btns.length;i++) btns[i].classList.toggle("on", btns[i].getAttribute("data-view") === v);
+  var views = document.querySelectorAll(".view");
+  for(var j=0;j<views.length;j++) views[j].classList.toggle("on", views[j].id === "view-" + v);
+  window.scrollTo(0, 0);
+}
+
+/* ---------- 交互层：改数据 → saveState → refreshAll ---------- */
+function showToast(msg){
+  var t = el("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(function(){ t.classList.remove("show"); }, 2200);
+}
+function nowStr(){
+  var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
+  return n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes());
+}
+function addLog(text){
+  var n = new Date();
+  var pad = function(x){ return (x<10?"0":"") + x; };
+  state.logs.unshift({ text:text, time: n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes()) });
+  if(state.logs.length > 50) state.logs.pop();
+}
+function findItem(id){
+  for(var i=0;i<state.items.length;i++) if(state.items[i].id === id) return state.items[i];
+  return null;
+}
+function onAiSubmit(id){
+  var it = findItem(id);
+  if(!it) return;
+  var cmd = "请提交我的作业：" + it.name + "（" + it.course + "，截止 " + it.due + "）到学在城院";
+  var needsReview = false, routeLabel = "";
+  if(typeof Laya !== "undefined"){
+    /* Laya 决策结果写进指令：推荐 AI + 是否自动交付 / 需学生审核 */
+    var d = Laya.analyze(it);
+    needsReview = d.review.needed;
+    routeLabel = d.route.label;
+    cmd += "。Laya 决策：优先级 " + d.priority + "（" + d.urgency.label + "，" + d.complexity.label + "）"
+      + "，建议由「" + d.route.label + "」完成（置信度 " + Math.round(d.route.confidence * 100) + "%）";
+    cmd += needsReview
+      ? "；该任务需要我先自查审核，请先生成草稿给我确认后再交付。"
+      : "；该任务可直接自动交付，完成后回报结果。";
+  }else{
+    cmd += "，完成后回报结果。";
+  }
+  /* 上下文简报：材料库 + 平台采集库 + 同课程历史（提高正确率 + 贴合文风） */
+  if(typeof ContextKit !== "undefined"){
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    var pack = ContextKit.pack(it, state.items, state.materials.concat(caps));
+    if(pack.brief) cmd += "\n\n" + pack.brief;
+  }
+  /* 去AI化要求：交付格式对应的润色指令 + 交付前自查 */
+  if(typeof Humanize !== "undefined"){
+    var cl = Humanize.checklist(it);
+    if(cl) cmd += "\n\n" + cl;
+  }
+  /* AI 派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器；带上任务 id 供内嵌对话直连） */
+  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name, it.id);
+  it.ai = true;
+  /* 交付记录：复制指令 ≠ 已提交 → 一律 pending。
+   * stage：直连网页 AI / 需自查 → review（待自查），WorkBuddy copy 流程 → dispatched（待执行）；
+   * 拿到平台回执后到「审批」点「确认已提交」才置 submitted */
+  if(plan && plan.action === "agent-chat"){
+    /* 选择器点了支持 API 直连的 AI：已转入工作台内嵌对话，
+       交付记录由对话抽屉「用最终结果提交」负责，这里不再重复记 */
+  }else{
+    var viaWebAi = !plan || plan.action !== "copy";
+    recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
+    addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
+      + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
+  }
+  saveState();
+  refreshAll();
+}
+/* ---------- AI 派发（bridge.js）：API 直连的走工作台内嵌对话，其余复制指令 + 打开对应 AI 网页 ---------- */
+function dispatchToAi(cmd, category, taskName, taskId){
+  if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
+  var pick = Bridge.pick(category || "");
+  if(pick.source === "none"){ openAiPicker(cmd, category, taskName, taskId); return { action: "picker" }; }
+  /* 默认/自动匹配到支持 API 直连的 AI 且带任务上下文：与选择器路径一致，转工作台内嵌对话，不跳网页 */
+  if(taskId && typeof Agent !== "undefined" && Agent.PRESETS[pick.ai]){
+    Agent.applyPreset(pick.ai);
+    addLog("Agent 直连对话：" + taskName + " → " + Agent.PRESETS[pick.ai].label);
+    onChatOpen(taskId);
+    return { action: "agent-chat" };
+  }
+  return doDispatch(Bridge.describe(pick), cmd, taskName);
+}
+function doDispatch(plan, cmd, taskName){
+  showToast("正在派发给 " + plan.label + "…");
+  copyText(cmd);
+  if(plan.action === "open+copy"){ window.open(plan.url, "_blank"); }
+  showToast(Bridge.toastText(plan));
+  addLog("AI 直连派发：" + taskName + " → " + plan.label);
+  return plan;
+}
+var _pickerCtx = null;
+function openAiPicker(cmd, category, taskName, taskId){
+  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "", taskId: taskId || null };
+  var catLabel = (category && typeof Laya !== "undefined" && Laya.AI_REGISTRY[category])
+    ? Laya.AI_REGISTRY[category].label : "通用";
+  el("aiPickerFor").textContent = "（" + catLabel + " · " + taskName + "）";
+  var html = "";
+  Bridge.ORDER.forEach(function(id){
+    var ai = Bridge.AI[id];
+    html += '<div class="ai-pick-item" data-ai="' + id + '" role="button" tabindex="0">'
+      + '<span><b>' + esc(ai.label) + '</b><span class="hint">' + esc(ai.desc) + '</span></span>'
+      + '<button class="btn sm" type="button" data-setdef="' + id + '">设为默认</button></div>';
+  });
+  el("aiPickerList").innerHTML = html;
+  el("aiPicker").style.display = "flex";
+}
+function closeAiPicker(){ el("aiPicker").style.display = "none"; _pickerCtx = null; }
+function confirmAiPick(id, makeDefault){
+  if(!_pickerCtx) return;
+  var ctx = _pickerCtx;
+  if(makeDefault){
+    Bridge.setPref("defaultAi", id);
+    refreshDefaultAiSelect();
+    addLog("已设默认执行 AI：" + Bridge.AI[id].label);
+  }
+  closeAiPicker();
+  /* 支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）：不再跳网页，
+     直接切到该 Agent 并打开工作台内嵌对话，聊出成稿后「用最终结果提交」 */
+  if(ctx.taskId && typeof Agent !== "undefined" && Agent.PRESETS[id]){
+    Agent.applyPreset(id);
+    addLog("Agent 直连对话：" + ctx.taskName + " → " + Agent.PRESETS[id].label);
+    onChatOpen(ctx.taskId);
+    return;
+  }
+  doDispatch(Bridge.describe({ ai: id }), ctx.cmd, ctx.taskName);
+}
+/* 设置页：默认执行 AI 下拉（含「每次询问」） */
+function refreshDefaultAiSelect(){
+  var sel = el("selDefaultAi");
+  if(!sel) return;
+  var html = '<option value="">每次询问（弹选择器）</option>';
+  Bridge.ORDER.forEach(function(id){
+    html += '<option value="' + id + '">' + esc(Bridge.AI[id].label) + '</option>';
+  });
+  sel.innerHTML = html;
+  Bridge.load();
+  sel.value = Bridge.prefs.defaultAi || "";
+}
+/* ---------- 作业 Agent 对话（agent.js + OpenAI 兼容 API） ---------- */
+var _chatId = null, _chatBusy = false, _chatRiskScore = null;
+function buildAgentCtx(it){
+  var ctx = {};
+  if(typeof Laya !== "undefined") ctx.decision = Laya.analyze(it);
+  if(typeof ContextKit !== "undefined"){
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    ctx.contextBrief = ContextKit.pack(it, state.items, state.materials.concat(caps)).brief;
+  }
+  if(typeof Humanize !== "undefined") ctx.humanizeChecklist = Humanize.checklist(it);
+  return ctx;
+}
+function onChatOpen(id){
+  if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
+  var it = findItem(id);
+  if(!it) return;
+  _chatId = id;
+  Agent.load();
+  /* 直接进对话，点开即聊：默认走云端免密钥通道（CloudAI）；
+   * 用户填了自己的 Key 则优先直连；两者皆无才展示内联配置条 */
+  var customReady = Agent.ready();
+  var cloudReady = (typeof CloudAI !== "undefined") && CloudAI.ok();
+  var ready = customReady || cloudReady;
+  el("chatSetup").style.display = ready ? "none" : "block";
+  fillChatSetup();   /* 绑定一次事件并回填当前配置；已配置时该条不显示 */
+  var chat = Agent.loadChat(id);
+  if(!chat.system){
+    chat.system = Agent.buildSystemPrompt(it, buildAgentCtx(it));
+    Agent.saveChat(id, chat);
+  }
+  el("chatTitle").textContent = it.name;
+  el("chatSub").textContent = customReady
+    ? it.course + " · " + ((Agent.PRESETS[Agent.config.preset] || {}).label || Agent.config.preset) + "（" + Agent.config.model + "）"
+    : (cloudReady ? it.course + " · 云端通道（免配置，点开即聊）" : it.course + " · 填一次 Key 即可开聊");
+  el("chatRisk").style.display = "none"; el("chatRisk").textContent = "";
+  if(cloudReady && !customReady && !CloudAI.model){
+    /* 云端模型目录懒加载：就绪后把副标题补上模型名 */
+    CloudAI.refreshModels().then(function(list){
+      if(_chatId !== id) return;
+      if(CloudAI.model){
+        el("chatSub").textContent = it.course + " · 云端通道 · " + (CloudAI.model.name || CloudAI.model.id);
+      }else if(!list.length && !customReady){
+        el("chatRisk").style.display = "block";
+        el("chatRisk").textContent = "云端通道暂无可用模型，可在下方填自己的 API Key";
+        el("chatSetup").style.display = "block";
+      }
+    }).catch(function(err){
+      if(_chatId === id && !customReady){
+        el("chatRisk").style.display = "block";
+        el("chatRisk").textContent = CloudAI.errText(err);
+      }
+    });
+  }
+  el("chatPanel").style.display = "flex";
+  renderChat(chat);
+}
+/* 抽屉内联配置：预设 / Key / 模型，保存后配置条收起，纯聊天 */
+function fillChatSetup(){
+  var sel = el("csPreset");
+  if(sel && !sel.options.length){
+    var html = "";
+    Agent.PRESET_ORDER.forEach(function(pid){
+      html += '<option value="' + pid + '">' + esc(Agent.PRESETS[pid].label) + '</option>';
+    });
+    sel.innerHTML = html;
+    sel.onchange = function(){
+      var p = Agent.PRESETS[sel.value];
+      if(p && p.model) el("csModel").value = p.model;
+    };
+    el("csSave").onclick = onChatSetupSave;
+  }
+  Agent.load();
+  sel.value = Agent.config.preset || "deepseek";
+  el("csModel").value = Agent.config.model || (Agent.PRESETS[sel.value] || {}).model || "";
+  el("csKey").value = Agent.config.apiKey || "";
+}
+function onChatSetupSave(){
+  var pid = el("csPreset").value, p = Agent.PRESETS[pid] || {};
+  Agent.load();
+  Agent.config.preset = pid;
+  if(p.baseUrl) Agent.config.baseUrl = p.baseUrl;
+  Agent.config.model = el("csModel").value.trim() || p.model || "";
+  Agent.config.apiKey = el("csKey").value.trim();
+  Agent.save();
+  if(!Agent.ready()){ showToast("还差 Key / 模型名，配齐才能开聊"); return; }
+  el("chatSetup").style.display = "none";
+  var it = findItem(_chatId);
+  if(it) el("chatSub").textContent = it.course + " · " + (p.label || pid) + "（" + Agent.config.model + "）";
+  addLog("Agent 对话配置已保存：" + (p.label || pid) + "（" + Agent.config.model + "）");
+  showToast("已保存，直接输入就能与 Agent 对话");
+}
+function renderChat(chat){
+  var box = el("chatMsgs"), html = "";
+  if(!chat.messages.length){
+    html = '<div class="empty">与 Agent 聊出成稿后，点下方「用最终结果提交」直接交付</div>';
+  }
+  chat.messages.forEach(function(m, i){
+    var last = (i === chat.messages.length - 1 && m.role === "assistant");
+    html += '<div class="chat-b ' + m.role + (last ? '" id="chatLast' : '') + '">'
+      + esc(m.content || (last ? "思考中…" : "")) + '</div>';
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+function renderChatTail(){
+  var node = el("chatLast");
+  if(!node) return;
+  var chat = Agent.loadChat(_chatId);
+  var m = chat.messages[chat.messages.length - 1];
+  node.textContent = m ? (m.content || "…") : "";
+  var box = el("chatMsgs");
+  box.scrollTop = box.scrollHeight;
+}
+function onChatSend(){
+  if(_chatBusy || _chatId === null) return;
+  var input = el("chatInput"), text = input.value.trim();
+  if(!text) return;
+  var chat = Agent.loadChat(_chatId);
+  chat.messages.push({ role: "user", content: text });
+  Agent.saveChat(_chatId, chat);
+  input.value = "";
+  chat.messages.push({ role: "assistant", content: "" });
+  renderChat(chat);
+  streamChat(chat);
+}
+function resetChatBtn(){
+  _chatBusy = false;
+  var b = el("chatSend");
+  if(b){ b.disabled = false; b.textContent = "发送"; }
+}
+function streamChat(chat){
+  _chatBusy = true;
+  el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
+  var _lastSave = Date.now();
+  /* 云端免密钥通道：没填自己的 Key 就走这里（点开即聊） */
+  if((!Agent.config || !Agent.config.apiKey) && typeof CloudAI !== "undefined" && CloudAI.ok()){
+    if(!CloudAI.model){
+      CloudAI.refreshModels().then(function(){
+        if(CloudAI.model) streamChat(chat);
+        else cloudChatFail(chat, { error: { code: "model_unavailable" } });
+      }).catch(function(err){ cloudChatFail(chat, err); });
+      return;
+    }
+    var lastSave = 0;
+    CloudAI.chat({
+      messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
+      conversationId: "hwdesk-chat-" + _chatId,
+      onDelta: function(d){
+        chat.messages[chat.messages.length - 1].content += d;
+        renderChatTail();
+        var now = Date.now();
+        if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
+      },
+      onDone: function(){ finishChat(); },
+      onErr: function(err){ cloudChatFail(chat, err); }
+    });
+    return;
+  }
+  var cfg = Agent.config;
+  var url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+  var body = JSON.stringify({
+    model: cfg.model, messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
+    stream: true, temperature: cfg.temperature || 0.7
+  });
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey }, body: body })
+  .then(function(res){
+    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP " + res.status + " " + String(t).slice(0, 160)); }); }
+    return res.body;
+  })
+  .then(function(body){
+    var reader = body.getReader(), dec = new TextDecoder(), buf = "";
+    function pump(){
+      return reader.read().then(function(r){
+        if(r.done){ finishChat(); return; }
+        buf += dec.decode(r.value, { stream: true });
+        var lines = buf.split("\n"); buf = lines.pop();
+        lines.forEach(function(ln){
+          ln = ln.trim();
+          if(ln.slice(0, 5) !== "data:") return;
+          var payload = ln.slice(5).trim();
+          if(payload === "[DONE]") return;
+          try{
+            var j = JSON.parse(payload);
+            var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
+            if(d){
+            chat.messages[chat.messages.length - 1].content += d;
+            renderChatTail();
+            /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
+            if(Date.now() - _lastSave > 1000){ _lastSave = Date.now(); Agent.saveChat(_chatId, chat); }
+          }
+          }catch(e){ /* 忽略半包 */ }
+        });
+        return pump();
+      });
+    }
+    return pump();
+  })
+  .catch(function(err){
+    resetChatBtn();                       /* 失败一次后按钮不再永久卡死 */
+    chat = Agent.loadChat(_chatId);
+    if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
+    Agent.saveChat(_chatId, chat);
+    renderChat(chat);
+    el("chatRisk").style.display = "block";
+    el("chatRisk").textContent = "请求失败：" + err.message
+      + "\n常见原因：Key / 模型名不对，或该服务不允许浏览器直连（CORS）——换预设试试（DeepSeek / Kimi / 通义一般可直连）。";
+    addLog("Agent 对话请求失败：" + err.message.slice(0, 80));
+  });
+}
+/* 云端通道失败兜底：与直连 catch 同样的收尾 + 人话错误提示 */
+function cloudChatFail(chat, err){
+  _chatBusy = false;
+  el("chatSend").disabled = false; el("chatSend").textContent = "发送";
+  chat = Agent.loadChat(_chatId);
+  if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
+  Agent.saveChat(_chatId, chat);
+  renderChat(chat);
+  el("chatRisk").style.display = "block";
+  el("chatRisk").textContent = (typeof CloudAI !== "undefined" && CloudAI.errText)
+    ? CloudAI.errText(err)
+    : "云端通道请求失败：" + (err && err.message ? err.message.slice(0, 120) : String(err));
+  addLog("云端通道请求失败：" + ((err && err.error && err.error.code) || (err && err.message) || "").slice(0, 80));
+}
+function finishChat(){
+  _chatBusy = false;
+  el("chatSend").disabled = false; el("chatSend").textContent = "发送";
+  var chat = Agent.loadChat(_chatId);
+  if(chat.messages.length){
+    Agent.saveChat(_chatId, chat);
+    renderChat(chat);
+  }
+  showChatRisk(chat);
+}
+function showChatRisk(chat){
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
+  var out = el("chatRisk");
+  if(!d){ out.style.display = "none"; _chatRiskScore = null; return; }
+  _chatRiskScore = null;
+  var text = "";
+  if(typeof Humanize !== "undefined"){
+    var r = Humanize.risk(d);
+    if(r){ _chatRiskScore = r.score; text = "成稿检测风险：" + r.score + " / 100（" + r.label + "）" + (r.label !== "低风险" ? " · 建议退回 Agent 重写命中段落" : " · ✓ 可以交付"); }
+  }
+  if(!info.confirmed){
+    text = "未检测到【最终交付】定稿块，当前只能取最后一条回复（" + d.length + " 字）作为交付内容，"
+      + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
+  }
+  if(!text) text = "成稿已就绪（" + d.length + " 字），点「用最终结果提交」交付。";
+  out.textContent = text;
+  out.style.display = "block";
+}
+function onChatSubmit(){
+  if(_chatId === null) return;
+  var chat = Agent.loadChat(_chatId);
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
+  if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
+  if(!info.confirmed){
+    /* fallback 到「好的已修改」这类短句时不再直接当交付，先二次确认 */
+    var preview = d.length > 60 ? d.slice(0, 60) + "…" : d;
+    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把最后一条回复（" + d.length + " 字）作为交付内容：\n「"
+      + preview + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
+  }
+  var it = findItem(_chatId);
+  if(!it) return;
+  var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
+  var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
+  if(typeof DB !== "undefined"){
+    /* 与全仓一致：成稿进审批队列（review=待自查 / dispatched=待执行），
+     * 确认学在城院回执后才置 submitted —— 工作台写入 ≠ 平台已收到 */
+    DB.insert("submissions", {
+      itemId: it.id, name: it.name, course: it.course,
+      ai: "Agent对话·" + preset.label,
+      status: "pending", stage: needsReview ? "review" : "dispatched",
+      risk: _chatRiskScore, time: nowStr()
+    });
+  }
+  it.ai = true;
+  it.status = "review";   // 无论待自查还是待执行，都还没拿到平台回执
+  if(needsReview){
+    /* 进审批队列的作业，列表状态同步标为待自查，避免「列表是待完成 / 审批里是待审」不一致 */
+    it.reviewPending = true;
+  }else{
+    it.reviewPending = false;
+  }
+  addLog("Agent 对话成稿" + (needsReview ? "送审" : "派发") + "：" + it.name);
+  saveState(); refreshAll();
+  closeChat();
+  showToast(needsReview
+    ? "草稿已进审批队列，自查通过后交付"
+    : "成稿已进审批队列（待执行），拿到平台回执后点「确认已提交」");
+}
+function onChatClear(){
+  if(_chatId === null) return;
+  if(!window.confirm("清空这个作业的对话？")) return;
+  var it = findItem(_chatId);
+  Agent.clearChat(_chatId);
+  if(it){
+    var chat = Agent.loadChat(_chatId);
+    chat.system = Agent.buildSystemPrompt(it, buildAgentCtx(it));
+    Agent.saveChat(_chatId, chat);
+    renderChat(chat);
+  }
+  el("chatRisk").style.display = "none";
+  showToast("对话已清空");
+}
+function closeChat(){
+  if(_chatBusy && _chatId !== null && typeof Agent !== "undefined"){
+    var c = Agent.loadChat(_chatId);
+    Agent.saveChat(_chatId, c);          /* 生成中途关抽屉也保留已收到的内容 */
+  }
+  el("chatPanel").style.display = "none";
+  _chatId = null;
+}
+/* 设置页：Agent 对话 API 配置 */
+function fillAgentSettings(){
+  if(typeof Agent === "undefined") return;
+  if(!el("agPreset")) return;   /* 设置区缺失时静默跳过，不打断初始化 */
+  Agent.load();
+  var sel = el("agPreset"), html = "";
+  Agent.PRESET_ORDER.forEach(function(id){
+    var tag = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(id) : "";
+    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label)
+      + (tag ? '（' + esc(tag) + '）' : '') + '</option>';
+  });
+  sel.innerHTML = html;
+  el("agPreset").value = Agent.config.preset;
+  el("agUrl").value = Agent.config.baseUrl;
+  el("agKey").value = Agent.config.apiKey;
+  el("agModel").value = Agent.config.model;
+  updateAgentHint();
+}
+function updateAgentHint(){
+  var p = Agent.PRESETS[Agent.config.preset] || {};
+  var cors = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(Agent.config.preset) : "";
+  var txt = p.hint || "";
+  if(cors) txt += "｜浏览器直连：" + cors;
+  if(p.cors === "proxy" || p.cors === "custom"){
+    txt += "｜若被 CORS 拦截，baseUrl 改填本地代理（例如 http://127.0.0.1:8787/v1）。";
+  }
+  el("agHint").textContent = txt;
+  el("agKeyLink").href = p.keyUrl || "#";
+  el("agKeyLink").style.display = p.keyUrl ? "" : "none";
+}
+/* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
+function onLayaPlan(){
+  if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
+  var opts = {};
+  if(typeof ContextKit !== "undefined"){
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    opts.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials.concat(caps)).brief; };
+  }
+  if(typeof Humanize !== "undefined"){
+    opts.humanizeFor = function(item){ return Humanize.checklist(item); };
+  }
+  var plan = Laya.buildPlan(state.items, null, opts);
+  if(!plan.queue.length){ showToast("没有待处理的作业"); return; }
+  /* 执行计划整包派发给默认 AI（不再强制走 WorkBuddy） */
+  dispatchToAi(plan.instruction, "", "Laya 执行计划（" + plan.queue.length + " 项）");
+  addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
+  saveState();
+  refreshAll();
+}
+/* 平台采集：生成单课程采集指令（旧方式，按需精拉） */
+function onCaptureGen(){
+  var course = el("capCourse").value;
+  var cmd = "【学在城院 · 数据采集】请登录学在城院，帮我采集以下内容并逐条回报摘要：\n"
+    + "课程：" + course + "\n"
+    + "1) 课件：该课程全部 PPT / Word 课件，逐个给出文件名与内容摘要（重点：参数要求、格式规范、老师强调的点）\n"
+    + "2) 作业要求：当前已发布作业的题目与要求原文\n"
+    + "3) 历史作业：我已提交过的作业清单（名称、提交时间、成绩与老师批语）\n"
+    + "采回后我会把摘要登记进工作台「数据获取」，供后续任务作答引用。";
+  /* 登录段落：默认只带账号；勾选「附带密码」才把密码写进指令（仅发给自己本机代理） */
+  if(typeof SSO !== "undefined" && SSO.has()){
+    var ssoLine = SSO.instructionSnippet({ includePassword: el("ssoIncPw").checked });
+    if(ssoLine) cmd += "\n" + ssoLine;
+  }
+  copyText(cmd);
+  showToast("采集指令已复制，去 WorkBuddy 粘贴发送即可");
+  addLog("生成学在城院采集指令：" + course);
+  saveState(); refreshAll();
+}
+/* ---------- 学在城院登录门禁（sso.js）：未登录不能进入工作台 ---------- */
+function refreshSsoStatus(){
+  var chip = el("acctChip");
+  var st = (typeof SSO !== "undefined") ? SSO.get() : null;
+  chip.textContent = st ? "当前账号：" + SSO.mask(st.creds.account) : "未登录";
+}
+function initLoginGate(){
+  /* 记住到本机 / 仅本次 且凭据还在 → 直接放行；否则拦在登录页 */
+  if(typeof SSO !== "undefined" && SSO.has()){
+    el("loginGate").style.display = "none";
+  }else{
+    el("loginGate").style.display = "flex";
+    setTimeout(function(){ el("lgAccount").focus(); }, 50);
+  }
+  refreshSsoStatus();
+}
+function onLogin(){
+  if(typeof SSO === "undefined"){ showToast("sso.js 未加载"); return; }
+  var acc = el("lgAccount").value.trim(), pw = el("lgPassword").value;
+  if(!acc || !pw){ showToast("输入学在城院账号和密码"); return; }
+  SSO.set(acc, pw, el("lgMode").value);
+  el("lgPassword").value = "";
+  el("loginGate").style.display = "none";
+  refreshSsoStatus();
+  addLog("登录工作台：" + SSO.mask(acc));
+  showToast("已登录：" + SSO.mask(acc));
+}
+function onLogout(){
+  if(!window.confirm("退出登录并清除本机凭据？")) return;
+  if(typeof SSO !== "undefined") SSO.clear();
+  location.reload();
+}
+/* 一键同步：全平台指令 + JSON 导入回填（零手工登记） */
+function onSync(){
+  if(typeof SyncKit === "undefined"){ showToast("sync.js 未加载"); return; }
+  copyText(SyncKit.buildInstruction());
+  var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
+  localStorage.setItem(SyncKit.LS_LAST, n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes()));
+  el("syncImportBox").style.display = "block";
+  el("syncOut").style.display = "none";
+  el("syncPayload").value = "";
+  renderSyncHint();
+  addLog("一键同步：已生成学在城院全平台同步指令");
+  showToast("同步指令已复制，粘给 AI 代理；回报后把 JSON 粘进下方导入框");
+}
+function renderSyncHint(){
+  var t = "";
+  try{ t = localStorage.getItem(SyncKit.LS_LAST) || ""; }catch(e){}
+  el("syncHint").textContent = "上次同步：" + (t || "从未");
+}
+function onSyncImport(){
+  if(typeof SyncKit === "undefined" || typeof DB === "undefined"){ showToast("sync.js / db.js 未加载"); return; }
+  var out = el("syncOut");
+  var p = SyncKit.parse(el("syncPayload").value);
+  out.style.display = "block";
+  if(!p.ok){
+    var msg = { empty: "（没有内容）", "no-json": "（没有找到 JSON，请确认粘贴的是代理回报）",
+      unbalanced: "（JSON 不完整，检查是否复制完整）", "invalid-json": "（JSON 格式错误）",
+      "not-object": "（应是一个 JSON 对象）", "no-valid-rows": "（JSON 里没有有效的课件/作业/成绩记录）" }[p.error] || p.error;
+    out.textContent = "导入失败：" + msg;
+    return;
+  }
+  var caps = DB.list("captures");
+  var plan = SyncKit.planMerge(p.data, caps, state.items);
+  var today = nowStr();
+  plan.capturesToAdd.forEach(function(c){ DB.insert("captures", { kind: c.kind, course: c.course, title: c.title, note: c.note, time: today }); });
+  plan.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
+  plan.itemsToUpdate.forEach(function(u){
+    var it = findItem(u.id);
+    if(it) it.due = u.to;
+  });
+  var s = plan.stats;
+  out.textContent = "✓ 同步完成：课件 " + s.courseware + " 条 · 作业 " + s.assignments + " 条 · 成绩 " + s.grades + " 条"
+    + "｜新增入库 " + s.newCaptures + " · 新建待办 " + s.newItems + " · 更新截止 " + s.updatedItems;
+  if(plan.itemsToUpdate.length){
+    out.textContent += "\n截止更新：" + plan.itemsToUpdate.map(function(u){
+      var it = findItem(u.id);
+      return it ? it.name + " " + u.from + " → " + u.to : "";
+    }).filter(Boolean).join("；");
+  }
+  addLog("一键同步导入：新增采集 " + s.newCaptures + " 条，新建待办 " + s.newItems + " 条，更新截止 " + s.updatedItems + " 条");
+  el("syncPayload").value = "";
+  saveState(); refreshAll();
+  showToast("同步结果已导入工作台");
+}
+
+/* ---------- 本机直连获取（syncserver.py，127.0.0.1:8765） ---------- */
+var DIRECT_URL = "http://127.0.0.1:8765";
+function directOut(){
+  var out = el("directOut");
+  out.style.display = "";
+  return out;
+}
+function directHelp(){
+  return "✗ 连不上本机同步服务（127.0.0.1:8765）。请在本项目目录运行 python syncserver.py 后重试（详见 README「本机直连获取」）。";
+}
+function onDirectHealth(){
+  var out = directOut();
+  out.textContent = "正在检查本机同步服务…";
+  fetch(DIRECT_URL + "/health").then(function(r){ return r.json(); }).then(function(res){
+    out.textContent = res.ok
+      ? "✓ 本机同步服务运行中（v" + res.version + "），可以一键获取了"
+      : "✗ 服务响应异常，请重启 python syncserver.py";
+  }).catch(function(){
+    out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
+  });
+}
+function onDirectSync(){
+  if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
+  var out = directOut();
+  out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
+  var body = {};
+  if(typeof SSO !== "undefined" && SSO.has()){
+    var st = SSO.get();
+    body.account = st.creds.account;      /* 只发往本机 127.0.0.1，不落盘、不写日志 */
+    body.password = st.creds.password;
+  }
+  fetch(DIRECT_URL + "/data", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res.ok){
+        out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
+        showToast("获取失败：" + (res.error || "").slice(0, 40));
+        return;
+      }
+      applyPlatformPayload(res.payload);
+    })
+    .catch(function(){
+      out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
+      showToast("本机同步服务未启动");
+    });
+}
+function applyPlatformPayload(payload){
+  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  var ops = PlatformKit.mergeOps(payload, DB.list("captures"), state.items);
+  ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
+  ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
+  ops.itemsToUpdate.forEach(function(u){
+    state.items.forEach(function(it){
+      if([it.course, it.name].join("|") === u.key) Object.assign(it, u.patch);
+    });
+  });
+  addLog("学在城院一键获取：作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
+    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条");
+  saveState();
+  refreshAll();
+  var out = directOut();
+  out.textContent = "✓ " + (payload.fetchedAt || "") + "：课程 " + (payload.courses || []).length
+    + "，作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
+    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+  if((payload.errors || []).length) out.textContent += "\n⚠ 部分内容未取到：" + payload.errors.join("；");
+  showToast("已从学在城院获取 " + ops.stats.items + " 项");
+}
+function onCaptureSave(){
+  var title = el("cTitle").value.trim();
+  if(!title){ showToast("请填写标题"); return; }
+  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  var n = new Date();
+  DB.insert("captures", {
+    kind: el("cKind").value,
+    course: el("cCourse").value === "通用（所有课程可用）" ? "通用" : el("cCourse").value,
+    title: title, note: el("cNote").value.trim(),
+    time: n.getFullYear() + "-" + (n.getMonth()+1) + "-" + n.getDate()
+  });
+  el("cTitle").value = ""; el("cNote").value = "";
+  el("capForm").classList.remove("open");
+  addLog("登记平台采集结果：" + title);
+  saveState(); refreshAll();
+  showToast("已存入采集库，任务决策将自动引用");
+}
+function onCaptureDelete(id){
+  if(typeof DB === "undefined") return;
+  var m = DB.find("captures", id);
+  if(!m) return;
+  if(!window.confirm("确定删除采集记录「" + m.title + "」吗？")) return;
+  DB.remove("captures", id);
+  addLog("删除采集记录：" + m.title);
+  saveState(); refreshAll();
+}
+/* 上下文库：添加 / 删除材料 */
+function onMatSave(){
+  var title = el("mTitle").value.trim();
+  if(!title){ showToast("请填写材料标题"); return; }
+  var n = new Date();
+  state.materials.push({
+    id: uid(), kind: el("mKind").value,
+    course: el("mCourse").value === "通用（所有课程可用）" ? "通用" : el("mCourse").value,
+    title: title, note: el("mNote").value.trim(),
+    time: n.getFullYear() + "-" + (n.getMonth() + 1) + "-" + n.getDate()
+  });
+  el("mTitle").value = ""; el("mNote").value = "";
+  el("matForm").classList.remove("open");
+  addLog("添加上下文材料：" + title);
+  saveState(); refreshAll();
+  showToast("材料已添加，AI 执行任务时自动引用");
+}
+function onMatDelete(id){
+  var m = null;
+  for(var i = 0; i < state.materials.length; i++) if(state.materials[i].id === id) m = state.materials[i];
+  if(!m) return;
+  if(!window.confirm("确定删除材料「" + m.title + "」吗？")) return;
+  state.materials = state.materials.filter(function(x){ return x.id !== id; });
+  addLog("删除上下文材料：" + m.title);
+  saveState(); refreshAll();
+}
+/* 审批：通过 / 退回 */
+function onApprove(id){
+  if(typeof DB === "undefined") return;
+  var s = DB.find("submissions", id);
+  if(!s || !DB.canTransition(s.status, "submitted")) return;
+  var wasDispatched = s.stage === "dispatched";
+  DB.update("submissions", id, { status: "submitted", stage: "confirmed" });
+  DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
+  var it = findItem(s.itemId);
+  if(it){ it.status = "submitted"; it.reviewPending = false; }
+  addLog((wasDispatched ? "确认已提交：" : "审批通过并交付：") + s.name);
+  saveState(); refreshAll();
+  showToast(wasDispatched ? "已确认提交，交付记录置为已交付" : "已通过，任务交付学在城院");
+}
+function onRequestChanges(id){
+  if(typeof DB === "undefined") return;
+  var s = DB.find("submissions", id);
+  if(!s || !DB.canTransition(s.status, "changes")) return;
+  var note = window.prompt("退回原因（会写进给 AI 的修改指令）：", "第2段像AI写的，重写；数据要保留我实测的那组");
+  if(note === null) return;
+  DB.update("submissions", id, { status: "changes" });
+  DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "changes", note: note, time: nowStr() });
+  addLog("退回修改：" + s.name + "（" + note + "）");
+  saveState(); refreshAll();
+  showToast("已退回，可重新生成草稿后再提交审批");
+}
+/* AI 对话：发送（组装完整提示词并复制） */
+function onHubSend(){
+  if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it){ showToast("请先选择任务"); return; }
+  var agentId = state.chat.agentId;
+  if(!agentId || !AgentHub.REGISTRY[agentId]){ showToast("请先选择 AI"); return; }
+  var userMsg = el("hubInput").value.trim();
+  var hooks = agentHooks();
+  var histRec = AgentHub.chat(it.id);
+  hooks.history = (histRec && histRec.turns) ? histRec.turns : [];
+  var prompt = AgentHub.composePrompt(it, agentId, userMsg, hooks);
+  if(!prompt){ showToast("提示词组装失败"); return; }
+  copyText(prompt);
+  /* 直连桥（bridge.js）已加载则顺带打开该 AI 的网页对话，省去手动找入口 */
+  var opened = false;
+  if(typeof AgentHub.openUrl === "function"){
+    var url = AgentHub.openUrl(agentId);
+    if(url){ try{ window.open(url, "_blank"); opened = true; }catch(e){} }
+  }
+  AgentHub.addTurn(it, {
+    role: "user", agent: agentId, agentLabel: AgentHub.REGISTRY[agentId].label,
+    text: userMsg || "（按任务卡与上下文直接执行）", prompt: prompt
+  });
+  el("hubInput").value = "";
+  addLog("AI 对话：向「" + AgentHub.REGISTRY[agentId].label + "」发送任务 " + it.name);
+  saveState(); refreshAll();
+  showToast(opened
+    ? "已打开「" + AgentHub.REGISTRY[agentId].label + "」的网页，提示词已复制，Ctrl+V 粘贴发送；回复粘回输入框点「记录 AI 回复」"
+    : "完整提示词已复制，去「" + AgentHub.REGISTRY[agentId].label + "」粘贴发送；回复粘回输入框点「记录 AI 回复」");
+}
+/* AI 对话：记录 AI 回复 */
+function onChatReply(){
+  if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it){ showToast("请先选择任务"); return; }
+  var text = el("hubInput").value.trim();
+  if(!text){ showToast("先把 AI 的回复粘贴到输入框"); return; }
+  var agentId = state.chat.agentId;
+  AgentHub.addTurn(it, {
+    role: "ai", agent: agentId,
+    agentLabel: (AgentHub.REGISTRY[agentId] || { label: "AI" }).label,
+    text: text
+  });
+  el("hubInput").value = "";
+  addLog("AI 对话：记录「" + (AgentHub.REGISTRY[agentId] || { label: "AI" }).label + "」的回复（" + it.name + "）");
+  saveState(); refreshAll();
+  showToast("回复已存入对话记录，满意就点该气泡上的「一键交付」");
+}
+/* 交付登记：复制指令 ≠ 已提交。
+ * 一律先记 pending：stage=review 表示待自查，stage=dispatched 表示已派发、等平台回执；
+ * 只有在「审批」里点「通过并交付 / 确认已提交」后才置 submitted。 */
+function recordDispatch(it, aiLabel, needsReview){
+  if(typeof DB === "undefined") return null;
+  return DB.insert("submissions", {
+    itemId: it.id, name: it.name, course: it.course, ai: aiLabel || "-",
+    status: "pending", stage: needsReview ? "review" : "dispatched",
+    risk: null, time: nowStr()
+  });
+}
+/* AI 对话：一键交付（满意的那条 AI 回复） */
+function onChatDeliver(turnIndex){
+  if(typeof AgentHub === "undefined" || typeof DB === "undefined"){ showToast("agents.js / db.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it) return;
+  var rec = AgentHub.chat(it.id);
+  if(!rec || !rec.turns[turnIndex]){ showToast("对话记录不存在"); return; }
+  var turn = rec.turns[turnIndex];
+  if(turn.role !== "ai"){ showToast("只能交付 AI 的回复"); return; }
+  var hooks = agentHooks();
+  var r = AgentHub.deliverCmd(it, turn.agent, turn.text, hooks);
+  copyText(r.cmd);
+  recordDispatch(it, turn.agentLabel || turn.agent || "-", r.needsReview);
+  addLog("一键交付：" + it.name + "（来源 " + (turn.agentLabel || turn.agent) + "，" +
+    (r.needsReview ? "待我自查审批" : "待确认平台回执") + "）");
+  saveState(); refreshAll();
+  showToast(r.needsReview
+    ? "交付指令已复制，需你自查：粘贴给 WorkBuddy 提交，草稿已进「审批」队列"
+    : "交付指令已复制，粘贴给 WorkBuddy 提交；拿到平台回执后到「审批」点「确认已提交」");
+}
+/* AI 对话：清空当前任务对话 */
+function onHubClear(){
+  if(typeof AgentHub === "undefined") return;
+  if(!state.chat.taskId){ showToast("请先选择任务"); return; }
+  var it = findItem(state.chat.taskId);
+  if(!it) return;
+  if(!window.confirm("确定清空「" + it.name + "」的全部对话记录吗？")) return;
+  AgentHub.clearChat(state.chat.taskId);
+  addLog("清空 AI 对话记录：" + it.name);
+  saveState(); refreshAll();
+  showToast("对话已清空");
+}
+/* 洞察：去AI化风险自查 */
+function onRiskCheck(){
+  if(typeof Humanize === "undefined"){ showToast("humanize.js 未加载"); return; }
+  var out = el("riskOut"), text = el("rText").value;
+  var r = Humanize.risk(text);
+  out.style.display = "block";
+  if(!r){ out.textContent = "（没有可评估的文本）"; return; }
+  var lines = ["检测风险：" + r.score + " / 100（" + r.label + "）", "句式节奏：" + r.rhythm];
+  lines.push("命中套话 " + r.hits.length + " 处" + (r.hits.length ? "：" + r.hits.join("、") : ""));
+  if(r.label !== "低风险") lines.push("建议：重写命中段落，打散句长节奏，补第一人称细节后再交付。");
+  else lines.push("✓ 可以交付。");
+  out.textContent = lines.join("\n");
+  addLog("去AI化风险自查：" + r.score + " 分（" + r.label + "）");
+  saveState();
+}
+function copyText(s){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(s).catch(function(){ fallbackCopy(s); });
+  }else{ fallbackCopy(s); }
+}
+function fallbackCopy(s){
+  var ta = document.createElement("textarea");
+  ta.value = s; document.body.appendChild(ta);
+  ta.select(); try{ document.execCommand("copy"); }catch(e){}
+  document.body.removeChild(ta);
+}
+function onDelete(id){
+  var it = findItem(id);
+  if(!it) return;
+  if(!window.confirm("确定删除「" + it.name + "」吗？")) return;
+  state.items = state.items.filter(function(x){ return x.id !== id; });
+  addLog("删除作业：" + it.name);
+  saveState(); refreshAll();
+}
+function onToggleDone(id, toDone){
+  var it = findItem(id);
+  if(!it) return;
+  if(toDone){ it.status = "submitted"; it.reviewPending = false; addLog("标记已提交：" + it.name); }
+  else{ it.status = "todo"; addLog("撤回为待办：" + it.name); }
+  saveState(); refreshAll();
+}
+function onSaveNew(){
+  var name = el("fName").value.trim();
+  if(!name){ showToast("请填写作业名称"); return; }
+  state.items.push({
+    id: uid(), name: name, course: el("fCourse").value,
+    due: el("fDue").value || "", type: el("fType").value,
+    note: el("fNote").value.trim(), status: "todo", ai: false,
+    difficulty: el("fDiff").value || "auto",
+    format: el("fFormat").value || "文字"
+  });
+  el("fName").value = ""; el("fDue").value = ""; el("fNote").value = "";
+  el("addForm").classList.remove("open");
+  addLog("添加作业：" + name);
+  saveState(); refreshAll();
+  showToast("已添加");
+}
+function onExport(){
+  var blob = new Blob([JSON.stringify({
+    items: state.items, logs: state.logs, materials: state.materials,
+    captures: (typeof DB!=="undefined"?DB.list("captures"):[]),
+    submissions: (typeof DB!=="undefined"?DB.list("submissions"):[]),
+    reviews: (typeof DB!=="undefined"?DB.list("reviews"):[]),
+    chats: (typeof DB!=="undefined"?DB.list("chats"):[])
+  }, null, 2)], { type: "application/json" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "作业工作台备份.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("已导出备份");
+}
+function onImport(file){
+  var r = new FileReader();
+  r.onload = function(){
+    try{
+      var d = JSON.parse(r.result);
+      if(!d || !Array.isArray(d.items)) throw 0;
+      state.items = d.items;
+      state.items.forEach(function(it){
+        if(!it.difficulty) it.difficulty = "auto";
+        if(!it.format) it.format = "文字";
+      });
+      state.logs = Array.isArray(d.logs) ? d.logs : [];
+      state.materials = Array.isArray(d.materials) ? d.materials : [];
+      if(typeof DB !== "undefined"){
+        if(Array.isArray(d.captures)){ DB.clear("captures"); d.captures.forEach(function(c){ DB.insert("captures", c); }); }
+        if(Array.isArray(d.submissions)){ DB.clear("submissions"); d.submissions.forEach(function(c){ DB.insert("submissions", c); }); }
+        if(Array.isArray(d.reviews)){ DB.clear("reviews"); d.reviews.forEach(function(c){ DB.insert("reviews", c); }); }
+        if(Array.isArray(d.chats)){ DB.clear("chats"); d.chats.forEach(function(c){ DB.insert("chats", c); }); }
+      }
+      addLog("导入备份成功，共 " + state.items.length + " 条作业、 " + state.materials.length + " 条上下文材料");
+      saveState(); refreshAll();
+      showToast("导入成功");
+    }catch(e){ showToast("备份文件格式不正确"); }
+  };
+  r.readAsText(file);
+}
+function onClearDemo(){
+  if(!window.confirm("将清空全部数据（含示例与采集/交付/审批库），确定吗？")) return;
+  if(!window.confirm("再次确认：数据清空后无法恢复，建议先导出备份。确定清空？")) return;
+  state.items = []; state.logs = []; state.materials = [];
+  localStorage.removeItem(LS_SEED);
+  try{ localStorage.removeItem(SyncKit.LS_LAST); }catch(e){}
+  if(typeof DB !== "undefined"){ DB.clear("captures"); DB.clear("submissions"); DB.clear("reviews"); DB.clear("chats"); }
+  saveState(); refreshAll();
+  showToast("已清空");
+}
+
+/* ---------- 初始化 ---------- */
+function bind(){
+  /* 侧边栏视图切换 */
+  el("nav").addEventListener("click", function(e){
+    var b = e.target.closest("[data-view]");
+    if(b) switchView(b.getAttribute("data-view"));
+  });
+
+  el("btnAdd").addEventListener("click", function(){ el("addForm").classList.toggle("open"); });
+  el("btnCancel").addEventListener("click", function(){ el("addForm").classList.remove("open"); });
+  el("btnSave").addEventListener("click", onSaveNew);
+  el("btnExport").addEventListener("click", onExport);
+  el("btnImportBtn").addEventListener("click", function(){ el("btnImport").click(); });
+  el("btnImport").addEventListener("change", function(e){
+    if(e.target.files && e.target.files[0]) onImport(e.target.files[0]);
+    e.target.value = "";
+  });
+  el("btnClearDemo").addEventListener("click", onClearDemo);
+  el("btnLayaPlan").addEventListener("click", onLayaPlan);
+
+  el("layaBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-laya]");
+    if(b) onAiSubmit(+b.getAttribute("data-laya"));   // 按方案执行 = 用 Laya 决策增强的指令
+  });
+
+  el("btnCapGen").addEventListener("click", onCaptureGen);
+  el("btnDirectSync").addEventListener("click", onDirectSync);
+  el("btnDirectHealth").addEventListener("click", onDirectHealth);
+
+  /* 登录门禁 */
+  el("btnLogin").addEventListener("click", onLogin);
+  el("btnLogout").addEventListener("click", onLogout);
+  el("lgPassword").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); onLogin(); }
+  });
+  el("lgAccount").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); el("lgPassword").focus(); }
+  });
+  el("btnSync").addEventListener("click", onSync);
+  el("btnSyncImport").addEventListener("click", onSyncImport);
+  el("btnSyncCancel").addEventListener("click", function(){
+    el("syncImportBox").style.display = "none";
+    el("syncOut").style.display = "none";
+  });
+  el("btnCap").addEventListener("click", function(){ el("capForm").classList.toggle("open"); });
+  el("cCancel").addEventListener("click", function(){ el("capForm").classList.remove("open"); });
+  el("cSave").addEventListener("click", onCaptureSave);
+  el("capBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-cap-del]");
+    if(b) onCaptureDelete(+b.getAttribute("data-cap-del"));
+  });
+
+  el("btnMat").addEventListener("click", function(){ el("matForm").classList.toggle("open"); });
+  el("mCancel").addEventListener("click", function(){ el("matForm").classList.remove("open"); });
+  el("mSave").addEventListener("click", onMatSave);
+  el("matBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-mat-del]");
+    if(b) onMatDelete(+b.getAttribute("data-mat-del"));
+  });
+
+  el("approvalBox").addEventListener("click", function(e){
+    var a = e.target.closest("[data-appr]"), rj = e.target.closest("[data-reject]");
+    if(a) onApprove(+a.getAttribute("data-appr"));
+    else if(rj) onRequestChanges(+rj.getAttribute("data-reject"));
+  });
+
+  el("btnRisk").addEventListener("click", onRiskCheck);
+
+  /* AI 直连选择器（「选择执行 AI」）
+   * 之前这些控件一个监听器都没有 → 取消点不动、选 AI 无反应，只能刷新页面退出 */
+  el("aiPickerCancel").addEventListener("click", closeAiPicker);
+  el("aiPicker").addEventListener("click", function(e){
+    if(e.target === el("aiPicker")) closeAiPicker();          /* 点遮罩空白处 = 取消 */
+  });
+  el("aiPickerList").addEventListener("click", function(e){
+    var setdef = e.target.closest("[data-setdef]");
+    if(setdef){ confirmAiPick(setdef.getAttribute("data-setdef"), true); return; }  /* 记住 + 派发 */
+    var row = e.target.closest(".ai-pick-item[data-ai]");
+    if(row) confirmAiPick(row.getAttribute("data-ai"), false);                      /* 仅本次 */
+  });
+  el("aiPickerList").addEventListener("keydown", function(e){
+    if(e.key !== "Enter" && e.key !== " ") return;
+    var row = e.target.closest(".ai-pick-item[data-ai]");
+    if(!row) return;
+    e.preventDefault();
+    confirmAiPick(row.getAttribute("data-ai"), false);
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && el("aiPicker").style.display !== "none") closeAiPicker();
+  });
+  /* 设置页「默认执行 AI」下拉（bridge.js） */
+  if(el("selDefaultAi")){
+    el("selDefaultAi").addEventListener("change", function(e){
+      var id = e.target.value;
+      Bridge.setPref("defaultAi", id);
+      addLog(id ? "已设默认执行 AI：" + Bridge.AI[id].label : "默认执行 AI 已改为每次询问");
+      saveState();
+    });
+  }
+
+  /* AI 对话（多 Agent） */
+  el("chatTask").addEventListener("change", function(e){
+    state.chat.taskId = e.target.value ? +e.target.value : null;
+    refreshAll();
+  });
+  el("agentGrid").addEventListener("click", function(e){
+    var c = e.target.closest("[data-agent]");
+    if(c){ state.chat.agentId = c.getAttribute("data-agent"); refreshAll(); }
+  });
+  el("btnChatSend").addEventListener("click", onHubSend);
+  el("btnChatReply").addEventListener("click", onChatReply);
+  el("btnChatClear").addEventListener("click", onHubClear);
+  el("chatLog").addEventListener("click", function(e){
+    var b = e.target.closest("[data-deliver]");
+    if(b) onChatDeliver(+b.getAttribute("data-deliver"));
+  });
+
+  el("todayBox").addEventListener("click", function(e){
+    var b = e.target.closest("[data-ai]");
+    if(b) onAiSubmit(+b.getAttribute("data-ai"));
+    var c = e.target.closest("[data-chat]");
+    if(c) onChatOpen(+c.getAttribute("data-chat"));
+  });
+  el("hwList").addEventListener("click", function(e){
+    var t;
+    if((t = e.target.closest("[data-ai]"))) onAiSubmit(+t.getAttribute("data-ai"));
+    else if((t = e.target.closest("[data-chat]"))) onChatOpen(+t.getAttribute("data-chat"));
+    else if((t = e.target.closest("[data-done]"))) onToggleDone(+t.getAttribute("data-done"), true);
+    else if((t = e.target.closest("[data-undo]"))) onToggleDone(+t.getAttribute("data-undo"), false);
+    else if((t = e.target.closest("[data-del]"))) onDelete(+t.getAttribute("data-del"));
+  });
+  el("chatClose").addEventListener("click", closeChat);
+  el("chatClear").addEventListener("click", onChatClear);
+  el("chatSend").addEventListener("click", onChatSend);
+  el("chatSubmit").addEventListener("click", onChatSubmit);
+  el("hubInput").addEventListener("keydown", function(e){
+    if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
+  });
+  el("hubInput").addEventListener("keydown", function(e){
+    if(e.key === "Escape") closeChat();
+  });
+  el("chatInput").addEventListener("keydown", function(e){
+    if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
+  });
+  el("chatInput").addEventListener("keydown", function(e){
+    if(e.key === "Escape") closeChat();
+  });
+
+  /* 设置页：Agent 对话 API
+   * agent.js 没加载 / 设置区缺失时整段跳过。以前这里 el("agPreset") 是 null，
+   * 一抛错就把 bind() 剩下的绑定和整个页面初始化全带崩（表现为「按键没反应」） */
+  if(typeof Agent !== "undefined" && el("agPreset") && el("agSave")){
+    el("agPreset").addEventListener("change", function(e){
+      Agent.applyPreset(e.target.value);
+      fillAgentSettings();
+      addLog("Agent 预设切换为：" + Agent.PRESETS[e.target.value].label);
+    });
+    el("agSave").addEventListener("click", function(){
+      Agent.load();
+      Agent.config.preset = el("agPreset").value;
+      Agent.config.baseUrl = el("agUrl").value.trim();
+      Agent.config.apiKey = el("agKey").value.trim();
+      Agent.config.model = el("agModel").value.trim();
+      Agent.save();
+      addLog("Agent 对话 API 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "）");
+      showToast(Agent.ready() ? "已保存，作业卡的「💬 对话」可用了" : "已保存（还差 Key / Model，配齐才能开聊）");
+    });
+  }
+  el("filterRow").addEventListener("click", function(e){
+    var c = e.target.closest("[data-f]");
+    if(c){ state.filter = c.getAttribute("data-f"); refreshAll(); }
+  });
+}
+/* 初始化分步容错：任一步报错只记日志，不让工作台停在半初始化状态 */
+function safe(name, fn){
+  try { fn(); } catch(e){ console.error("[hwdesk] " + name + " failed:", e); }
+}
+document.addEventListener("DOMContentLoaded", function(){
+  loadState();
+  if(!localStorage.getItem(LS_KEY)) saveState();   // 首次：写入示例数据
+  if(state.items.length >= 30){
+    setTimeout(function(){ showToast("数据已积累 30 条，建议导出备份"); }, 800);
+  }
+  safe("bind", bind);
+  safe("refreshDefaultAiSelect", function(){ if(typeof Bridge !== "undefined") refreshDefaultAiSelect(); });
+  safe("fillAgentSettings", function(){ if(typeof Agent !== "undefined") fillAgentSettings(); });
+  safe("initLoginGate", initLoginGate);
+  safe("refreshAll", refreshAll);
+  safe("switchView", function(){ switchView("overview"); });
+});
+</script>
+</body>
+</html>
