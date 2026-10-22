@@ -13,7 +13,14 @@
   python syncserver.py --self-test    # 自检：AES 登录加密 + HTML 解析（不出网）
 
 登录门禁：工作台「登录」按钮会把账号密码 POST 到本机 /verify，由本脚本代为
-登录 course.hzcu.edu.cn（超星统一认证）验证真伪；验证通过才放行进入工作台。
+登录 course.hzcu.edu.cn 验证真伪；验证通过才放行进入工作台。
+
+真实登录链路（实测，2026-10-22）：
+  学在城院 = 浙大城市学院个性化泛雅（course.hzcu.edu.cn），统一身份认证走
+  校内 CAS —— GET /ua/login 302 到 ca.hzcu.edu.cn/cas/login?service=...，
+  学号 + 密码提交的是 CAS 表单（execution/_eventId），不是超星 fanyalogin。
+  因此 platform_login() 先走 ZUCC CAS（学号直登），失败再兜底超星
+  fanyalogin（手机号 / 全局学习通账号），两种账号都能自动匹配。
 
 凭据来源（优先级从高到低）：
   1. 页面请求体（工作台「学在城院登录」保存的账号密码，只在本次请求内存中使用）
@@ -44,12 +51,21 @@ CFG_FILE = os.path.join(HERE, "wb_local.json")
 CACHE_FILE = os.path.join(HERE, "wb_platform_cache.json")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) hwdesk-syncserver/" + VERSION
 
-# 学在城院（浙大城市学院）= 超星泛雅体系，登录走学习通统一账号
+# 主链路：浙大城市学院统一身份认证（CAS）→ course.hzcu.edu.cn 会话
+URL_CAS = ("http://ca.hzcu.edu.cn/cas/login"
+           "?service=https%3A%2F%2Fcourse.hzcu.edu.cn%2Fua%2Flogin")
+ZUCC_BASE = "https://course.hzcu.edu.cn"
+ZUCC_URL_COURSES = (ZUCC_BASE + "/mooc-ans/visit/courselistdata",
+                    ZUCC_BASE + "/visit/courselistdata")
+ZUCC_URL_WORK = ZUCC_BASE + "/mooc2/work/list"
+ZUCC_URL_EXAM = ZUCC_BASE + "/mooc2/exam/exam-list"
+
+# 兜底链路：超星学习通全局账号（手机号）
 URL_LOGIN = "https://passport2.chaoxing.com/fanyalogin"
-URL_COURSES = ("https://mooc1-1.chaoxing.com/mooc-ans/visit/courselistdata",
-               "https://mooc1-1.chaoxing.com/visit/courselistdata")
-URL_WORK = "https://mooc1.chaoxing.com/mooc2/work/list"
-URL_EXAM = "https://mooc1.chaoxing.com/mooc2/exam/exam-list"
+CX_URL_COURSES = ("https://mooc1-1.chaoxing.com/mooc-ans/visit/courselistdata",
+                  "https://mooc1-1.chaoxing.com/visit/courselistdata")
+CX_URL_WORK = "https://mooc1.chaoxing.com/mooc2/work/list"
+CX_URL_EXAM = "https://mooc1.chaoxing.com/mooc2/exam/exam-list"
 
 # fanyalogin 的 AES 参数（逆向自 passport2-static/js/fanya/login.js，与开源
 # chaoxing-mcp / Xuexitong-mcp 等项目一致）：key = iv，CBC + PKCS7，结果 Base64
@@ -171,12 +187,45 @@ def _cx_cipher(text):
     return base64.b64encode(aes_cbc_encrypt(AES_KEY, AES_KEY, text.encode("utf-8"))).decode("ascii")
 
 
+# ---------------------------------------------------------------- CAS 解析（纯函数，可自测）
+def parse_cas_execution(html):
+    """从 CAS 登录页取 fm1 的 execution 隐藏域值（拿不到说明页面变了）"""
+    m = re.search(r'name="execution"\s+value="([^"]+)"', html)
+    if not m:
+        m = re.search(r'value="([^"]+)"\s+name="execution"', html)
+    return m.group(1) if m else ""
+
+
+_CAS_ERR_ZH = [
+    ("cannot be determined to be authentic", "用户名或密码错误"),
+    ("account was locked", "账号已被锁定，请稍后再试或先在校园门户解锁"),
+    ("captcha", "需要图形验证码：请先在浏览器登录一次校园门户再试"),
+    ("Authentication handler", "登录方式不被支持（请用账号密码方式）"),
+]
+
+
+def cas_error(html):
+    """CAS 登录失败时页面里的 class="errorMsg"；成功返回 None"""
+    m = re.search(r'class="errorMsg">([^<]{1,200})', html)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    for key, zh in _CAS_ERR_ZH:
+        if key.lower() in raw.lower():
+            return zh
+    return "统一身份认证拒绝登录：%s" % raw
+
+
 # ---------------------------------------------------------------- HTTP 基础封装
+# 强制直连：校园 CAS / 泛雅都在国内，系统代理（Clash 等）只会把请求带进 502
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def _http(url, data=None, headers=None, timeout=20):
     req = urllib.request.Request(url, data=data, headers=headers or {}, method="POST" if data is not None else "GET")
     req.add_header("User-Agent", UA)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:
             return resp.status, resp.headers, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.headers, e.read()
@@ -226,6 +275,74 @@ def cx_login(account, password):
     if not any(k in jar for k in ("UID", "_uid", "fid")):
         raise SyncError("登录成功但未拿到会话 Cookie，平台可能已改版，请反馈给开发者")
     return jar
+
+
+# ---------------------------------------------------------------- 学在城院 CAS 登录（主链路）
+def zucc_login(account, password):
+    """学号 + 密码走浙大城市学院统一身份认证（CAS），返回带会话的 cookie dict。
+
+    流程：GET CAS 登录页拿 execution → POST 账号密码 → 手工跟随 302
+    （service ticket → course.hzcu.edu.cn/ua/login 建会话）→ 探测课程
+    列表接口确认已登录。失败抛 SyncError。"""
+    if not account or not password:
+        raise SyncError("缺少学在城院账号或密码")
+    jar = {}
+    status, headers, body = _http(URL_CAS, headers={"Accept": "text/html"})
+    _set_cookiejar(jar, headers)
+    execution = parse_cas_execution(body.decode("utf-8", "replace"))
+    if not execution:
+        raise SyncError("统一身份认证页面解析失败（可能已改版），请反馈开发者")
+    status, headers, body = _http(URL_CAS, data=urllib.parse.urlencode({
+        "username": account, "password": password, "authType": "0",
+        "lt": "", "execution": execution, "_eventId": "submit", "validTime": "5",
+    }).encode(), headers={
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": URL_CAS,
+        "Cookie": _cookie_header(jar),
+    })
+    err = cas_error(body.decode("utf-8", "replace"))
+    if err:
+        raise SyncError("登录失败：%s（统一身份认证）" % err)
+    # 成功：CAS 302 → service?ticket=ST-xxx → /ua/login 验票并种下学在城院会话；
+    # 手工跟随整条重定向链，把每一跳的 Set-Cookie 都收进 jar。
+    for _ in range(8):
+        loc = headers.get("Location")
+        if not loc or status not in (301, 302, 303, 307):
+            break
+        status, headers, body = _http(loc, headers={"Cookie": _cookie_header(jar)})
+        _set_cookiejar(jar, headers)
+    # 会话探测：未登录时所有页面都回同一个 485 字节的 umi 门户壳
+    probe = None
+    for url in ZUCC_URL_COURSES:
+        st, hd, bd = _http(url, data=urllib.parse.urlencode({
+            "courseType": "1", "courseFolderId": "0", "baseEducation": "0",
+        }).encode(), headers=dict({
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": ZUCC_BASE + "/",
+        }, **{"Cookie": _cookie_header(jar)}))
+        text = bd.decode("utf-8", "replace")
+        if "courseid" in text.lower():
+            probe = True
+            break
+    if probe is not True:
+        raise SyncError("统一身份认证已通过，但未取得学在城院会话（平台可能改版），请反馈开发者")
+    return jar
+
+
+def platform_login(account, password):
+    """自动匹配登录链路：学号 → ZUCC CAS；手机号/学习通号 → 超星兜底。
+
+    返回 (cookie jar, scope)；scope = "zucc" | "chaoxing"。"""
+    errs = []
+    try:
+        return zucc_login(account, password), "zucc"
+    except SyncError as e:
+        errs.append("统一身份认证：%s" % e)
+    try:
+        return cx_login(account, password), "chaoxing"
+    except SyncError as e:
+        errs.append("学习通：%s" % e)
+    raise SyncError("；".join(errs))
 
 
 # ---------------------------------------------------------------- 解析（纯函数，可自测）
@@ -280,19 +397,25 @@ def parse_work_list(html, course_name, kind):
 
 
 # ---------------------------------------------------------------- 采集
-def cx_collect(jar):
+def cx_collect(jar, scope="zucc"):
     """拉取课程 / 作业 / 考试；单项失败不阻断整体，逐条记入 errors"""
+    if scope == "chaoxing":
+        url_courses, url_work, url_exam = CX_URL_COURSES, CX_URL_WORK, CX_URL_EXAM
+        base = "https://mooc1-1.chaoxing.com"
+    else:
+        url_courses, url_work, url_exam = ZUCC_URL_COURSES, ZUCC_URL_WORK, ZUCC_URL_EXAM
+        base = ZUCC_BASE
     errors, assignments = [], []
     cookie = {"Cookie": _cookie_header(jar)}
     html = None
     last_err = None
-    for url in URL_COURSES:
+    for url in url_courses:
         try:
             _, _, body = _http(url, data=urllib.parse.urlencode({
                 "courseType": "1", "courseFolderId": "0", "baseEducation": "0",
                 "superstarClass": "", "courseFolderSize": "1",
             }).encode(), headers=dict(cookie, **{"Content-Type": "application/x-www-form-urlencoded",
-                                                 "Referer": "https://mooc1-1.chaoxing.com/mooc-ans"}))
+                                                 "Referer": base + "/mooc-ans"}))
             text = body.decode("utf-8", "replace")
             if "courseid" in text.lower() or "courseId" in text:
                 html = text
@@ -310,11 +433,11 @@ def cx_collect(jar):
         name = c["name"] or ("课程 %s" % c["courseId"])
         try:
             if c["enc"]:
-                _, _, wb = _http(URL_WORK + "?" + urllib.parse.urlencode({
+                _, _, wb = _http(url_work + "?" + urllib.parse.urlencode({
                     "courseId": c["courseId"], "classId": c["clazzId"], "cpi": c["cpi"], "enc": c["enc"]
                 }), headers=dict(cookie, **{"Referer": "https://mooc2-ans.chaoxing.com/"}))
                 assignments += parse_work_list(wb.decode("utf-8", "replace"), name, "作业")
-                _, _, eb = _http(URL_EXAM + "?" + urllib.parse.urlencode({
+                _, _, eb = _http(url_exam + "?" + urllib.parse.urlencode({
                     "courseid": c["courseId"], "classId": c["clazzId"], "cpi": c["cpi"], "enc": c["enc"]
                 }), headers=dict(cookie, **{"Referer": "https://mooc2-ans.chaoxing.com/"}))
                 assignments += parse_work_list(eb.decode("utf-8", "replace"), name, "考试")
@@ -325,7 +448,7 @@ def cx_collect(jar):
 
     return {
         "fetchedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "source": "chaoxing",
+        "source": ("zucc" if scope == "zucc" else "chaoxing"),
         "courses": [{"id": c["courseId"], "name": c["name"]} for c in courses],
         "assignments": assignments,
         "materials": [],   # 预留：课件/资料目录接口按需扩展（见 README）
@@ -348,6 +471,24 @@ def load_cfg_creds():
 _STATE = {"last": None, "lock": threading.Lock()}
 
 
+def save_creds(account, password):
+    """把验证成功的凭据写进 wb_local.json（.gitignore 排除，永不进仓库）"""
+    try:
+        with open(CFG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"account": account, "password": password}, f, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
+
+
+def add_log_local(msg):
+    try:
+        with open(os.path.join(HERE, "wb_local.log"), "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), msg))
+    except OSError:
+        pass
+
+
 def collect_payload(creds=None, force=True):
     """入口：优先用请求携带的凭据（仅内存），否则用 wb_local.json。带 60s 缓存。"""
     with _STATE["lock"]:
@@ -358,8 +499,8 @@ def collect_payload(creds=None, force=True):
             account, password = str(creds["account"]), str(creds["password"])
         else:
             account, password = load_cfg_creds()
-        jar = cx_login(account, password)
-        payload = cx_collect(jar)
+        jar, scope = platform_login(account, password)
+        payload = cx_collect(jar, scope)
         try:
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=1)
@@ -429,8 +570,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": False, "error": "请求缺少 account / password 字段"})
                 return
             try:
-                cx_login(str(creds["account"]), str(creds["password"]))
-                self._json(200, {"ok": True})
+                _, scope = platform_login(str(creds["account"]), str(creds["password"]))
+                # 自动配置：登录成功且用户勾选「记住到本机」时，把凭据写进
+                # wb_local.json（.gitignore 已排除），之后 /data 无需再传账号密码。
+                if creds.get("remember"):
+                    saved = save_creds(str(creds["account"]), str(creds["password"]))
+                    if saved:
+                        add_log_local("凭据已自动配置到 wb_local.json（不进仓库）")
+                self._json(200, {"ok": True, "source": scope})
             except SyncError as e:
                 self._json(200, {"ok": False, "error": str(e)})
             except Exception as e:  # 网络/未知异常也要给页面可读信息
@@ -504,6 +651,18 @@ def self_test():
     print(("ok  - parse_work_list extracts due/status" if good else "FAIL - parse_work_list: %r" % rows))
     ok &= good
 
+    # 5) CAS execution 解析
+    ex = parse_cas_execution('<input type="hidden" name="execution" value="e1s1" />')
+    good = ex == "e1s1"
+    print(("ok  - parse_cas_execution extracts the flow key" if good else "FAIL - parse_cas_execution: %r" % ex))
+    ok &= good
+
+    # 6) CAS 错误识别与中文化
+    good = cas_error('<span class="errorMsg">The credentials you provided cannot be determined to be authentic.</span>') \
+        == "用户名或密码错误" and cas_error("<p>ok</p>") is None
+    print(("ok  - cas_error maps CAS failures to readable Chinese" if good else "FAIL - cas_error"))
+    ok &= good
+
     print("SELF-TEST " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -514,7 +673,7 @@ def main():
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print("hwdesk-syncserver %s | http://%s:%s" % (VERSION, HOST, PORT))
     print("  GET  /health      健康检查")
-    print("  POST /verify      登录验证：{\"account\",\"password\"} → 学在城院真实登录（仅内存）")
+    print("  POST /verify      登录验证：{\"account\",\"password\",\"remember\"} → ZUCC CAS 真实登录")
     print("  GET  /data        取缓存或用 wb_local.json 拉取")
     print("  POST /data        请求体可带 {\"account\",\"password\"}（仅本次内存使用）")
     print("  POST /ingest      外部采集结果投递")

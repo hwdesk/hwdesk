@@ -1,4 +1,7 @@
-# 本机凭据与平台缓存（绝不提交）
+# 本机凭据与缓存 — 永不进仓库
 wb_local.json
+wb_local.log
 wb_platform_cache.json
-merged.html/
+
+__pycache__/
+*.pyc
