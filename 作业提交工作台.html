@@ -235,20 +235,6 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <h2>数据获取 · 学在城院平台采集</h2>
       <span class="hint">代理用你登录时保存的本机凭据（每人自己的账号）</span>
     </div>
-    <div class="section-title"><h2>本机直连获取</h2><span class="hint">不用复制指令，一键把学在城院数据拉进工作台</span></div>
-    <div class="card" style="padding:14px">
-      <div class="grid2">
-        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnDirectSync" style="width:100%">⚡ 从学在城院一键获取</button></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn" id="btnDirectHealth" style="width:100%">检查本机服务状态</button></div>
-        <div class="full ai-note" id="directOut" style="display:none;margin:0;white-space:pre-wrap"></div>
-        <div class="full ai-note" style="margin:0">
-          <b>首次使用：</b>在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着），再点上面的按钮。
-          服务只监听本机 127.0.0.1:8765；页面用<b>登录门禁</b>保存的账号密码向<b>本机服务</b>发起登录采集，
-          密码不落盘、不写日志、不出本机。拉到的待办作业自动进作业库、已提交的自动进采集库留档，
-          之后的 Laya 决策与上下文简报会自动引用。服务没开时，仍可用下方「生成采集指令」由 AI 代理代采。
-        </div>
-      </div>
-    </div>
     <div class="card" style="padding:14px">
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1;min-width:220px">
@@ -267,7 +253,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
       <div class="full" style="margin-top:2px"><label style="font-size:12.5px"><input type="checkbox" id="ssoIncPw"> 采集指令中附带登录密码（仅发给本机代理时可见，默认只带账号）</label></div>
       <div class="ai-note full" style="margin:10px 0 0">
-        点「一键同步」复制全平台同步指令 → 发给 AI 代理 → 把回报的 JSON 粘进「导入同步结果」，自动批量入库。
+        <b>怎么用？</b> 点「一键同步」→ 复制的是一份<b>全平台同步指令</b>（要求代理以 JSON 回报所有课程的课件、作业、成绩）→ 粘到 AI 代理对话发送 → 代理回报后，把 JSON 粘进下方「导入同步结果」→ 工作台自动批量入库：<b>课件/成绩进采集库、新作业自动建档、截止日期自动更新</b>，全程零手工登记。<br>
+        <span class="hint">说明：本页面是 file:// 本地应用，无法也不应直接登录学在城院（凭据不进页面）；登录平台这一步仍由持有凭据的 AI 代理执行，但只剩「点一下 → 粘一次」两个动作。</span>
       </div>
       <div id="syncImportBox" style="display:none;margin-top:12px">
         <label class="f">粘贴代理回报的 JSON</label>
@@ -375,8 +362,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="card" style="padding:12px">
       <textarea id="hubInput" placeholder="给所选 AI 的要求（可空，会自动附任务卡、Laya 决策、课件上下文与交付格式要求）。粘贴 AI 的回复进来则点「记录 AI 回复」存入对话。"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI</button>
-        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复</button>
+        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI（复制完整提示词）</button>
+        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复（把上方粘贴的回复存入对话）</button>
       </div>
       <div class="hint" style="margin-top:8px">发送后到所选 AI 自己的窗口（网页版或客户端）粘贴发送；回复粘回上方输入框点「记录 AI 回复」。觉得效果满意时，点回复气泡上的「✅ 一键交付」。</div>
     </div>
@@ -484,6 +471,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div style="text-align:right;margin-top:10px">
       <button class="btn sm" id="aiPickerCancel">取消</button>
     </div>
+    <div class="hint" style="margin-top:8px;line-height:1.5">点一行 = 本次用它执行；「设为默认」= 记住选择并派发；Esc 或点弹窗外空白处 = 取消</div>
   </div>
 </div>
 <style>
@@ -505,10 +493,19 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         <button class="btn sm" id="chatClose">关闭</button>
       </div>
     </div>
+    <div id="chatSetup" style="display:none;padding:12px 16px;border-bottom:1px solid #eef0f4;background:#fffdf5">
+      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认走云端通道（免配置，点开即聊）。想用你自己的模型服务时才填这里：选接口 → 填 API Key（只存本机 localStorage，不上传），保存后这里会消失</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:1;min-width:130px">接口<select id="csPreset"></select></label>
+        <label class="f" style="flex:2;min-width:190px">API Key<input type="password" id="csKey" autocomplete="off" placeholder="sk-…"></label>
+        <label class="f" style="flex:1;min-width:150px">模型<input type="text" id="csModel"></label>
+        <button class="btn sm primary" id="csSave">保存并开聊</button>
+      </div>
+    </div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-risk" id="chatRisk" style="display:none"></div>
     <div class="chat-foot">
-      <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）"></textarea>
+      <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）；认可后回复「请给最终交付」即可产出成稿"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn sm primary" id="chatSubmit">📤 用最终结果提交</button>
         <button class="btn sm" id="chatSend">发送</button>
@@ -565,8 +562,9 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <script src="db.js"></script>
 <script src="sso.js"></script>
 <script src="agents.js"></script>
+<script src="workbuddy-cloud.js"></script>
+<script src="cloudai.js"></script>
 <script src="sync.js"></script>
-<script src="platform.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
@@ -737,8 +735,7 @@ function renderList(){
     html += '<div class="hw-item">'
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
-      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
-      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
+      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span></div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
   });
@@ -1048,36 +1045,24 @@ function onAiSubmit(id){
     var cl = Humanize.checklist(it);
     if(cl) cmd += "\n\n" + cl;
   }
-  /* AI 派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器；带上任务 id 供内嵌对话直连） */
-  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name, it.id);
+  /* AI 直连派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器） */
+  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name);
   it.ai = true;
   /* 交付记录：复制指令 ≠ 已提交 → 一律 pending。
    * stage：直连网页 AI / 需自查 → review（待自查），WorkBuddy copy 流程 → dispatched（待执行）；
    * 拿到平台回执后到「审批」点「确认已提交」才置 submitted */
-  if(plan && plan.action === "agent-chat"){
-    /* 选择器点了支持 API 直连的 AI：已转入工作台内嵌对话，
-       交付记录由对话抽屉「用最终结果提交」负责，这里不再重复记 */
-  }else{
-    var viaWebAi = !plan || plan.action !== "copy";
-    recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
-    addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
-      + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
-  }
+  var viaWebAi = !plan || plan.action !== "copy";
+  recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
+  addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
+    + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
   saveState();
   refreshAll();
 }
-/* ---------- AI 派发（bridge.js）：API 直连的走工作台内嵌对话，其余复制指令 + 打开对应 AI 网页 ---------- */
-function dispatchToAi(cmd, category, taskName, taskId){
+/* ---------- AI 直连派发（bridge.js）：复制指令 + 打开对应 AI 网页 ---------- */
+function dispatchToAi(cmd, category, taskName){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
-  if(pick.source === "none"){ openAiPicker(cmd, category, taskName, taskId); return { action: "picker" }; }
-  /* 默认/自动匹配到支持 API 直连的 AI 且带任务上下文：与选择器路径一致，转工作台内嵌对话，不跳网页 */
-  if(taskId && typeof Agent !== "undefined" && Agent.PRESETS[pick.ai]){
-    Agent.applyPreset(pick.ai);
-    addLog("Agent 直连对话：" + taskName + " → " + Agent.PRESETS[pick.ai].label);
-    onChatOpen(taskId);
-    return { action: "agent-chat" };
-  }
+  if(pick.source === "none"){ openAiPicker(cmd, category, taskName); return { action: "picker" }; }
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
 function doDispatch(plan, cmd, taskName){
@@ -1089,8 +1074,8 @@ function doDispatch(plan, cmd, taskName){
   return plan;
 }
 var _pickerCtx = null;
-function openAiPicker(cmd, category, taskName, taskId){
-  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "", taskId: taskId || null };
+function openAiPicker(cmd, category, taskName){
+  _pickerCtx = { cmd: cmd, category: category || "", taskName: taskName || "" };
   var catLabel = (category && typeof Laya !== "undefined" && Laya.AI_REGISTRY[category])
     ? Laya.AI_REGISTRY[category].label : "通用";
   el("aiPickerFor").textContent = "（" + catLabel + " · " + taskName + "）";
@@ -1114,14 +1099,6 @@ function confirmAiPick(id, makeDefault){
     addLog("已设默认执行 AI：" + Bridge.AI[id].label);
   }
   closeAiPicker();
-  /* 支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）：不再跳网页，
-     直接切到该 Agent 并打开工作台内嵌对话，聊出成稿后「用最终结果提交」 */
-  if(ctx.taskId && typeof Agent !== "undefined" && Agent.PRESETS[id]){
-    Agent.applyPreset(id);
-    addLog("Agent 直连对话：" + ctx.taskName + " → " + Agent.PRESETS[id].label);
-    onChatOpen(ctx.taskId);
-    return;
-  }
   doDispatch(Bridge.describe({ ai: id }), ctx.cmd, ctx.taskName);
 }
 /* 设置页：默认执行 AI 下拉（含「每次询问」） */
@@ -1136,7 +1113,6 @@ function refreshDefaultAiSelect(){
   Bridge.load();
   sel.value = Bridge.prefs.defaultAi || "";
 }
-/* ---------- 作业 Agent 对话（agent.js + OpenAI 兼容 API） ---------- */
 var _chatId = null, _chatBusy = false, _chatRiskScore = null;
 function buildAgentCtx(it){
   var ctx = {};
@@ -1150,21 +1126,82 @@ function buildAgentCtx(it){
 }
 function onChatOpen(id){
   if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
-  if(!Agent.ready()){ showToast("先到「设置 · Agent 对话 API」选预设并填 Key"); switchView("settings"); fillAgentSettings(); return; }
   var it = findItem(id);
   if(!it) return;
   _chatId = id;
+  Agent.load();
+  /* 直接进对话，点开即聊：默认走云端免密钥通道（CloudAI）；
+   * 用户填了自己的 Key 则优先直连；两者皆无才展示内联配置条 */
+  var customReady = Agent.ready();
+  var cloudReady = (typeof CloudAI !== "undefined") && CloudAI.ok();
+  var ready = customReady || cloudReady;
+  el("chatSetup").style.display = ready ? "none" : "block";
+  fillChatSetup();   /* 绑定一次事件并回填当前配置；已配置时该条不显示 */
   var chat = Agent.loadChat(id);
   if(!chat.system){
     chat.system = Agent.buildSystemPrompt(it, buildAgentCtx(it));
     Agent.saveChat(id, chat);
   }
-  var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
   el("chatTitle").textContent = it.name;
-  el("chatSub").textContent = it.course + " · " + preset.label + "（" + Agent.config.model + "）";
+  el("chatSub").textContent = customReady
+    ? it.course + " · " + ((Agent.PRESETS[Agent.config.preset] || {}).label || Agent.config.preset) + "（" + Agent.config.model + "）"
+    : (cloudReady ? it.course + " · 云端通道（免配置，点开即聊）" : it.course + " · 填一次 Key 即可开聊");
   el("chatRisk").style.display = "none"; el("chatRisk").textContent = "";
+  if(cloudReady && !customReady && !CloudAI.model){
+    /* 云端模型目录懒加载：就绪后把副标题补上模型名 */
+    CloudAI.refreshModels().then(function(list){
+      if(_chatId !== id) return;
+      if(CloudAI.model){
+        el("chatSub").textContent = it.course + " · 云端通道 · " + (CloudAI.model.name || CloudAI.model.id);
+      }else if(!list.length && !customReady){
+        el("chatRisk").style.display = "block";
+        el("chatRisk").textContent = "云端通道暂无可用模型，可在下方填自己的 API Key";
+        el("chatSetup").style.display = "block";
+      }
+    }).catch(function(err){
+      if(_chatId === id && !customReady){
+        el("chatRisk").style.display = "block";
+        el("chatRisk").textContent = CloudAI.errText(err);
+      }
+    });
+  }
   el("chatPanel").style.display = "flex";
   renderChat(chat);
+}
+/* 抽屉内联配置：预设 / Key / 模型，保存后配置条收起，纯聊天 */
+function fillChatSetup(){
+  var sel = el("csPreset");
+  if(sel && !sel.options.length){
+    var html = "";
+    Agent.PRESET_ORDER.forEach(function(pid){
+      html += '<option value="' + pid + '">' + esc(Agent.PRESETS[pid].label) + '</option>';
+    });
+    sel.innerHTML = html;
+    sel.onchange = function(){
+      var p = Agent.PRESETS[sel.value];
+      if(p && p.model) el("csModel").value = p.model;
+    };
+    el("csSave").onclick = onChatSetupSave;
+  }
+  Agent.load();
+  sel.value = Agent.config.preset || "deepseek";
+  el("csModel").value = Agent.config.model || (Agent.PRESETS[sel.value] || {}).model || "";
+  el("csKey").value = Agent.config.apiKey || "";
+}
+function onChatSetupSave(){
+  var pid = el("csPreset").value, p = Agent.PRESETS[pid] || {};
+  Agent.load();
+  Agent.config.preset = pid;
+  if(p.baseUrl) Agent.config.baseUrl = p.baseUrl;
+  Agent.config.model = el("csModel").value.trim() || p.model || "";
+  Agent.config.apiKey = el("csKey").value.trim();
+  Agent.save();
+  if(!Agent.ready()){ showToast("还差 Key / 模型名，配齐才能开聊"); return; }
+  el("chatSetup").style.display = "none";
+  var it = findItem(_chatId);
+  if(it) el("chatSub").textContent = it.course + " · " + (p.label || pid) + "（" + Agent.config.model + "）";
+  addLog("Agent 对话配置已保存：" + (p.label || pid) + "（" + Agent.config.model + "）");
+  showToast("已保存，直接输入就能与 Agent 对话");
 }
 function renderChat(chat){
   var box = el("chatMsgs"), html = "";
@@ -1200,15 +1237,33 @@ function onChatSend(){
   renderChat(chat);
   streamChat(chat);
 }
-function resetChatBtn(){
-  _chatBusy = false;
-  var b = el("chatSend");
-  if(b){ b.disabled = false; b.textContent = "发送"; }
-}
 function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
-  var _lastSave = Date.now();
+  /* 云端免密钥通道：没填自己的 Key 就走这里（点开即聊） */
+  if((!Agent.config || !Agent.config.apiKey) && typeof CloudAI !== "undefined" && CloudAI.ok()){
+    if(!CloudAI.model){
+      CloudAI.refreshModels().then(function(){
+        if(CloudAI.model) streamChat(chat);
+        else cloudChatFail(chat, { error: { code: "model_unavailable" } });
+      }).catch(function(err){ cloudChatFail(chat, err); });
+      return;
+    }
+    var lastSave = 0;
+    CloudAI.chat({
+      messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
+      conversationId: "hwdesk-chat-" + _chatId,
+      onDelta: function(d){
+        chat.messages[chat.messages.length - 1].content += d;
+        renderChatTail();
+        var now = Date.now();
+        if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
+      },
+      onDone: function(){ finishChat(); },
+      onErr: function(err){ cloudChatFail(chat, err); }
+    });
+    return;
+  }
   var cfg = Agent.config;
   var url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
   var body = JSON.stringify({
@@ -1222,6 +1277,7 @@ function streamChat(chat){
   })
   .then(function(body){
     var reader = body.getReader(), dec = new TextDecoder(), buf = "";
+    var lastSave = 0;
     function pump(){
       return reader.read().then(function(r){
         if(r.done){ finishChat(); return; }
@@ -1236,11 +1292,11 @@ function streamChat(chat){
             var j = JSON.parse(payload);
             var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
             if(d){
-            chat.messages[chat.messages.length - 1].content += d;
-            renderChatTail();
-            /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
-            if(Date.now() - _lastSave > 1000){ _lastSave = Date.now(); Agent.saveChat(_chatId, chat); }
-          }
+              chat.messages[chat.messages.length - 1].content += d;
+              renderChatTail();
+              var now = Date.now();
+              if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
+            }
           }catch(e){ /* 忽略半包 */ }
         });
         return pump();
@@ -1249,7 +1305,8 @@ function streamChat(chat){
     return pump();
   })
   .catch(function(err){
-    resetChatBtn();                       /* 失败一次后按钮不再永久卡死 */
+    _chatBusy = false;
+    el("chatSend").disabled = false; el("chatSend").textContent = "发送";
     chat = Agent.loadChat(_chatId);
     if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
     Agent.saveChat(_chatId, chat);
@@ -1259,6 +1316,20 @@ function streamChat(chat){
       + "\n常见原因：Key / 模型名不对，或该服务不允许浏览器直连（CORS）——换预设试试（DeepSeek / Kimi / 通义一般可直连）。";
     addLog("Agent 对话请求失败：" + err.message.slice(0, 80));
   });
+}
+/* 云端通道失败兜底：与直连 catch 同样的收尾 + 人话错误提示 */
+function cloudChatFail(chat, err){
+  _chatBusy = false;
+  el("chatSend").disabled = false; el("chatSend").textContent = "发送";
+  chat = Agent.loadChat(_chatId);
+  if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
+  Agent.saveChat(_chatId, chat);
+  renderChat(chat);
+  el("chatRisk").style.display = "block";
+  el("chatRisk").textContent = (typeof CloudAI !== "undefined" && CloudAI.errText)
+    ? CloudAI.errText(err)
+    : "云端通道请求失败：" + (err && err.message ? err.message.slice(0, 120) : String(err));
+  addLog("云端通道请求失败：" + ((err && err.error && err.error.code) || (err && err.message) || "").slice(0, 80));
 }
 function finishChat(){
   _chatBusy = false;
@@ -1271,8 +1342,7 @@ function finishChat(){
   showChatRisk(chat);
 }
 function showChatRisk(chat){
-  var info = Agent.extractDeliverableInfo(chat.messages);
-  var d = info.text;
+  var d = Agent.extractDeliverable(chat.messages);
   var out = el("chatRisk");
   if(!d){ out.style.display = "none"; _chatRiskScore = null; return; }
   _chatRiskScore = null;
@@ -1281,10 +1351,6 @@ function showChatRisk(chat){
     var r = Humanize.risk(d);
     if(r){ _chatRiskScore = r.score; text = "成稿检测风险：" + r.score + " / 100（" + r.label + "）" + (r.label !== "低风险" ? " · 建议退回 Agent 重写命中段落" : " · ✓ 可以交付"); }
   }
-  if(!info.confirmed){
-    text = "未检测到【最终交付】定稿块，当前只能取最后一条回复（" + d.length + " 字）作为交付内容，"
-      + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
-  }
   if(!text) text = "成稿已就绪（" + d.length + " 字），点「用最终结果提交」交付。";
   out.textContent = text;
   out.style.display = "block";
@@ -1292,15 +1358,10 @@ function showChatRisk(chat){
 function onChatSubmit(){
   if(_chatId === null) return;
   var chat = Agent.loadChat(_chatId);
-  var info = Agent.extractDeliverableInfo(chat.messages);
-  var d = info.text;
+  var d = Agent.extractDeliverable(chat.messages);
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
-  if(!info.confirmed){
-    /* fallback 到「好的已修改」这类短句时不再直接当交付，先二次确认 */
-    var preview = d.length > 60 ? d.slice(0, 60) + "…" : d;
-    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把最后一条回复（" + d.length + " 字）作为交付内容：\n「"
-      + preview + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
-  }
+  var marked = (typeof Agent.deliverableMarked === "function") ? Agent.deliverableMarked(chat.messages) : true;
+  if(!marked && !window.confirm("最后一条回复没有【最终交付】标记（可能只是简短确认语，而非成稿）。\n确认把整条回复作为交付提交？")) return;
   var it = findItem(_chatId);
   if(!it) return;
   var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
@@ -1317,12 +1378,6 @@ function onChatSubmit(){
   }
   it.ai = true;
   it.status = "review";   // 无论待自查还是待执行，都还没拿到平台回执
-  if(needsReview){
-    /* 进审批队列的作业，列表状态同步标为待自查，避免「列表是待完成 / 审批里是待审」不一致 */
-    it.reviewPending = true;
-  }else{
-    it.reviewPending = false;
-  }
   addLog("Agent 对话成稿" + (needsReview ? "送审" : "派发") + "：" + it.name);
   saveState(); refreshAll();
   closeChat();
@@ -1345,10 +1400,6 @@ function onChatClear(){
   showToast("对话已清空");
 }
 function closeChat(){
-  if(_chatBusy && _chatId !== null && typeof Agent !== "undefined"){
-    var c = Agent.loadChat(_chatId);
-    Agent.saveChat(_chatId, c);          /* 生成中途关抽屉也保留已收到的内容 */
-  }
   el("chatPanel").style.display = "none";
   _chatId = null;
 }
@@ -1359,9 +1410,7 @@ function fillAgentSettings(){
   Agent.load();
   var sel = el("agPreset"), html = "";
   Agent.PRESET_ORDER.forEach(function(id){
-    var tag = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(id) : "";
-    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label)
-      + (tag ? '（' + esc(tag) + '）' : '') + '</option>';
+    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label) + '</option>';
   });
   sel.innerHTML = html;
   el("agPreset").value = Agent.config.preset;
@@ -1372,13 +1421,7 @@ function fillAgentSettings(){
 }
 function updateAgentHint(){
   var p = Agent.PRESETS[Agent.config.preset] || {};
-  var cors = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(Agent.config.preset) : "";
-  var txt = p.hint || "";
-  if(cors) txt += "｜浏览器直连：" + cors;
-  if(p.cors === "proxy" || p.cors === "custom"){
-    txt += "｜若被 CORS 拦截，baseUrl 改填本地代理（例如 http://127.0.0.1:8787/v1）。";
-  }
-  el("agHint").textContent = txt;
+  el("agHint").textContent = p.hint || "";
   el("agKeyLink").href = p.keyUrl || "#";
   el("agKeyLink").style.display = p.keyUrl ? "" : "none";
 }
@@ -1505,74 +1548,6 @@ function onSyncImport(){
   saveState(); refreshAll();
   showToast("同步结果已导入工作台");
 }
-
-/* ---------- 本机直连获取（syncserver.py，127.0.0.1:8765） ---------- */
-var DIRECT_URL = "http://127.0.0.1:8765";
-function directOut(){
-  var out = el("directOut");
-  out.style.display = "";
-  return out;
-}
-function directHelp(){
-  return "✗ 连不上本机同步服务（127.0.0.1:8765）。请在本项目目录运行 python syncserver.py 后重试（详见 README「本机直连获取」）。";
-}
-function onDirectHealth(){
-  var out = directOut();
-  out.textContent = "正在检查本机同步服务…";
-  fetch(DIRECT_URL + "/health").then(function(r){ return r.json(); }).then(function(res){
-    out.textContent = res.ok
-      ? "✓ 本机同步服务运行中（v" + res.version + "），可以一键获取了"
-      : "✗ 服务响应异常，请重启 python syncserver.py";
-  }).catch(function(){
-    out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
-  });
-}
-function onDirectSync(){
-  if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
-  var out = directOut();
-  out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
-  var body = {};
-  if(typeof SSO !== "undefined" && SSO.has()){
-    var st = SSO.get();
-    body.account = st.creds.account;      /* 只发往本机 127.0.0.1，不落盘、不写日志 */
-    body.password = st.creds.password;
-  }
-  fetch(DIRECT_URL + "/data", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) })
-    .then(function(r){ return r.json(); })
-    .then(function(res){
-      if(!res.ok){
-        out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
-        showToast("获取失败：" + (res.error || "").slice(0, 40));
-        return;
-      }
-      applyPlatformPayload(res.payload);
-    })
-    .catch(function(){
-      out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
-      showToast("本机同步服务未启动");
-    });
-}
-function applyPlatformPayload(payload){
-  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
-  var ops = PlatformKit.mergeOps(payload, DB.list("captures"), state.items);
-  ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
-  ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
-  ops.itemsToUpdate.forEach(function(u){
-    state.items.forEach(function(it){
-      if([it.course, it.name].join("|") === u.key) Object.assign(it, u.patch);
-    });
-  });
-  addLog("学在城院一键获取：作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
-    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条");
-  saveState();
-  refreshAll();
-  var out = directOut();
-  out.textContent = "✓ " + (payload.fetchedAt || "") + "：课程 " + (payload.courses || []).length
-    + "，作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
-    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
-  if((payload.errors || []).length) out.textContent += "\n⚠ 部分内容未取到：" + payload.errors.join("；");
-  showToast("已从学在城院获取 " + ops.stats.items + " 项");
-}
 function onCaptureSave(){
   var title = el("cTitle").value.trim();
   if(!title){ showToast("请填写标题"); return; }
@@ -1634,7 +1609,7 @@ function onApprove(id){
   DB.update("submissions", id, { status: "submitted", stage: "confirmed" });
   DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
   var it = findItem(s.itemId);
-  if(it){ it.status = "submitted"; it.reviewPending = false; }
+  if(it && it.status !== "submitted"){ it.status = "submitted"; }
   addLog((wasDispatched ? "确认已提交：" : "审批通过并交付：") + s.name);
   saveState(); refreshAll();
   showToast(wasDispatched ? "已确认提交，交付记录置为已交付" : "已通过，任务交付学在城院");
@@ -1780,7 +1755,7 @@ function onDelete(id){
 function onToggleDone(id, toDone){
   var it = findItem(id);
   if(!it) return;
-  if(toDone){ it.status = "submitted"; it.reviewPending = false; addLog("标记已提交：" + it.name); }
+  if(toDone){ it.status = "submitted"; addLog("标记已提交：" + it.name); }
   else{ it.status = "todo"; addLog("撤回为待办：" + it.name); }
   saveState(); refreshAll();
 }
@@ -1878,8 +1853,6 @@ function bind(){
   });
 
   el("btnCapGen").addEventListener("click", onCaptureGen);
-  el("btnDirectSync").addEventListener("click", onDirectSync);
-  el("btnDirectHealth").addEventListener("click", onDirectHealth);
 
   /* 登录门禁 */
   el("btnLogin").addEventListener("click", onLogin);
@@ -1952,6 +1925,7 @@ function bind(){
     });
   }
 
+  /* 作业 Agent 对话 */
   /* AI 对话（多 Agent） */
   el("chatTask").addEventListener("change", function(e){
     state.chat.taskId = e.target.value ? +e.target.value : null;
@@ -1991,12 +1965,6 @@ function bind(){
     if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
   });
   el("hubInput").addEventListener("keydown", function(e){
-    if(e.key === "Escape") closeChat();
-  });
-  el("chatInput").addEventListener("keydown", function(e){
-    if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
-  });
-  el("chatInput").addEventListener("keydown", function(e){
     if(e.key === "Escape") closeChat();
   });
 
