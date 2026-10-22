@@ -128,6 +128,23 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .sub-name{font-weight:600;font-size:14px;word-break:break-all}
 .sub-meta{font-size:12px;color:var(--sub);margin-top:2px}
 .risk-out{margin:0 14px 14px;padding:12px;border-radius:10px;background:var(--blue-weak);font-size:13px;line-height:1.7;white-space:pre-wrap}
+/* AI 对话（多 Agent） */
+.chat-pickers{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.agent-chip{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1.5px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;font-size:14px;transition:border-color .15s}
+.agent-chip:hover{border-color:var(--blue)}
+.agent-chip.on{border-color:var(--blue);background:var(--blue-weak)}
+.agent-chip .ag-emoji{font-size:18px}
+.agent-chip .ag-name{font-weight:600}
+.agent-chip .ag-desc{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96px}
+.agent-chip .ag-star{color:var(--orange);font-size:12px;margin-left:auto;flex:none}
+.chat-log{max-height:420px;overflow-y:auto;padding:12px}
+.chat-log .empty{padding:20px 8px}
+.bubble{max-width:86%;margin-bottom:10px;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.bubble.ai{background:var(--blue-weak);border:1px solid var(--line)}
+.bubble.user{background:var(--green-weak);margin-left:auto}
+.bubble .b-meta{font-size:11px;color:var(--sub);margin-bottom:5px;display:flex;gap:8px;align-items:center}
+.bubble .b-ops{margin-top:8px;display:flex;gap:6px}
 @media (max-width:640px){
   .grid2{grid-template-columns:1fr}
   .stats{grid-template-columns:repeat(2,1fr)}
@@ -153,6 +170,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <button data-view="capture"><span class="ico">📷</span>数据获取</button>
       <button data-view="assets"><span class="ico">🗄️</span>数据资产</button>
       <button data-view="workflow"><span class="ico">🧭</span>工作流</button>
+      <button data-view="chat"><span class="ico">💬</span>AI 对话</button>
       <button data-view="approvals"><span class="ico">✅</span>审批</button>
       <button data-view="actions"><span class="ico">⚡</span>行动</button>
       <button data-view="insights"><span class="ico">📊</span>洞察</button>
@@ -237,17 +255,33 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
     <div class="card" style="padding:14px">
-      <div class="grid2">
-        <div><label class="f">采集课程</label>
-          <select id="capCourse">
-            <option>全部课程</option>
-            <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
-            <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
-          </select></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnCapGen" style="width:100%">📋 生成采集指令（复制给 WorkBuddy）</button></div>
-        <div class="full ai-note" style="margin:0">
-          <b>怎么用？</b> 点上方按钮复制采集指令 → 回到 WorkBuddy 对话粘贴发送 → 代理会登录学在城院拉取该课程的<b>课件（PPT / Word）、作业要求原文、历史作业与成绩</b>并回报摘要 → 你把摘要登记到下方「采集登记」，之后的任务决策就会自动引用这些平台数据。
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <button class="btn primary" id="btnSync" style="width:100%">🔄 一键同步学在城院（全部课程）</button>
+          <div class="hint" style="margin-top:6px" id="syncHint">上次同步：从未</div>
         </div>
+        <div style="flex:1;min-width:220px">
+          <div><label class="f">只拉某一门课（可选）</label>
+            <select id="capCourse">
+              <option>全部课程</option>
+              <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
+              <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
+            </select></div>
+          <button class="btn sm" id="btnCapGen" style="margin-top:6px;width:100%">📋 生成单课程采集指令（旧方式）</button>
+        </div>
+      </div>
+      <div class="ai-note full" style="margin:10px 0 0">
+        <b>怎么用？</b> 点「一键同步」→ 复制的是一份<b>全平台同步指令</b>（要求代理以 JSON 回报所有课程的课件、作业、成绩）→ 粘到 AI 代理对话发送 → 代理回报后，把 JSON 粘进下方「导入同步结果」→ 工作台自动批量入库：<b>课件/成绩进采集库、新作业自动建档、截止日期自动更新</b>，全程零手工登记。<br>
+        <span class="hint">说明：本页面是 file:// 本地应用，无法也不应直接登录学在城院（凭据不进页面）；登录平台这一步仍由持有凭据的 AI 代理执行，但只剩「点一下 → 粘一次」两个动作。</span>
+      </div>
+      <div id="syncImportBox" style="display:none;margin-top:12px">
+        <label class="f">粘贴代理回报的 JSON</label>
+        <textarea id="syncPayload" style="min-height:120px" placeholder='{"courseware":[...],"assignments":[...],"grades":[...]}'></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn sm primary" id="btnSyncImport">📥 导入同步结果</button>
+          <button class="btn sm" id="btnSyncCancel">取消</button>
+        </div>
+        <div id="syncOut" class="risk-out" style="display:none;margin:10px 0 0"></div>
       </div>
     </div>
 
@@ -325,6 +359,34 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     </div>
   </section>
 
+  <!-- ========== 4.5) AI 对话（多 Agent） ========== -->
+  <section class="view" id="view-chat">
+    <div class="section-title">
+      <h2>AI 对话 · 多 Agent 协作</h2>
+      <span class="hint">选任务 → 选任意 AI（⭐ 为 Laya 推荐）→ 对话到满意 → 一键交付</span>
+    </div>
+    <div class="card" style="padding:12px">
+      <div class="chat-pickers">
+        <div style="flex:1;min-width:180px"><label class="f">任务</label>
+          <select id="chatTask"></select></div>
+        <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
+      </div>
+      <div class="f" style="margin:10px 0 6px">选择 AI Agent（可随时切换，对话跨 Agent 连续记录）</div>
+      <div id="agentGrid" class="agent-grid"></div>
+    </div>
+    <div class="card" style="padding:0">
+      <div id="chatLog" class="chat-log"></div>
+    </div>
+    <div class="card" style="padding:12px">
+      <textarea id="hubInput" placeholder="给所选 AI 的要求（可空，会自动附任务卡、Laya 决策、课件上下文与交付格式要求）。粘贴 AI 的回复进来则点「记录 AI 回复」存入对话。"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI（复制完整提示词）</button>
+        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复（把上方粘贴的回复存入对话）</button>
+      </div>
+      <div class="hint" style="margin-top:8px">发送后到所选 AI 自己的窗口（网页版或客户端）粘贴发送；回复粘回上方输入框点「记录 AI 回复」。觉得效果满意时，点回复气泡上的「✅ 一键交付」。</div>
+    </div>
+  </section>
+
   <!-- ========== 5) 审批 ========== -->
   <section class="view" id="view-approvals">
     <div class="section-title">
@@ -345,7 +407,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     </div>
     <div class="card ai-note" style="margin:0 0 10px">
       <b>AI 一键提交 & Laya 决策怎么用？</b><br>
-      ① 「工作流」区块按<b>交付时间 / 紧急度 / 复杂度</b>排序待办并为每项任务推荐最合适的 AI，标记需你自查的任务；② 「数据获取 / 数据资产」登记<b>学在城院的课件、作业要求、历史作业</b>作为上下文，提高正确率；③ 点「生成执行计划」复制完整指令（含上下文简报 + <b>去AI化润色要求</b>）粘贴给 WorkBuddy，按计划分派执行并自动提交；④ 需自查的任务先出草稿，到「审批」区块确认后交付。
+      ① 「工作流」区块按<b>交付时间 / 紧急度 / 复杂度</b>排序待办并为每项任务推荐最合适的 AI，标记需你自查的任务；② 「数据获取 / 数据资产」登记<b>学在城院的课件、作业要求、历史作业</b>作为上下文，提高正确率；③ 「AI 对话」可跟<b>任意 AI（千问 / DeepSeek / Kimi / 豆包 / 即梦 / Qoder / Claude / WorkBuddy）</b>逐项讨论，回复满意后点气泡上「一键交付」；④ 点「生成执行计划」复制完整指令（含上下文简报 + <b>去AI化润色要求</b>）粘贴给 WorkBuddy，按计划分派执行并自动提交；⑤ 需自查的任务先出草稿，到「审批」区块确认后交付。
     </div>
     <div class="section-title"><h2>交付记录</h2><span class="hint">AI 代提交后自动写入</span></div>
     <div class="card"><div id="subBox"></div></div>
@@ -412,7 +474,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       · 优先级 = 45% 紧急度 + 25% 时间压力 + 18% 复杂度 + 12% 交付物风险，逾期 +8<br>
       · 行动阈值 act = 0.625（与 Laya act/escalate 头一致），路由置信度低于阈值强制升级学生自查<br>
       · AI 注册表：深度推理 / 写作 / 快速作答 / 代码 / 润色 / 格式工具<br>
-      · 数据库：作业库 / 材料库（旧键兼容）+ 采集库 / 交付库 / 审批库（db.js 管理）<br>
+      · Agent Hub（agents.js）：千问 / WorkBuddy / 即梦 / DeepSeek / Kimi / 豆包 / Qoder / Claude 任意选择，对话到满意后一键交付<br>
+      · 数据库：作业库 / 材料库（旧键兼容）+ 采集库 / 交付库 / 审批库 / 对话库（db.js 管理）<br>
       · 页面不含任何账号密码；真实凭据只在你本机的 AI 代理里，不写入本页面、不部署上公网。
     </div>
   </section>
@@ -480,11 +543,30 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <script src="humanize.js"></script>
 <script src="db.js"></script>
 <script src="sso.js"></script>
+<script src="agents.js"></script>
+<script src="sync.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
 var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
-var state = { items: [], logs: [], materials: [], filter: "all", view: "overview" };
+var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null } };
+
+/* Agent Hub 钩子：页面把 laya/humanize 能力注入 agents.js（引擎间零依赖） */
+function agentHooks(){
+  var hooks = {};
+  if(typeof Laya !== "undefined"){
+    hooks.routeFor = function(item){ return Laya.routeAI(item); };
+    hooks.analyzeFor = function(item){ return Laya.analyze(item); };
+  }
+  if(typeof ContextKit !== "undefined"){
+    var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
+    hooks.contextFor = function(item){ return ContextKit.pack(item, state.items, state.materials.concat(caps)).brief; };
+  }
+  if(typeof Humanize !== "undefined"){
+    hooks.humanizeFor = function(item){ return Humanize.checklist(item); };
+  }
+  return hooks;
+}
 
 function loadState(){
   try{
@@ -727,6 +809,73 @@ function renderCaptures(){
   });
   box.innerHTML = html;
 }
+/* AI 对话：任务下拉 */
+function renderChatTasks(){
+  if(typeof AgentHub === "undefined") return;
+  var sel = el("chatTask");
+  var todos = state.items.filter(function(it){ return it.status === "todo"; });
+  var html = "";
+  if(!todos.length){
+    html = '<option value="">（没有待办任务，先添加作业）</option>';
+  }else{
+    todos.forEach(function(it){
+      html += '<option value="' + it.id + '">' + esc(it.name) + '（' + esc(it.course) + '）</option>';
+    });
+  }
+  sel.innerHTML = html;
+  /* 保持选择；失效则选第一项 */
+  if(todos.length){
+    var has = todos.some(function(it){ return it.id === state.chat.taskId; });
+    if(!has) state.chat.taskId = todos[0].id;
+    sel.value = String(state.chat.taskId);
+  }else{
+    state.chat.taskId = null;
+  }
+}
+/* AI 对话：Agent 网格（⭐ = Laya 推荐） */
+function renderAgentGrid(){
+  if(typeof AgentHub === "undefined"){ el("agentGrid").innerHTML = '<div class="empty">agents.js 未加载</div>'; return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  var recs = it ? AgentHub.recommend(it, agentHooks()) : Object.keys(AgentHub.REGISTRY).map(function(k){
+    return { id: k, agent: AgentHub.REGISTRY[k], score: 0, reasons: [], recommended: false };
+  });
+  /* 默认选推荐位 */
+  if(!state.chat.agentId || !AgentHub.REGISTRY[state.chat.agentId]) state.chat.agentId = recs[0].id;
+  var html = "";
+  recs.forEach(function(r){
+    html += '<div class="agent-chip' + (r.id === state.chat.agentId ? " on" : "") + '" data-agent="' + r.id + '">'
+      + '<span class="ag-emoji">' + r.agent.emoji + '</span>'
+      + '<div style="min-width:0"><div class="ag-name">' + esc(r.agent.label) + '</div>'
+      + '<div class="ag-desc">' + esc(r.agent.desc) + '</div></div>'
+      + (r.recommended ? '<span class="ag-star">⭐</span>' : "")
+      + '</div>';
+  });
+  el("agentGrid").innerHTML = html;
+}
+/* AI 对话：气泡对话记录（user 右 / ai 左，AI 回复可一键交付） */
+function renderChatLog(){
+  var box = el("chatLog");
+  if(typeof AgentHub === "undefined"){ box.innerHTML = ""; return; }
+  if(!state.chat.taskId){ box.innerHTML = '<div class="empty">选择任务后开始与 AI 对话</div>'; return; }
+  var rec = AgentHub.chat(state.chat.taskId);
+  if(!rec || !rec.turns.length){
+    box.innerHTML = '<div class="empty">还没有对话。选好 AI，输入要求点「发送」，把提示词粘到该 AI 的窗口，回复粘回来记录</div>';
+    return;
+  }
+  var html = "";
+  rec.turns.forEach(function(t, i){
+    var who = t.role === "user"
+      ? '<span class="b-meta">🙋 我 → ' + esc(t.agentLabel || t.agent || "AI") + ' · ' + esc(t.time || "") + '</span>'
+      : '<span class="b-meta">🤖 ' + esc(t.agentLabel || t.agent || "AI") + ' 回复 · ' + esc(t.time || "") + '</span>';
+    var ops = t.role === "ai"
+      ? '<div class="b-ops"><button class="btn sm primary" data-deliver="' + i + '">✅ 一键交付（满意后用）</button></div>'
+      : "";
+    html += '<div class="bubble ' + (t.role === "user" ? "user" : "ai") + '">'
+      + who + esc(t.text) + ops + '</div>';
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
 /* 审批队列 + 审批记录 */
 function renderApprovals(){
   var box = el("approvalBox");
@@ -737,11 +886,12 @@ function renderApprovals(){
   }
   var html = "";
   pend.forEach(function(s){
+    var dispatched = s.stage === "dispatched";
     html += '<div class="sub-row">'
-      + '<span class="mat-kind" style="background:var(--red-weak);color:var(--red)">待审</span>'
+      + '<span class="mat-kind" style="background:var(--red-weak);color:var(--red)">' + (dispatched ? "待执行" : "待审") + '</span>'
       + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
       + '<div class="sub-meta">' + esc(s.course) + ' · 执行AI：' + esc(s.ai || "-") + (s.risk != null ? ' · 检测风险 ' + s.risk : '') + ' · ' + esc(s.time || "-") + '</div></div>'
-      + '<button class="btn sm primary" data-appr="' + s.id + '">通过并交付</button>'
+      + '<button class="btn sm primary" data-appr="' + s.id + '">' + (dispatched ? "确认已提交" : "通过并交付") + '</button>'
       + '<button class="btn sm danger-ghost" data-reject="' + s.id + '">退回修改</button>'
       + '</div>';
   });
@@ -771,6 +921,7 @@ function renderSubmissions(){
   var html = "";
   subs.forEach(function(s){
     var st = stMap[s.status] || stMap.pending;
+    if(s.status === "pending" && s.stage === "dispatched") st = ["待执行", st[1], st[2]];
     html += '<div class="sub-row">'
       + '<span class="mat-kind" style="background:' + st[1] + ';color:' + st[2] + '">' + st[0] + '</span>'
       + '<div class="sub-main"><div class="sub-name">' + esc(s.name) + '</div>'
@@ -800,6 +951,9 @@ function esc(s){
 function refreshAll(){
   renderToday();
   renderLaya();
+  renderChatTasks();
+  renderAgentGrid();
+  renderChatLog();
   renderMaterials();
   renderCaptures();
   renderApprovals();
@@ -807,6 +961,7 @@ function refreshAll(){
   renderSubmissions();
   renderStats();
   renderLogs();
+  renderSyncHint();
   renderSync();
 }
 /* 视图切换（侧边栏多区块） */
@@ -873,15 +1028,11 @@ function onAiSubmit(id){
   /* AI 直连派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器） */
   var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name);
   it.ai = true;
-  /* 交付记录：直连网页 AI 只出草稿、不能代登录学在城院提交 → 一律 pending 进审批队列；
-   * WorkBuddy copy 流程可代提交 → 需自查 pending，否则 submitted */
+  /* 交付记录：复制指令 ≠ 已提交 → 一律 pending。
+   * stage：直连网页 AI / 需自查 → review（待自查），WorkBuddy copy 流程 → dispatched（待执行）；
+   * 拿到平台回执后到「审批」点「确认已提交」才置 submitted */
   var viaWebAi = !plan || plan.action !== "copy";
-  if(typeof DB !== "undefined"){
-    DB.insert("submissions", {
-      itemId: it.id, name: it.name, course: it.course, ai: routeLabel || "-",
-      status: (viaWebAi || needsReview) ? "pending" : "submitted", risk: null, time: nowStr()
-    });
-  }
+  recordDispatch(it, routeLabel || "-", viaWebAi || needsReview);
   addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
     + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
   saveState();
@@ -1174,7 +1325,7 @@ function onLayaPlan(){
   saveState();
   refreshAll();
 }
-/* 平台采集：生成学在城院采集指令（课件/作业要求/历史作业） */
+/* 平台采集：生成单课程采集指令（旧方式，按需精拉） */
 function onCaptureGen(){
   var course = el("capCourse").value;
   var cmd = "【学在城院 · 数据采集】请登录学在城院，帮我采集以下内容并逐条回报摘要：\n"
@@ -1219,7 +1370,59 @@ function onSsoClear(){
   el("ssoAccount").value = ""; el("ssoPassword").value = "";
   refreshSsoStatus();
   addLog("已清除本机学在城院凭据");
-  showToast("已清除");
+  showToast("已清除");}
+/* 一键同步：全平台指令 + JSON 导入回填（零手工登记） */
+function onSync(){
+  if(typeof SyncKit === "undefined"){ showToast("sync.js 未加载"); return; }
+  copyText(SyncKit.buildInstruction());
+  var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
+  localStorage.setItem(SyncKit.LS_LAST, n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes()));
+  el("syncImportBox").style.display = "block";
+  el("syncOut").style.display = "none";
+  el("syncPayload").value = "";
+  renderSyncHint();
+  addLog("一键同步：已生成学在城院全平台同步指令");
+  showToast("同步指令已复制，粘给 AI 代理；回报后把 JSON 粘进下方导入框");
+}
+function renderSyncHint(){
+  var t = "";
+  try{ t = localStorage.getItem(SyncKit.LS_LAST) || ""; }catch(e){}
+  el("syncHint").textContent = "上次同步：" + (t || "从未");
+}
+function onSyncImport(){
+  if(typeof SyncKit === "undefined" || typeof DB === "undefined"){ showToast("sync.js / db.js 未加载"); return; }
+  var out = el("syncOut");
+  var p = SyncKit.parse(el("syncPayload").value);
+  out.style.display = "block";
+  if(!p.ok){
+    var msg = { empty: "（没有内容）", "no-json": "（没有找到 JSON，请确认粘贴的是代理回报）",
+      unbalanced: "（JSON 不完整，检查是否复制完整）", "invalid-json": "（JSON 格式错误）",
+      "not-object": "（应是一个 JSON 对象）", "no-valid-rows": "（JSON 里没有有效的课件/作业/成绩记录）" }[p.error] || p.error;
+    out.textContent = "导入失败：" + msg;
+    return;
+  }
+  var caps = DB.list("captures");
+  var plan = SyncKit.planMerge(p.data, caps, state.items);
+  var today = nowStr();
+  plan.capturesToAdd.forEach(function(c){ DB.insert("captures", { kind: c.kind, course: c.course, title: c.title, note: c.note, time: today }); });
+  plan.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
+  plan.itemsToUpdate.forEach(function(u){
+    var it = findItem(u.id);
+    if(it) it.due = u.to;
+  });
+  var s = plan.stats;
+  out.textContent = "✓ 同步完成：课件 " + s.courseware + " 条 · 作业 " + s.assignments + " 条 · 成绩 " + s.grades + " 条"
+    + "｜新增入库 " + s.newCaptures + " · 新建待办 " + s.newItems + " · 更新截止 " + s.updatedItems;
+  if(plan.itemsToUpdate.length){
+    out.textContent += "\n截止更新：" + plan.itemsToUpdate.map(function(u){
+      var it = findItem(u.id);
+      return it ? it.name + " " + u.from + " → " + u.to : "";
+    }).filter(Boolean).join("；");
+  }
+  addLog("一键同步导入：新增采集 " + s.newCaptures + " 条，新建待办 " + s.newItems + " 条，更新截止 " + s.updatedItems + " 条");
+  el("syncPayload").value = "";
+  saveState(); refreshAll();
+  showToast("同步结果已导入工作台");
 }
 function onCaptureSave(){
   var title = el("cTitle").value.trim();
@@ -1278,13 +1481,14 @@ function onApprove(id){
   if(typeof DB === "undefined") return;
   var s = DB.find("submissions", id);
   if(!s || !DB.canTransition(s.status, "submitted")) return;
-  DB.update("submissions", id, { status: "submitted" });
+  var wasDispatched = s.stage === "dispatched";
+  DB.update("submissions", id, { status: "submitted", stage: "confirmed" });
   DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
   var it = findItem(s.itemId);
   if(it && it.status !== "submitted"){ it.status = "submitted"; }
-  addLog("审批通过并交付：" + s.name);
+  addLog((wasDispatched ? "确认已提交：" : "审批通过并交付：") + s.name);
   saveState(); refreshAll();
-  showToast("已通过，任务交付学在城院");
+  showToast(wasDispatched ? "已确认提交，交付记录置为已交付" : "已通过，任务交付学在城院");
 }
 function onRequestChanges(id){
   if(typeof DB === "undefined") return;
@@ -1297,6 +1501,98 @@ function onRequestChanges(id){
   addLog("退回修改：" + s.name + "（" + note + "）");
   saveState(); refreshAll();
   showToast("已退回，可重新生成草稿后再提交审批");
+}
+/* AI 对话：发送（组装完整提示词并复制） */
+function onHubSend(){
+  if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it){ showToast("请先选择任务"); return; }
+  var agentId = state.chat.agentId;
+  if(!agentId || !AgentHub.REGISTRY[agentId]){ showToast("请先选择 AI"); return; }
+  var userMsg = el("hubInput").value.trim();
+  var hooks = agentHooks();
+  var histRec = AgentHub.chat(it.id);
+  hooks.history = (histRec && histRec.turns) ? histRec.turns : [];
+  var prompt = AgentHub.composePrompt(it, agentId, userMsg, hooks);
+  if(!prompt){ showToast("提示词组装失败"); return; }
+  copyText(prompt);
+  /* 直连桥（bridge.js）已加载则顺带打开该 AI 的网页对话，省去手动找入口 */
+  var opened = false;
+  if(typeof AgentHub.openUrl === "function"){
+    var url = AgentHub.openUrl(agentId);
+    if(url){ try{ window.open(url, "_blank"); opened = true; }catch(e){} }
+  }
+  AgentHub.addTurn(it, {
+    role: "user", agent: agentId, agentLabel: AgentHub.REGISTRY[agentId].label,
+    text: userMsg || "（按任务卡与上下文直接执行）", prompt: prompt
+  });
+  el("hubInput").value = "";
+  addLog("AI 对话：向「" + AgentHub.REGISTRY[agentId].label + "」发送任务 " + it.name);
+  saveState(); refreshAll();
+  showToast(opened
+    ? "已打开「" + AgentHub.REGISTRY[agentId].label + "」的网页，提示词已复制，Ctrl+V 粘贴发送；回复粘回输入框点「记录 AI 回复」"
+    : "完整提示词已复制，去「" + AgentHub.REGISTRY[agentId].label + "」粘贴发送；回复粘回输入框点「记录 AI 回复」");
+}
+/* AI 对话：记录 AI 回复 */
+function onChatReply(){
+  if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it){ showToast("请先选择任务"); return; }
+  var text = el("hubInput").value.trim();
+  if(!text){ showToast("先把 AI 的回复粘贴到输入框"); return; }
+  var agentId = state.chat.agentId;
+  AgentHub.addTurn(it, {
+    role: "ai", agent: agentId,
+    agentLabel: (AgentHub.REGISTRY[agentId] || { label: "AI" }).label,
+    text: text
+  });
+  el("hubInput").value = "";
+  addLog("AI 对话：记录「" + (AgentHub.REGISTRY[agentId] || { label: "AI" }).label + "」的回复（" + it.name + "）");
+  saveState(); refreshAll();
+  showToast("回复已存入对话记录，满意就点该气泡上的「一键交付」");
+}
+/* 交付登记：复制指令 ≠ 已提交。
+ * 一律先记 pending：stage=review 表示待自查，stage=dispatched 表示已派发、等平台回执；
+ * 只有在「审批」里点「通过并交付 / 确认已提交」后才置 submitted。 */
+function recordDispatch(it, aiLabel, needsReview){
+  if(typeof DB === "undefined") return null;
+  return DB.insert("submissions", {
+    itemId: it.id, name: it.name, course: it.course, ai: aiLabel || "-",
+    status: "pending", stage: needsReview ? "review" : "dispatched",
+    risk: null, time: nowStr()
+  });
+}
+/* AI 对话：一键交付（满意的那条 AI 回复） */
+function onChatDeliver(turnIndex){
+  if(typeof AgentHub === "undefined" || typeof DB === "undefined"){ showToast("agents.js / db.js 未加载"); return; }
+  var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
+  if(!it) return;
+  var rec = AgentHub.chat(it.id);
+  if(!rec || !rec.turns[turnIndex]){ showToast("对话记录不存在"); return; }
+  var turn = rec.turns[turnIndex];
+  if(turn.role !== "ai"){ showToast("只能交付 AI 的回复"); return; }
+  var hooks = agentHooks();
+  var r = AgentHub.deliverCmd(it, turn.agent, turn.text, hooks);
+  copyText(r.cmd);
+  recordDispatch(it, turn.agentLabel || turn.agent || "-", r.needsReview);
+  addLog("一键交付：" + it.name + "（来源 " + (turn.agentLabel || turn.agent) + "，" +
+    (r.needsReview ? "待我自查审批" : "待确认平台回执") + "）");
+  saveState(); refreshAll();
+  showToast(r.needsReview
+    ? "交付指令已复制，需你自查：粘贴给 WorkBuddy 提交，草稿已进「审批」队列"
+    : "交付指令已复制，粘贴给 WorkBuddy 提交；拿到平台回执后到「审批」点「确认已提交」");
+}
+/* AI 对话：清空当前任务对话 */
+function onHubClear(){
+  if(typeof AgentHub === "undefined") return;
+  if(!state.chat.taskId){ showToast("请先选择任务"); return; }
+  var it = findItem(state.chat.taskId);
+  if(!it) return;
+  if(!window.confirm("确定清空「" + it.name + "」的全部对话记录吗？")) return;
+  AgentHub.clearChat(state.chat.taskId);
+  addLog("清空 AI 对话记录：" + it.name);
+  saveState(); refreshAll();
+  showToast("对话已清空");
 }
 /* 洞察：去AI化风险自查 */
 function onRiskCheck(){
@@ -1360,7 +1656,8 @@ function onExport(){
     items: state.items, logs: state.logs, materials: state.materials,
     captures: (typeof DB!=="undefined"?DB.list("captures"):[]),
     submissions: (typeof DB!=="undefined"?DB.list("submissions"):[]),
-    reviews: (typeof DB!=="undefined"?DB.list("reviews"):[])
+    reviews: (typeof DB!=="undefined"?DB.list("reviews"):[]),
+    chats: (typeof DB!=="undefined"?DB.list("chats"):[])
   }, null, 2)], { type: "application/json" });
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1386,6 +1683,7 @@ function onImport(file){
         if(Array.isArray(d.captures)){ DB.clear("captures"); d.captures.forEach(function(c){ DB.insert("captures", c); }); }
         if(Array.isArray(d.submissions)){ DB.clear("submissions"); d.submissions.forEach(function(c){ DB.insert("submissions", c); }); }
         if(Array.isArray(d.reviews)){ DB.clear("reviews"); d.reviews.forEach(function(c){ DB.insert("reviews", c); }); }
+        if(Array.isArray(d.chats)){ DB.clear("chats"); d.chats.forEach(function(c){ DB.insert("chats", c); }); }
       }
       addLog("导入备份成功，共 " + state.items.length + " 条作业、 " + state.materials.length + " 条上下文材料");
       saveState(); refreshAll();
@@ -1399,7 +1697,8 @@ function onClearDemo(){
   if(!window.confirm("再次确认：数据清空后无法恢复，建议先导出备份。确定清空？")) return;
   state.items = []; state.logs = []; state.materials = [];
   localStorage.removeItem(LS_SEED);
-  if(typeof DB !== "undefined"){ DB.clear("captures"); DB.clear("submissions"); DB.clear("reviews"); }
+  try{ localStorage.removeItem(SyncKit.LS_LAST); }catch(e){}
+  if(typeof DB !== "undefined"){ DB.clear("captures"); DB.clear("submissions"); DB.clear("reviews"); DB.clear("chats"); }
   saveState(); refreshAll();
   showToast("已清空");
 }
@@ -1434,6 +1733,12 @@ function bind(){
   /* 学在城院登录 */
   el("btnSsoSave").addEventListener("click", onSsoSave);
   el("btnSsoClear").addEventListener("click", onSsoClear);
+  el("btnSync").addEventListener("click", onSync);
+  el("btnSyncImport").addEventListener("click", onSyncImport);
+  el("btnSyncCancel").addEventListener("click", function(){
+    el("syncImportBox").style.display = "none";
+    el("syncOut").style.display = "none";
+  });
   el("btnCap").addEventListener("click", function(){ el("capForm").classList.toggle("open"); });
   el("cCancel").addEventListener("click", function(){ el("capForm").classList.remove("open"); });
   el("cSave").addEventListener("click", onCaptureSave);
@@ -1491,6 +1796,23 @@ function bind(){
   }
 
   /* 作业 Agent 对话 */
+  /* AI 对话（多 Agent） */
+  el("chatTask").addEventListener("change", function(e){
+    state.chat.taskId = e.target.value ? +e.target.value : null;
+    refreshAll();
+  });
+  el("agentGrid").addEventListener("click", function(e){
+    var c = e.target.closest("[data-agent]");
+    if(c){ state.chat.agentId = c.getAttribute("data-agent"); refreshAll(); }
+  });
+  el("btnChatSend").addEventListener("click", onHubSend);
+  el("btnChatReply").addEventListener("click", onChatReply);
+  el("btnChatClear").addEventListener("click", onHubClear);
+  el("chatLog").addEventListener("click", function(e){
+    var b = e.target.closest("[data-deliver]");
+    if(b) onChatDeliver(+b.getAttribute("data-deliver"));
+  });
+
   el("todayBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-ai]");
     if(b) onAiSubmit(+b.getAttribute("data-ai"));
@@ -1509,10 +1831,10 @@ function bind(){
   el("chatClear").addEventListener("click", onChatClear);
   el("chatSend").addEventListener("click", onChatSend);
   el("chatSubmit").addEventListener("click", onChatSubmit);
-  el("chatInput").addEventListener("keydown", function(e){
+  el("hubInput").addEventListener("keydown", function(e){
     if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
   });
-  el("chatInput").addEventListener("keydown", function(e){
+  el("hubInput").addEventListener("keydown", function(e){
     if(e.key === "Escape") closeChat();
   });
 

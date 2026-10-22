@@ -7,22 +7,24 @@
  *   captures    平台采集库：从学在城院拉取的课件/作业要求/历史作业登记
  *   submissions 交付库：每项任务的交付记录（pending → submitted / changes）
  *   reviews     审批库：自查审批记录（通过 / 退回修改）
+ *   chats       对话库：每项任务与多个 AI Agent 的对话记录（turns）
  *
  * 兼容性：作业(items)、日志(logs)、材料(materials)仍使用原有
  * localStorage 键（wb_hwdesk_*），由页面直接管理；本模块只负责
- * 新增三库，避免破坏既有数据。
+ * 新增四库，避免破坏既有数据。
  */
 (function (global) {
   "use strict";
 
   var DB = {};
-  DB.VERSION = "1.0.0";
+  DB.VERSION = "1.1.0";
 
   /* 库注册表：key → localStorage 键名 */
   DB.STORES = {
     captures: "wb_hwdesk_captures",
     submissions: "wb_hwdesk_submissions",
-    reviews: "wb_hwdesk_reviews"
+    reviews: "wb_hwdesk_reviews",
+    chats: "wb_hwdesk_chats"
   };
 
   function read(key) {
