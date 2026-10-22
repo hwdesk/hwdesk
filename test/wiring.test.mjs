@@ -144,7 +144,21 @@ test("data-ai buttons go through onAiChat, not the browser dispatch", () => {
   const aiSubmitRefs = [...app.matchAll(/onAiSubmit\(/g)].length;
   assert.equal(aiSubmitRefs, 2, "onAiSubmit should only be defined + called from the Laya flow, got " + aiSubmitRefs);
   const dispatchChunk = app.slice(app.indexOf("function doDispatch"));
-  assert.ok(dispatchChunk.includes("window.open"), "按方案执行 (doDispatch) keeps window.open");
+  assert.ok(!/window\.open\(/.test(app), "the workbench must never window.open an AI website");
+  assert.ok(dispatchChunk.includes("copyText(cmd)"), "doDispatch stays the copy-only fallback");
+});
+test("picker / default dispatch always lands in the in-workbench chat drawer", () => {
+  has(/function doAgentChat\(aiId, cmd, taskName, taskId\)/, "doAgentChat(aiId, cmd, taskName, taskId)");
+  has(/if\(ctx\.taskId\)\{\s*doAgentChat\(id, ctx\.cmd, ctx\.taskName, ctx\.taskId\);/,
+      "picker confirm opens the drawer for every AI (元宝 / WorkBuddy included)");
+  has(/if\(taskId\)\{ return doAgentChat\(pick\.ai, cmd, taskName, taskId\); \}/,
+      "default-AI dispatch opens the drawer");
+  has(/function openAgentChatWith\(taskId, cmd\)[\s\S]{0,300}onChatSend\(\)/,
+      "the dispatch instruction is auto-sent into the drawer when a channel is ready");
+});
+test("Laya 执行计划 also opens the in-workbench drawer (top task context)", () => {
+  has(/dispatchToAi\(plan\.instruction, "", "Laya 执行计划（" \+ plan\.queue\.length \+ " 项）", plan\.queue\[0\]\.item\.id\)/,
+      "onLayaPlan forwards the top task id");
 });
 test("AI 代提交 with multiple usable agents opens the picker; unconfigured nudges to Agent view", () => {
   has(/openAgPick\(id\); return;/, "multiple usable agents -> openAgPick");

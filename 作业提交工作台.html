@@ -1195,21 +1195,34 @@ function dispatchToAi(cmd, category, taskName, taskId){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
   if(pick.source === "none"){ openAiPicker(cmd, category, taskName, taskId); return { action: "picker" }; }
-  /* 默认/自动匹配到支持 API 直连的 AI 且带任务上下文：与选择器路径一致，转工作台内嵌对话，不跳网页 */
-  if(taskId && typeof Agent !== "undefined" && Agent.PRESETS[pick.ai]){
-    Agent.applyPreset(pick.ai);
-    addLog("Agent 直连对话：" + taskName + " → " + Agent.PRESETS[pick.ai].label);
-    onChatOpen(taskId);
-    return { action: "agent-chat" };
-  }
+  /* 有任务上下文一律转工作台内嵌对话，绝不跳网页（与选择器路径一致） */
+  if(taskId){ return doAgentChat(pick.ai, cmd, taskName, taskId); }
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
+/* 打开作业对话抽屉并自动发出派发指令；未配置任何通道时把指令留在输入框 */
+function openAgentChatWith(taskId, cmd){
+  onChatOpen(taskId);
+  if(!cmd) return;
+  var ready = (typeof Agent !== "undefined" && Agent.ready())
+    || (typeof CloudAI !== "undefined" && CloudAI.ok());
+  var input = el("chatInput");
+  input.value = cmd;
+  if(ready){ onChatSend(); }   /* 就绪即自动发送；否则留给用户点发送 */
+}
+function doAgentChat(aiId, cmd, taskName, taskId){
+  if(typeof Agent !== "undefined" && Agent.PRESETS[aiId]){
+    Agent.applyPreset(aiId);
+  }
+  var label = (Bridge.AI[aiId] ? Bridge.AI[aiId].label : "Agent");
+  addLog("工作台内对话：" + (taskName || "") + " → " + label);
+  openAgentChatWith(taskId, cmd);
+  return { action: "agent-chat" };
+}
 function doDispatch(plan, cmd, taskName){
-  showToast("正在派发给 " + plan.label + "…");
+  /* 兜底（无任务上下文，如旧入口）：只复制指令，一律不打开 AI 网页版 */
   copyText(cmd);
-  if(plan.action === "open+copy"){ window.open(plan.url, "_blank"); }
-  showToast(Bridge.toastText(plan));
-  addLog("AI 直连派发：" + taskName + " → " + plan.label);
+  showToast("指令已复制：到「AI 对话」粘贴发送即可");
+  addLog("AI 指令已复制（不跳网页）：" + taskName + " → " + plan.label);
   return plan;
 }
 var _pickerCtx = null;
@@ -1238,12 +1251,9 @@ function confirmAiPick(id, makeDefault){
     addLog("已设默认执行 AI：" + Bridge.AI[id].label);
   }
   closeAiPicker();
-  /* 支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）：不再跳网页，
-     直接切到该 Agent 并打开工作台内嵌对话，聊出成稿后「用最终结果提交」 */
-  if(ctx.taskId && typeof Agent !== "undefined" && Agent.PRESETS[id]){
-    Agent.applyPreset(id);
-    addLog("Agent 直连对话：" + ctx.taskName + " → " + Agent.PRESETS[id].label);
-    onChatOpen(ctx.taskId);
+  /* 任何 AI（含 元宝 / WorkBuddy）都不再跳网页：带任务上下文就开工作台内嵌对话 */
+  if(ctx.taskId){
+    doAgentChat(id, ctx.cmd, ctx.taskName, ctx.taskId);
     return;
   }
   doDispatch(Bridge.describe({ ai: id }), ctx.cmd, ctx.taskName);
@@ -1650,8 +1660,8 @@ function onLayaPlan(){
   }
   var plan = Laya.buildPlan(state.items, null, opts);
   if(!plan.queue.length){ showToast("没有待处理的作业"); return; }
-  /* 执行计划整包派发给默认 AI（不再强制走 WorkBuddy） */
-  dispatchToAi(plan.instruction, "", "Laya 执行计划（" + plan.queue.length + " 项）");
+  /* 执行计划整包派发：带上最优先任务的 id，抽屉在工作台内打开（不跳网页） */
+  dispatchToAi(plan.instruction, "", "Laya 执行计划（" + plan.queue.length + " 项）", plan.queue[0].item.id);
   addLog("生成 Laya 执行计划：" + plan.queue.length + " 项，其中 " + plan.reviewCount + " 项需学生自查");
   saveState();
   refreshAll();
@@ -2004,12 +2014,7 @@ function onHubSend(){
   var prompt = AgentHub.composePrompt(it, agentId, userMsg, hooks);
   if(!prompt){ showToast("提示词组装失败"); return; }
   copyText(prompt);
-  /* 直连桥（bridge.js）已加载则顺带打开该 AI 的网页对话，省去手动找入口 */
-  var opened = false;
-  if(typeof AgentHub.openUrl === "function"){
-    var url = AgentHub.openUrl(agentId);
-    if(url){ try{ window.open(url, "_blank"); opened = true; }catch(e){} }
-  }
+  /* 一律留在工作台内：只复制完整提示词，不打开任何 AI 网页 */
   AgentHub.addTurn(it, {
     role: "user", agent: agentId, agentLabel: AgentHub.REGISTRY[agentId].label,
     text: userMsg || "（按任务卡与上下文直接执行）", prompt: prompt
@@ -2017,9 +2022,7 @@ function onHubSend(){
   el("hubInput").value = "";
   addLog("AI 对话：向「" + AgentHub.REGISTRY[agentId].label + "」发送任务 " + it.name);
   saveState(); refreshAll();
-  showToast(opened
-    ? "已打开「" + AgentHub.REGISTRY[agentId].label + "」的网页，提示词已复制，Ctrl+V 粘贴发送；回复粘回输入框点「记录 AI 回复」"
-    : "完整提示词已复制，去「" + AgentHub.REGISTRY[agentId].label + "」粘贴发送；回复粘回输入框点「记录 AI 回复」");
+  showToast("提示词已复制，粘到「" + AgentHub.REGISTRY[agentId].label + "」发送；回复粘回输入框点「记录 AI 回复」");
 }
 /* AI 对话：记录 AI 回复 */
 function onChatReply(){
