@@ -27,8 +27,8 @@ function test(name, fn) {
 console.log("db.js " + DB.VERSION + " | stores: " + Object.keys(DB.STORES).join(", "));
 
 /* ---------- 库注册 ---------- */
-test("registry defines captures / submissions / reviews", () => {
-  assert.deepEqual(Object.keys(DB.STORES).sort(), ["captures", "reviews", "submissions"]);
+test("registry defines captures / submissions / reviews / chats", () => {
+  assert.deepEqual(Object.keys(DB.STORES).sort(), ["captures", "chats", "reviews", "submissions"]);
 });
 
 /* ---------- CRUD ---------- */
