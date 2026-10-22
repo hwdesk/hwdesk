@@ -557,7 +557,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </select>
     </label>
     <button class="btn primary" id="btnLogin" style="width:100%;margin-top:14px">登录进入工作台</button>
-    <p class="hint" style="margin:10px 0 0">代理采集 / 提交时使用这份凭据登录学在城院；团队每人登自己的账号，退出登录即清除本机凭据。</p>
+    <div id="loginErr" style="display:none;margin-top:10px;padding:8px 10px;border:1px solid #f0c0c0;background:#fdf2f2;border-radius:8px;font-size:12.5px;color:#a33;line-height:1.6"></div>
+    <p class="hint" style="margin:10px 0 0">登录时本机桥（<b>python syncserver.py</b>）会代你向 course.hzcu.edu.cn 验证账号密码——只有真实登录成功的账号才能进入工作台；凭据只存你自己电脑的本机存储，不进仓库、不上传。</p>
   </div>
 </div>
 <style>
@@ -1550,12 +1551,40 @@ function onLogin(){
   if(typeof SSO === "undefined"){ showToast("sso.js 未加载"); return; }
   var acc = el("lgAccount").value.trim(), pw = el("lgPassword").value;
   if(!acc || !pw){ showToast("输入学在城院账号和密码"); return; }
-  SSO.set(acc, pw, el("lgMode").value);
-  el("lgPassword").value = "";
-  el("loginGate").style.display = "none";
-  refreshSsoStatus();
-  addLog("登录工作台：" + SSO.mask(acc));
-  showToast("已登录：" + SSO.mask(acc));
+  /* 登录门禁真实验证：账号密码先交本机桥（syncserver.py /verify），
+   * 由它代为登录 course.hzcu.edu.cn —— 只有真实登录成功的账号才放行进工作台。
+   * 凭据仅随本次请求发给 127.0.0.1，不落盘、不写日志、不出本机。 */
+  /* 本机桥（syncserver.py）地址：main 侧已移除全局 DIRECT_URL 定义（48965e4），
+   * 这里局部声明，保证合并后登录验证仍指向 127.0.0.1:8765（wiring 断言不变）。 */
+  var DIRECT_URL = "http://127.0.0.1:8765";
+  var err = el("loginErr"), btn = el("btnLogin");
+  err.style.display = "none"; err.textContent = "";
+  btn.disabled = true; btn.textContent = "正在向学在城院验证账号…";
+  fetch(DIRECT_URL + "/verify", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },   /* 免 CORS 预检 */
+    body: JSON.stringify({ account: acc, password: pw })
+  }).then(function(r){ return r.json(); }).then(function(res){
+    btn.disabled = false; btn.textContent = "登录进入工作台";
+    if(!res.ok){
+      err.textContent = "✗ " + (res.error || "账号或密码不正确");
+      err.style.display = "block";
+      addLog("登录被拒（平台验证失败）：" + SSO.mask(acc));
+      return;
+    }
+    SSO.set(acc, pw, el("lgMode").value);
+    el("lgPassword").value = "";
+    el("loginGate").style.display = "none";
+    refreshSsoStatus();
+    addLog("登录工作台（平台验证通过）：" + SSO.mask(acc));
+    showToast("已登录：" + SSO.mask(acc));
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = "登录进入工作台";
+    err.innerHTML = "✗ 连不上本机验证服务（127.0.0.1:8765），无法核对账号密码。"
+      + "请在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着）后再登录。";
+    err.style.display = "block";
+    addLog("登录被拒（本机验证服务未启动）");
+  });
 }
 function onLogout(){
   if(!window.confirm("退出登录并清除本机凭据？")) return;

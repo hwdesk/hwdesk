@@ -12,6 +12,9 @@
   python syncserver.py                # 启动服务（默认 127.0.0.1:8765）
   python syncserver.py --self-test    # 自检：AES 登录加密 + HTML 解析（不出网）
 
+登录门禁：工作台「登录」按钮会把账号密码 POST 到本机 /verify，由本脚本代为
+登录 course.hzcu.edu.cn（超星统一认证）验证真伪；验证通过才放行进入工作台。
+
 凭据来源（优先级从高到低）：
   1. 页面请求体（工作台「学在城院登录」保存的账号密码，只在本次请求内存中使用）
   2. 同目录 wb_local.json：{"account": "...", "password": "..."}（已被 .gitignore 排除）
@@ -216,8 +219,8 @@ def cx_login(account, password):
     except ValueError:
         raise SyncError("登录返回异常（HTTP %s），平台可能已改版，请把本条信息反馈给开发者" % status)
     if not res.get("status"):
-        raise SyncError("登录失败：%s（检查账号密码；若平台要求短信/扫码验证，请先在学习通 App 或网页端完成一次登录再试）"
-                        % res.get("msg2") or res.get("msg") or "未知原因")
+        reason = res.get("msg2") or res.get("msg") or "未知原因"
+        raise SyncError("登录失败：%s（检查账号密码；若平台要求短信/扫码验证，请先在学习通 App 或网页端完成一次登录再试）" % reason)
     jar = {}
     _set_cookiejar(jar, headers)
     if not any(k in jar for k in ("UID", "_uid", "fid")):
@@ -419,7 +422,20 @@ class Handler(BaseHTTPRequestHandler):
                     creds = body
         except ValueError:
             pass
-        if self.path.startswith("/data"):
+        if self.path.startswith("/verify"):
+            # 登录门禁真实验证：只做 cx_login（登录 course.hzcu.edu.cn）不拉数据，
+            # 成败都回 200 + ok，页面据此放行或拦截。凭据仅本次内存使用，不落盘不写日志。
+            if not (creds and creds.get("account") and creds.get("password")):
+                self._json(200, {"ok": False, "error": "请求缺少 account / password 字段"})
+                return
+            try:
+                cx_login(str(creds["account"]), str(creds["password"]))
+                self._json(200, {"ok": True})
+            except SyncError as e:
+                self._json(200, {"ok": False, "error": str(e)})
+            except Exception as e:  # 网络/未知异常也要给页面可读信息
+                self._json(200, {"ok": False, "error": "验证服务内部错误：%s" % e})
+        elif self.path.startswith("/data"):
             try:
                 payload, _ = collect_payload(creds)
                 self._json(200, {"ok": True, "cached": False, "payload": payload})
@@ -498,6 +514,7 @@ def main():
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print("hwdesk-syncserver %s | http://%s:%s" % (VERSION, HOST, PORT))
     print("  GET  /health      健康检查")
+    print("  POST /verify      登录验证：{\"account\",\"password\"} → 学在城院真实登录（仅内存）")
     print("  GET  /data        取缓存或用 wb_local.json 拉取")
     print("  POST /data        请求体可带 {\"account\",\"password\"}（仅本次内存使用）")
     print("  POST /ingest      外部采集结果投递")
