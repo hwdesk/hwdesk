@@ -73,7 +73,16 @@ node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
 node test/bridge.test.mjs     # AI 直连桥：12 项
+node test/agent.test.mjs      # 作业 Agent 对话：15 项
 ```
+
+## 作业 Agent 对话（agent.js）
+
+每个作业自带一个 **内嵌 Agent 对话抽屉**（作业卡上的「💬 对话」）：学生与 Agent 在工作台内交互成稿，点「📤 用最终结果提交」**直接通过工作台交付**——写入交付库并走交付状态机（需自查的进审批队列），全程不必离开页面。
+
+- 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；配置存 `wb_hwdesk_agent` 键，**Key 只存本机 localStorage**
+- 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
+- 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
 
 ## AI 直连（bridge.js）
 
