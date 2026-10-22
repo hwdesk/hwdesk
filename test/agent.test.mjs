@@ -1,0 +1,143 @@
+/*
+ * agent.js 作业内嵌 Agent 对话测试（零依赖，Node >= 16）
+ * 运行：node test/agent.test.mjs
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import assert from "node:assert/strict";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(__dirname, "..");
+(0, eval)(readFileSync(path.join(root, "agent.js"), "utf8"));
+const Agent = globalThis.Agent;
+
+/* 最小 localStorage 桩 */
+const store = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (store.has(k) ? store.get(k) : null),
+  setItem: (k, v) => store.set(k, String(v)),
+  removeItem: (k) => store.delete(k)
+};
+
+let passed = 0;
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log("  ok - " + name);
+  } catch (e) {
+    console.error("  FAIL - " + name + "\n    " + e.message);
+    process.exitCode = 1;
+  }
+}
+
+console.log("agent.js " + Agent.version + " | presets: " + Agent.PRESET_ORDER.join(", "));
+
+/* ---------- 预设 ---------- */
+test("presets include deepseek / kimi / qwen / doubao / custom", () => {
+  for (const id of ["deepseek", "kimi", "qwen", "doubao", "custom"]) {
+    assert.ok(Agent.PRESETS[id], id + " missing");
+  }
+});
+test("web presets carry https baseUrl and default model", () => {
+  for (const id of ["deepseek", "kimi", "qwen"]) {
+    assert.match(Agent.PRESETS[id].baseUrl, /^https:/);
+    assert.ok(Agent.PRESETS[id].model.length > 0);
+  }
+});
+
+/* ---------- 配置 ---------- */
+test("default config is deepseek with empty key; ready() false without key", () => {
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7 };
+  assert.equal(Agent.ready(), false);
+});
+test("applyPreset rewrites baseUrl/model and persists; key survives", () => {
+  Agent.load();
+  Agent.config.apiKey = "sk-test";
+  Agent.save();
+  Agent.applyPreset("kimi");
+  assert.equal(Agent.config.preset, "kimi");
+  assert.equal(Agent.config.baseUrl, Agent.PRESETS.kimi.baseUrl);
+  assert.equal(Agent.config.model, "moonshot-v1-8k");
+  assert.equal(Agent.config.apiKey, "sk-test");
+  const fresh = JSON.parse(localStorage.getItem("wb_hwdesk_agent"));
+  assert.equal(fresh.preset, "kimi");
+});
+test("ready() true only with baseUrl+model+key", () => {
+  Agent.applyPreset("doubao");            // model 为空
+  assert.equal(Agent.ready(), false);
+  Agent.config.model = "ep-123";
+  Agent.save();
+  assert.equal(Agent.ready(), true);
+  Agent.config.apiKey = "";
+  Agent.save();
+  assert.equal(Agent.ready(), false);
+  Agent.applyPreset("deepseek");
+});
+
+/* ---------- 聊天历史 ---------- */
+test("loadChat returns empty structure for unknown item", () => {
+  store.delete("wb_hwdesk_chats");
+  const c = Agent.loadChat(42);
+  assert.deepEqual(c, { system: "", messages: [] });
+});
+test("saveChat/loadChat roundtrip is per-item isolated", () => {
+  Agent.saveChat(1, { system: "s1", messages: [{ role: "user", content: "a" }] });
+  Agent.saveChat(2, { system: "s2", messages: [] });
+  assert.equal(Agent.loadChat(1).system, "s1");
+  assert.equal(Agent.loadChat(2).system, "s2");
+  assert.equal(Agent.loadChat(3).messages.length, 0);
+});
+test("clearChat wipes the item conversation", () => {
+  Agent.clearChat(1);
+  assert.deepEqual(Agent.loadChat(1), { system: "", messages: [] });
+});
+
+/* ---------- 系统提示词 ---------- */
+const item = { id: 7, name: "第二章作业", course: "PLC", due: "2026-10-24", format: "文字", note: "2 道计算题" };
+test("system prompt embeds task fields", () => {
+  const s = Agent.buildSystemPrompt(item, {});
+  assert.ok(s.includes("第二章作业") && s.includes("PLC") && s.includes("2026-10-24"));
+  assert.ok(s.includes("【最终交付】"));
+});
+test("system prompt includes context brief and humanize checklist when provided", () => {
+  const s = Agent.buildSystemPrompt(item, { contextBrief: "课件：开关频率 20kHz", humanizeChecklist: "禁用AI套话" });
+  assert.ok(s.includes("开关频率 20kHz") && s.includes("禁用AI套话"));
+});
+test("system prompt reflects Laya decision review flag", () => {
+  const d = { route: { label: "代码AI", confidence: 0.7 }, review: { needed: true } };
+  assert.ok(Agent.buildSystemPrompt(item, { decision: d }).includes("先给出完整草稿"));
+  const d2 = { route: { label: "代码AI", confidence: 0.7 }, review: { needed: false } };
+  assert.ok(Agent.buildSystemPrompt(item, { decision: d2 }).includes("可直接产出"));
+});
+
+/* ---------- 消息组装 ---------- */
+test("buildMessages prefixes system and drops invalid entries", () => {
+  const msgs = Agent.buildMessages("SYS", [
+    { role: "user", content: "q1" },
+    { role: "tool", content: "noise" },
+    { role: "assistant", content: "a1" },
+    null
+  ]);
+  assert.equal(msgs.length, 3);
+  assert.equal(msgs[0].role, "system");
+  assert.equal(msgs[1].content, "q1");
+  assert.equal(msgs[2].role, "assistant");
+});
+
+/* ---------- 交付提取 ---------- */
+test("extractDeliverable prefers 【最终交付】 section", () => {
+  const msgs = [{ role: "assistant", content: "先给草稿。\n【最终交付】\n答案是 42。" }];
+  assert.equal(Agent.extractDeliverable(msgs), "答案是 42。");
+});
+test("extractDeliverable falls back to last assistant message", () => {
+  assert.equal(Agent.extractDeliverable([{ role: "assistant", content: "  直接成稿 " }]), "直接成稿");
+});
+test("extractDeliverable empty when no assistant message", () => {
+  assert.equal(Agent.extractDeliverable([{ role: "user", content: "hi" }]), "");
+});
+
+console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");
+if (!process.exitCode) console.log("ALL PASS");
