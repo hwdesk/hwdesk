@@ -1263,16 +1263,15 @@ function startAgentChat(id, auto){
     Agent.saveChat(id, chat);
   }
   el("chatTitle").textContent = it.name;
-  el("chatSub").textContent = customReady
-    ? it.course + " · " + ((Agent.PRESETS[Agent.config.preset] || {}).label || Agent.config.preset) + "（" + Agent.config.model + "）"
-    : (cloudReady ? it.course + " · 云端通道（免配置，点开即聊）" : it.course + " · 填一次 Key 即可开聊");
+  /* 抽屉标题只留作业名 + 课程/截止，不显示预设/模型（#28 规格） */
+  el("chatSub").textContent = it.course + " · " + dueText(it);
   el("chatRisk").style.display = "none"; el("chatRisk").textContent = "";
   if(cloudReady && !customReady && !CloudAI.model){
     /* 云端模型目录懒加载：就绪后把副标题补上模型名 */
     CloudAI.refreshModels().then(function(list){
       if(_chatId !== id) return;
       if(CloudAI.model){
-        el("chatSub").textContent = it.course + " · 云端通道 · " + (CloudAI.model.name || CloudAI.model.id);
+        el("chatSub").textContent = it.course + " · " + dueText(it);
       }else if(!list.length && !customReady){
         el("chatRisk").style.display = "block";
         el("chatRisk").textContent = "云端通道暂无可用模型，可在下方填自己的 API Key";
@@ -1324,7 +1323,7 @@ function onChatSetupSave(){
   if(!Agent.ready()){ showToast("还差 Key / 模型名，配齐才能开聊"); return; }
   el("chatSetup").style.display = "none";
   var it = findItem(_chatId);
-  if(it) el("chatSub").textContent = it.course + " · " + (p.label || pid) + "（" + Agent.config.model + "）";
+  if(it) el("chatSub").textContent = it.course + " · " + dueText(it);
   addLog("Agent 对话配置已保存：" + (p.label || pid) + "（" + Agent.config.model + "）");
   showToast("已保存，直接输入就能与 Agent 对话");
 }
@@ -1515,8 +1514,8 @@ function onChatFinal(mode){
   var text = el("chatFinalText").value.trim();
   if(!text){ showToast("提交内容是空的"); return; }
   if(_chatId !== null && typeof Agent.extractDeliverableInfo === "function"){
-    var _info = Agent.extractDeliverableInfo(Agent.loadChat(_chatId).messages);
-    if(!_info.confirmed){
+    var info = Agent.extractDeliverableInfo(Agent.loadChat(_chatId).messages);
+    if(!info.confirmed){
       /* 无【最终交付】定稿块（fallback 到「好的已修改」这类短句）时先二次确认 */
       var _pv = text.length > 60 ? text.slice(0, 60) + "…" : text;
       if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把预览内容（" + text.length + " 字）作为交付内容：\n「"
