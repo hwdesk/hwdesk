@@ -874,32 +874,36 @@ function onAiSubmit(id){
     var cl = Humanize.checklist(it);
     if(cl) cmd += "\n\n" + cl;
   }
-  copyText(cmd);
-  showToast("指令已复制（含上下文与去AI化要求），去 WorkBuddy 粘贴发送即可");
+  /* AI 直连派发：按 Laya 路由类别挑目标（未设默认且无自动匹配时弹选择器） */
+  var plan = dispatchToAi(cmd, d ? d.route.ai : "", it.name);
   it.ai = true;
-  /* 交付记录：需自查 → pending（进审批队列）；否则直接 submitted */
+  /* 交付记录：直连网页 AI 只出草稿、不能代登录学在城院提交 → 一律 pending 进审批队列；
+   * WorkBuddy copy 流程可代提交 → 需自查 pending，否则 submitted */
+  var viaWebAi = !plan || plan.action !== "copy";
   if(typeof DB !== "undefined"){
     DB.insert("submissions", {
       itemId: it.id, name: it.name, course: it.course, ai: routeLabel || "-",
-      status: needsReview ? "pending" : "submitted", risk: null, time: nowStr()
+      status: (viaWebAi || needsReview) ? "pending" : "submitted", risk: null, time: nowStr()
     });
   }
-  addLog("已复制 AI 提交指令：" + it.name + (typeof Laya !== "undefined" ? "（Laya 优先级 " + Laya.analyze(it).priority + "）" : ""));
+  addLog((viaWebAi ? "AI 直连派发：" : "已复制 AI 提交指令：") + it.name
+    + (routeLabel ? "（Laya 路由：" + routeLabel + "）" : ""));
   saveState();
   refreshAll();
 }
 /* ---------- AI 直连派发（bridge.js）：复制指令 + 打开对应 AI 网页 ---------- */
 function dispatchToAi(cmd, category, taskName){
-  if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return; }
+  if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
-  if(pick.source === "none"){ openAiPicker(cmd, category, taskName); return; }
-  doDispatch(Bridge.describe(pick), cmd, taskName);
+  if(pick.source === "none"){ openAiPicker(cmd, category, taskName); return { action: "picker" }; }
+  return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
 function doDispatch(plan, cmd, taskName){
   copyText(cmd);
   if(plan.action === "open+copy"){ window.open(plan.url, "_blank"); }
   showToast(Bridge.toastText(plan));
   addLog("AI 直连派发：" + taskName + " → " + plan.label);
+  return plan;
 }
 var _pickerCtx = null;
 function openAiPicker(cmd, category, taskName){
@@ -1451,6 +1455,33 @@ function bind(){
   });
 
   el("btnRisk").addEventListener("click", onRiskCheck);
+
+  /* ---------- AI 直连选择器 / 设置页默认 AI（bridge.js） ---------- */
+  el("aiPickerCancel").addEventListener("click", closeAiPicker);
+  /* 点遮罩空白处关闭（点内部卡片不关） */
+  el("aiPicker").addEventListener("click", function(e){
+    if(e.target === el("aiPicker")) closeAiPicker();
+  });
+  /* ESC 关闭 */
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && el("aiPicker").style.display !== "none") closeAiPicker();
+  });
+  /* 选择器列表：点 AI 项 = 本次用它派发；点「设为默认」= 设默认并派发 */
+  el("aiPickerList").addEventListener("click", function(e){
+    var item = e.target.closest(".ai-pick-item");
+    if(!item) return;
+    var id = item.getAttribute("data-ai");
+    if(!Bridge.AI[id]) return;
+    confirmAiPick(id, !!e.target.closest("[data-setdef]"));
+  });
+  /* 设置页「默认执行 AI」下拉 */
+  el("selDefaultAi").addEventListener("change", function(e){
+    var id = e.target.value;
+    Bridge.setPref("defaultAi", id);
+    addLog(id ? "已设默认执行 AI：" + Bridge.AI[id].label : "默认执行 AI 已改为每次询问");
+    saveState();
+  });
+
 
   /* 作业 Agent 对话 */
   el("todayBox").addEventListener("click", function(e){
