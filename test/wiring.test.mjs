@@ -102,7 +102,75 @@ test("Agent bindings are guarded so a missing block cannot abort bind()", () => 
       "fillAgentSettings() bails out when the block is absent");
 });
 
-/* ---------- 4. 初始化容错 ---------- */
+/* ---------- 4. Agent 独立板块（配置搬家：设置页不再放 Agent 配置） ---------- */
+test("nav exposes a dedicated Agent view hosting the config blocks", () => {
+  assert.ok(html.includes('data-view="agent"'), "nav button data-view=agent missing");
+  const agentStart = html.indexOf('id="view-agent"');
+  const settingsStart = html.indexOf('id="view-settings"');
+  assert.ok(agentStart !== -1 && settingsStart !== -1 && agentStart < settingsStart,
+      "view-agent section missing or misordered");
+  const agentView = html.slice(agentStart, settingsStart);
+  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi"]) {
+    assert.ok(agentView.includes('id="' + id + '"'), "#" + id + " not inside the Agent view");
+  }
+  assert.ok(!html.slice(settingsStart).includes('id="agPreset"'), "agPreset still inside settings view");
+});
+
+/* ---------- 5. 极简 Agent 选择器（AI 代提交：只选 Agent，选完工作台内开聊） ---------- */
+test("agent picker markup exists (agPick / agPickList / agPickFor / agPickCfg)", () => {
+  for (const id of ["agPick", "agPickList", "agPickFor", "agPickCfg"]) {
+    assert.ok(ids.has(id), "#" + id + " missing");
+  }
+});
+test("agent picker rows are keyboard reachable and wired", () => {
+  has(/el\("agPickList"\)\.addEventListener\(\s*"click"/, "agPickList delegated click");
+  has(/closest\(\s*"\.ag-pick-item\[data-ag\]"\s*\)/, 'closest(".ag-pick-item[data-ag]")');
+  has(/confirmAgPick\(row\.getAttribute\("data-ag"\)\)/, "confirmAgPick(<preset>)");
+  has(/el\("agPickList"\)\.addEventListener\(\s*"keydown"/, "agPickList keydown");
+  has(/role="button" tabindex="0"/, 'role="button" tabindex="0"');
+});
+test("agent picker closes via mask click / Escape / 管理配置 button", () => {
+  has(/e\.target === el\("agPick"\)\s*\)\s*closeAgPick\(\)/, "mask click -> closeAgPick()");
+  has(/e\.key === "Escape" && el\("agPick"\)\.style\.display !== "none"/, "Escape closes agPick");
+  has(/el\("agPickCfg"\)\.addEventListener\(\s*"click"/, "agPickCfg wired");
+  has(/closeAgPick\(\); switchView\("agent"\); fillAgentSettings\(\);/, "管理配置 jumps to the Agent view");
+});
+
+/* ---------- 6. AI 代提交改走工作台内嵌对话（不再开浏览器） ---------- */
+test("data-ai buttons go through onAiChat, not the browser dispatch", () => {
+  has(/function onAiChat\(id, auto\)/, "onAiChat(id, auto) exists");
+  has(/if\(b\) onAiChat\(\+b\.getAttribute\("data-ai"\), true\);/, "todayBox data-ai -> onAiChat");
+  has(/onAiChat\(\+t\.getAttribute\("data-ai"\), true\)/, "hwList data-ai -> onAiChat");
+  const aiSubmitRefs = [...app.matchAll(/onAiSubmit\(/g)].length;
+  assert.equal(aiSubmitRefs, 2, "onAiSubmit should only be defined + called from the Laya flow, got " + aiSubmitRefs);
+  const dispatchChunk = app.slice(app.indexOf("function doDispatch"));
+  assert.ok(dispatchChunk.includes("window.open"), "按方案执行 (doDispatch) keeps window.open");
+});
+test("AI 代提交 with multiple usable agents opens the picker; unconfigured nudges to Agent view", () => {
+  has(/openAgPick\(id\); return;/, "multiple usable agents -> openAgPick");
+  has(/switchView\("agent"\); fillAgentSettings\(\); return;/, "not-configured path jumps to Agent view");
+});
+
+/* ---------- 7. 对话抽屉：提交预览（选择性提交） ---------- */
+test("submit preview panel exists and is fully wired", () => {
+  for (const id of ["chatFinal", "chatFinalText", "chatFinalRisk", "chatFinalSend", "chatFinalReview", "chatFinalCancel"]) {
+    assert.ok(ids.has(id), "#" + id + " missing");
+  }
+  has(/el\("chatSubmit"\)\.addEventListener\(\s*"click",\s*onChatSubmitOpen\s*\)/, "chatSubmit -> onChatSubmitOpen");
+  has(/function onChatFinal\(mode\)/, "onChatFinal(mode) exists");
+  has(/onChatFinal\("direct"\)/, "直接提交 path");
+  has(/onChatFinal\("review"\)/, "送审批队列 path");
+  has(/el\("chatFinalCancel"\)\.addEventListener\(\s*"click",\s*closeChatFinal\s*\)/, "cancel wired");
+  has(/status: direct \? "submitted" : "pending"/, "direct submit records status submitted");
+});
+test("对话 opens the drawer without config noise; header shows course/due only", () => {
+  has(/function startAgentChat\(id, auto\)/, "startAgentChat exists");
+  has(/chatSub"\)\.textContent = it\.course \+ " · " \+ dueText\(it\)/, "chatSub shows course/due, no preset/model");
+  assert.ok(!/先到「设置 · Agent 对话 API」/.test(app), "old settings nudge text still present");
+  has(/auto && !chat\.messages\.length && !_chatBusy/, "auto mode sends the kickoff message");
+});
+
+/* ---------- 8. 初始化容错 ---------- */
 test("startup runs each step through safe() so one failure cannot abort init", () => {
   has(/function safe\(name, fn\)\{[\s\S]{0,120}try \{ fn\(\); \} catch\(e\)/, "safe(name, fn) helper");
   for (const step of ["bind", "fillAgentSettings", "refreshAll", "switchView"]) {

@@ -53,27 +53,62 @@ test("default config is deepseek with empty key; ready() false without key", () 
   Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7 };
   assert.equal(Agent.ready(), false);
 });
-test("applyPreset rewrites baseUrl/model and persists; key survives", () => {
-  Agent.load();
-  Agent.config.apiKey = "sk-test";
-  Agent.save();
+test("applyPreset switches preset; keys are stored per-preset and survive switching", () => {
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {} };
+  Agent.setKey("deepseek", "sk-ds");
   Agent.applyPreset("kimi");
   assert.equal(Agent.config.preset, "kimi");
   assert.equal(Agent.config.baseUrl, Agent.PRESETS.kimi.baseUrl);
   assert.equal(Agent.config.model, "moonshot-v1-8k");
-  assert.equal(Agent.config.apiKey, "sk-test");
+  assert.equal(Agent.config.apiKey, "");            // kimi 还没配 key
+  Agent.setKey("kimi", "sk-kimi");
+  assert.equal(Agent.config.apiKey, "sk-kimi");
+  Agent.use("deepseek");
+  assert.equal(Agent.config.preset, "deepseek");
+  assert.equal(Agent.config.apiKey, "sk-ds");       // 切回 deepseek，key 还在
   const fresh = JSON.parse(localStorage.getItem("wb_hwdesk_agent"));
-  assert.equal(fresh.preset, "kimi");
+  assert.equal(fresh.keys.deepseek, "sk-ds");
+  assert.equal(fresh.keys.kimi, "sk-kimi");
 });
-test("ready() true only with baseUrl+model+key", () => {
-  Agent.applyPreset("doubao");            // model 为空
+test("ready() true only with baseUrl+model+key; use() syncs the preset key", () => {
+  Agent.applyPreset("doubao");            // model 为空、doubao 无 key
   assert.equal(Agent.ready(), false);
   Agent.config.model = "ep-123";
-  Agent.save();
+  Agent.save();                           // setKey 内部会 load()，先把修改落盘
+  Agent.setKey("doubao", "sk-ark");
   assert.equal(Agent.ready(), true);
+  Agent.use("deepseek");
+  assert.equal(Agent.ready(), true);      // deepseek 的 key 还在
   Agent.config.apiKey = "";
   Agent.save();
   assert.equal(Agent.ready(), false);
+  Agent.applyPreset("deepseek");          // key 从 keys 里恢复
+  assert.equal(Agent.ready(), true);
+});
+
+/* ---------- 多 Agent Key 管理（1.1.0：选择 Agent / 按预设分存 Key） ---------- */
+test("legacy single apiKey migrates into keys[preset] on load", () => {
+  store.clear();
+  Agent.config.keys = {};                 // 模拟全新浏览器（内存里也不留旧 keys）
+  localStorage.setItem("wb_hwdesk_agent", JSON.stringify({
+    preset: "kimi", baseUrl: "https://api.moonshot.cn/v1", apiKey: "sk-legacy", model: "moonshot-v1-8k"
+  }));
+  Agent.load();
+  assert.equal(Agent.config.keys.kimi, "sk-legacy");
+  assert.equal(Agent.config.apiKey, "sk-legacy");
+});
+test("usablePresets lists only presets with keys, in PRESET_ORDER", () => {
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {} };
+  Agent.setKey("qwen", "sk-q");
+  Agent.setKey("deepseek", "sk-d");
+  assert.deepEqual(Agent.usablePresets(), ["deepseek", "qwen"]);
+});
+test("use() applies a known preset and rejects unknown ones", () => {
+  assert.equal(Agent.use("nope"), false);
+  assert.equal(Agent.use("kimi"), true);
+  assert.equal(Agent.config.preset, "kimi");
   Agent.applyPreset("deepseek");
 });
 

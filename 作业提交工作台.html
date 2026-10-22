@@ -174,6 +174,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <button data-view="approvals"><span class="ico">✅</span>审批</button>
       <button data-view="actions"><span class="ico">⚡</span>行动</button>
       <button data-view="insights"><span class="ico">📊</span>洞察</button>
+      <button data-view="agent"><span class="ico">🤖</span>Agent</button>
       <button data-view="settings"><span class="ico">⚙️</span>设置</button>
     </nav>
     <div class="sync" style="margin-top:16px"><span class="dot"></span><span id="syncText">本地模式</span></div>
@@ -426,34 +427,36 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="card"><div id="logBox"></div></div>
   </section>
 
-  <!-- ========== 8) 设置 ========== -->
-  <section class="view" id="view-settings">
-    <div class="section-title"><h2>AI 直连</h2><span class="hint">点「AI 代提交」直接派发给下面的 AI，不再经过 WorkBuddy</span></div>
+  <!-- ========== 8) Agent 配置（独立板块：对话 / 代提交的一切设置都在这里） ========== -->
+  <section class="view" id="view-agent">
+    <div class="section-title"><h2>Agent · 对话与代提交</h2><span class="hint">配好一次，作业卡点「💬 对话 / AI 代提交」直接在工作台开聊，不再弹配置</span></div>
+    <div class="card" style="padding:14px">
+      <div style="display:grid;gap:10px;max-width:520px">
+        <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
+          <span class="hint" id="agHint"></span></div>
+        <div><label class="f">API Key（按预设分开保存，换 Agent 不丢；只写本机，不上传）</label><input type="password" id="agKey" placeholder="sk-...">
+          <span class="hint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
+        <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
+        <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
+      </div>
+      <p class="hint" style="margin:8px 0 0">浏览器直连第三方接口可能被 CORS 拦；被拦时换预设（DeepSeek / Kimi / 通义一般可直连）或填自建网关地址。</p>
+      <footer class="ops" style="margin:12px 0 0">
+        <button class="btn sm primary" id="agSave">保存配置</button>
+      </footer>
+    </div>
+    <div class="section-title"><h2>默认执行 AI（网页直连）</h2><span class="hint">仅供「工作流 · 按方案执行」派发网页 AI 使用；作业卡上的对话不再打开浏览器</span></div>
     <div class="card" style="padding:14px">
       <label class="f" style="max-width:280px">默认执行 AI
         <select id="selDefaultAi" style="width:100%"></select>
       </label>
       <p class="hint" style="margin:8px 0 0">
-        选「每次询问」时会弹出选择器；在弹出选择器里也可以点「设为默认」。
-        直连方式 = 自动复制指令 + 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
-        「WorkBuddy（本地代理）」保留旧流程：可代登录学在城院完成提交。
+        选「每次询问」时按方案执行会弹出选择器。直连方式 = 自动复制指令 + 打开对应 AI 网页对话。
       </p>
     </div>
-    <div class="section-title"><h2>Agent 对话 API</h2><span class="hint">作业卡「💬 对话」直连大模型，Key 只存本机 localStorage</span></div>
-    <div class="card" style="padding:14px">
-      <div style="display:grid;gap:10px;max-width:520px">
-        <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
-          <span class="hint" id="agHint"></span></div>
-        <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
-        <div><label class="f">API Key（只写本机，不进页面源码、不上传）</label><input type="password" id="agKey" placeholder="sk-...">
-          <span class="hint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
-        <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
-      </div>
-      <p class="hint" style="margin:8px 0 0">浏览器直连第三方接口可能被 CORS 拦；被拦时改用本机代理网关，或在设置里填自建网关地址。</p>
-      <footer class="ops" style="margin:12px 0 0">
-        <button class="btn sm primary" id="agSave">保存配置</button>
-      </footer>
-    </div>
+  </section>
+
+  <!-- ========== 9) 设置 ========== -->
+  <section class="view" id="view-settings">
     <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
       <footer class="ops" style="margin:0">
@@ -495,7 +498,18 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .ai-pick-item b{font-size:14px}
   .ai-pick-item .hint{display:block}
 </style>
-<!-- 作业 Agent 对话抽屉：每个作业独立对话，成稿后直接通过工作台提交 -->
+<!-- Agent 选择器（点「AI 代提交」弹出：只选 Agent，选完直接在工作台开聊，不开浏览器） -->
+<div class="ai-picker-mask" id="agPick" style="display:none">
+  <div class="ai-picker">
+    <div class="ai-picker-title">选择 Agent <span class="hint" id="agPickFor"></span></div>
+    <div id="agPickList"></div>
+    <div class="hint" style="margin-top:8px;line-height:1.5;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>点一个 Agent 立即开聊；带 ✓ 的已配好 Key</span>
+      <button class="btn sm" type="button" id="agPickCfg">管理 Agent 配置</button>
+    </div>
+  </div>
+</div>
+<!-- 作业 Agent 对话抽屉：每个作业独立对话，成稿后在工作台内预览、选择性提交 -->
 <div class="chat-mask" id="chatPanel" style="display:none">
   <div class="chat-drawer">
     <div class="chat-head">
@@ -516,6 +530,16 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-risk" id="chatRisk" style="display:none"></div>
+    <div class="chat-final" id="chatFinal" style="display:none">
+      <div class="chat-final-head"><b>提交预览</b><span class="hint">可直接删改，只提交你要交的内容</span></div>
+      <textarea id="chatFinalText" placeholder="成稿内容（可编辑）"></textarea>
+      <div class="hint" id="chatFinalRisk" style="margin-top:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn sm primary" id="chatFinalSend">✅ 确认提交</button>
+        <button class="btn sm" id="chatFinalReview">送审批队列</button>
+        <button class="btn sm" id="chatFinalCancel">返回对话</button>
+      </div>
+    </div>
     <div class="chat-foot">
       <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
@@ -537,6 +561,14 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .chat-foot{border-top:1px solid #eef0f4;padding:12px 16px;background:#fff}
   .chat-foot textarea{width:100%;min-height:70px;resize:vertical}
   .chat-risk{margin:0 16px;padding:8px 12px;background:#fff8ec;border:1px solid #f2dfb6;border-radius:8px;font-size:12.5px;white-space:pre-wrap}
+  .chat-final{border-top:1px solid #eef0f4;padding:12px 16px;background:#f4f7ff}
+  .chat-final-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+  .chat-final textarea{width:100%;min-height:150px;max-height:40vh;resize:vertical;font-size:13px}
+  .ag-pick-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+  .ag-pick-item:hover{border-color:var(--pri,#6c5ce7);background:#f4f1ff}
+  .ag-pick-item b{font-size:14px}
+  .ag-pick-item .hint{display:block}
+  .ag-pick-item .ok-mark{color:#1a9e5c;font-weight:600}
 </style>
 <!-- 登录门禁：未登录学在城院账号不能进入工作台 -->
 <div class="login-mask" id="loginGate" style="display:none">
@@ -1078,6 +1110,54 @@ function onAiSubmit(id){
   saveState();
   refreshAll();
 }
+/* ---------- AI 代提交（新流程）：选 Agent → 工作台内嵌对话 → 预览后选择性提交 ----------
+ * 不再复制指令、不再打开 AI 网页；网页直连（bridge.js）仅供「按方案执行」使用。 */
+function onAiChat(id, auto){
+  var it = findItem(id);
+  if(!it) return;
+  if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
+  Agent.load();
+  if(!Agent.ready()){
+    showToast("先到「Agent」板块配好 Key，之后一键直达");
+    switchView("agent"); fillAgentSettings(); return;
+  }
+  if(auto && Agent.usablePresets().length > 1){ openAgPick(id); return; }
+  startAgentChat(id, auto);
+}
+var _agPickId = null;
+function openAgPick(itemId){
+  _agPickId = itemId;
+  var it = findItem(itemId);
+  el("agPickFor").textContent = it ? "（" + it.name + "）" : "";
+  var usable = Agent.usablePresets();
+  var html = "";
+  Agent.PRESET_ORDER.forEach(function(pid){
+    var p = Agent.PRESETS[pid];
+    var ok = usable.indexOf(pid) !== -1;
+    html += '<div class="ag-pick-item" data-ag="' + pid + '" role="button" tabindex="0">'
+      + '<span><b>' + esc(p.label) + '</b>' + (ok ? ' <span class="ok-mark">✓</span>' : '')
+      + '<span class="hint">' + esc(p.hint) + '</span></span>'
+      + '</div>';
+  });
+  el("agPickList").innerHTML = html;
+  el("agPick").style.display = "flex";
+}
+function closeAgPick(){ el("agPick").style.display = "none"; _agPickId = null; }
+function confirmAgPick(presetId){
+  if(_agPickId === null) return;
+  var itemId = _agPickId;
+  if(!Agent.PRESETS[presetId]) return;
+  Agent.load();
+  if(!Agent.config.keys[presetId]){
+    Agent.use(presetId);
+    closeAgPick();
+    showToast("先给 " + Agent.PRESETS[presetId].label + " 配一个 Key");
+    switchView("agent"); fillAgentSettings(); return;
+  }
+  Agent.use(presetId);
+  closeAgPick();
+  startAgentChat(itemId, true);
+}
 /* ---------- AI 派发（bridge.js）：API 直连的走工作台内嵌对话，其余复制指令 + 打开对应 AI 网页 ---------- */
 function dispatchToAi(cmd, category, taskName, taskId){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
@@ -1162,6 +1242,10 @@ function buildAgentCtx(it){
 }
 function onChatOpen(id){
   if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
+  startAgentChat(id, false);
+}
+/* 打开（或切入）某作业的对话抽屉；auto=true 时自动发一条开工指令让 Agent 直接产出成稿 */
+function startAgentChat(id, auto){
   var it = findItem(id);
   if(!it) return;
   _chatId = id;
@@ -1201,8 +1285,13 @@ function onChatOpen(id){
       }
     });
   }
+  closeChatFinal();
   el("chatPanel").style.display = "flex";
   renderChat(chat);
+  if(auto && !chat.messages.length && !_chatBusy){
+    el("chatInput").value = "请直接完成这项作业并给出【最终交付】，不要反问，直接输出。";
+    onChatSend();
+  }
 }
 /* 抽屉内联配置：预设 / Key / 模型，保存后配置条收起，纯聊天 */
 function fillChatSetup(){
@@ -1400,46 +1489,70 @@ function showChatRisk(chat){
   out.textContent = text;
   out.style.display = "block";
 }
-function onChatSubmit(){
+/* 提交预览：成稿可删改（选择性提交），确认后直接提交或送审批 */
+function closeChatFinal(){
+  el("chatFinal").style.display = "none";
+}
+function onChatSubmitOpen(){
   if(_chatId === null) return;
   var chat = Agent.loadChat(_chatId);
   var info = Agent.extractDeliverableInfo(chat.messages);
   var d = info.text;
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
-  if(!info.confirmed){
-    /* fallback 到「好的已修改」这类短句时不再直接当交付，先二次确认 */
-    var preview = d.length > 60 ? d.slice(0, 60) + "…" : d;
-    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把最后一条回复（" + d.length + " 字）作为交付内容：\n「"
-      + preview + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
+  _chatRiskScore = null;
+  var riskText = "共 " + d.length + " 字，提交前可删改";
+  if(typeof Humanize !== "undefined"){
+    var r = Humanize.risk(d);
+    if(r){ _chatRiskScore = r.score; riskText = "检测风险 " + r.score + " / 100（" + r.label + "）· 提交前可删改"; }
+  }
+  el("chatFinalText").value = d;
+  el("chatFinalRisk").textContent = riskText;
+  el("chatFinal").style.display = "block";
+  el("chatFinalText").focus();
+}
+function onChatFinal(mode){
+  if(_chatId === null) return;
+  var text = el("chatFinalText").value.trim();
+  if(!text){ showToast("提交内容是空的"); return; }
+  if(_chatId !== null && typeof Agent.extractDeliverableInfo === "function"){
+    var _info = Agent.extractDeliverableInfo(Agent.loadChat(_chatId).messages);
+    if(!_info.confirmed){
+      /* 无【最终交付】定稿块（fallback 到「好的已修改」这类短句）时先二次确认 */
+      var _pv = text.length > 60 ? text.slice(0, 60) + "…" : text;
+      if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把预览内容（" + text.length + " 字）作为交付内容：\n「"
+        + _pv + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
+    }
   }
   var it = findItem(_chatId);
   if(!it) return;
-  var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
   var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
+  var direct = (mode === "direct");
+  var needsReview = !direct && (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
   if(typeof DB !== "undefined"){
-    /* 与全仓一致：成稿进审批队列（review=待自查 / dispatched=待执行），
-     * 确认学在城院回执后才置 submitted —— 工作台写入 ≠ 平台已收到 */
+    /* direct = 工作台内确认后直接置已提交；review = 维持审批队列语义（拿到平台回执才算完） */
     DB.insert("submissions", {
       itemId: it.id, name: it.name, course: it.course,
       ai: "Agent对话·" + preset.label,
-      status: "pending", stage: needsReview ? "review" : "dispatched",
+      status: direct ? "submitted" : "pending",
+      stage: direct ? "direct" : (needsReview ? "review" : "dispatched"),
       risk: _chatRiskScore, time: nowStr()
     });
   }
   it.ai = true;
-  it.status = "review";   // 无论待自查还是待执行，都还没拿到平台回执
-  if(needsReview){
+  it.status = direct ? "submitted" : "review";
+  if(direct){
+    it.reviewPending = false;
+  }else if(needsReview){
     /* 进审批队列的作业，列表状态同步标为待自查，避免「列表是待完成 / 审批里是待审」不一致 */
     it.reviewPending = true;
   }else{
     it.reviewPending = false;
   }
-  addLog("Agent 对话成稿" + (needsReview ? "送审" : "派发") + "：" + it.name);
+  addLog((direct ? "Agent 成稿已直接提交" : "Agent 成稿送审批") + "：" + it.name);
   saveState(); refreshAll();
+  closeChatFinal();
   closeChat();
-  showToast(needsReview
-    ? "草稿已进审批队列，自查通过后交付"
-    : "成稿已进审批队列（待执行），拿到平台回执后点「确认已提交」");
+  showToast(direct ? "已提交 ✓（交付记录里可撤回）" : "已送审批队列");
 }
 function onChatClear(){
   if(_chatId === null) return;
@@ -2091,6 +2204,7 @@ function bind(){
     });
   }
 
+  /* 作业卡按钮：💬 对话 = 直接开聊；AI 代提交 = 选 Agent → 工作台内自动开工 */
   /* AI 对话（多 Agent） */
   el("chatTask").addEventListener("change", function(e){
     state.chat.taskId = e.target.value ? +e.target.value : null;
@@ -2110,13 +2224,13 @@ function bind(){
 
   el("todayBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-ai]");
-    if(b) onAiSubmit(+b.getAttribute("data-ai"));
+    if(b) onAiChat(+b.getAttribute("data-ai"), true);
     var c = e.target.closest("[data-chat]");
     if(c) onChatOpen(+c.getAttribute("data-chat"));
   });
   el("hwList").addEventListener("click", function(e){
     var t;
-    if((t = e.target.closest("[data-ai]"))) onAiSubmit(+t.getAttribute("data-ai"));
+    if((t = e.target.closest("[data-ai]"))) onAiChat(+t.getAttribute("data-ai"), true);
     else if((t = e.target.closest("[data-chat]"))) onChatOpen(+t.getAttribute("data-chat"));
     else if((t = e.target.closest("[data-done]"))) onToggleDone(+t.getAttribute("data-done"), true);
     else if((t = e.target.closest("[data-undo]"))) onToggleDone(+t.getAttribute("data-undo"), false);
@@ -2125,7 +2239,10 @@ function bind(){
   el("chatClose").addEventListener("click", closeChat);
   el("chatClear").addEventListener("click", onChatClear);
   el("chatSend").addEventListener("click", onChatSend);
-  el("chatSubmit").addEventListener("click", onChatSubmit);
+  el("chatSubmit").addEventListener("click", onChatSubmitOpen);
+  el("chatFinalSend").addEventListener("click", function(){ onChatFinal("direct"); });
+  el("chatFinalReview").addEventListener("click", function(){ onChatFinal("review"); });
+  el("chatFinalCancel").addEventListener("click", closeChatFinal);
   el("hubInput").addEventListener("keydown", function(e){
     if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
   });
@@ -2137,6 +2254,26 @@ function bind(){
   });
   el("chatInput").addEventListener("keydown", function(e){
     if(e.key === "Escape") closeChat();
+  });
+
+  /* Agent 选择器（极简：点一行就开聊） */
+  el("agPickList").addEventListener("click", function(e){
+    var row = e.target.closest(".ag-pick-item[data-ag]");
+    if(row) confirmAgPick(row.getAttribute("data-ag"));
+  });
+  el("agPickList").addEventListener("keydown", function(e){
+    if(e.key !== "Enter" && e.key !== " ") return;
+    var row = e.target.closest(".ag-pick-item[data-ag]");
+    if(row){ e.preventDefault(); confirmAgPick(row.getAttribute("data-ag")); }
+  });
+  el("agPickCfg").addEventListener("click", function(){
+    closeAgPick(); switchView("agent"); fillAgentSettings();
+  });
+  el("agPick").addEventListener("click", function(e){
+    if(e.target === el("agPick")) closeAgPick();
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && el("agPick").style.display !== "none") closeAgPick();
   });
 
   /* 设置页：Agent 对话 API
@@ -2152,11 +2289,11 @@ function bind(){
       Agent.load();
       Agent.config.preset = el("agPreset").value;
       Agent.config.baseUrl = el("agUrl").value.trim();
-      Agent.config.apiKey = el("agKey").value.trim();
+      Agent.setKey(Agent.config.preset, el("agKey").value.trim());
       Agent.config.model = el("agModel").value.trim();
       Agent.save();
-      addLog("Agent 对话 API 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "）");
-      showToast(Agent.ready() ? "已保存，作业卡的「💬 对话」可用了" : "已保存（还差 Key / Model，配齐才能开聊）");
+      addLog("Agent 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "，已配 Key：" + Agent.usablePresets().length + " 个预设）");
+      showToast(Agent.ready() ? "已保存，作业卡「💬 对话 / AI 代提交」直接可用" : "已保存（还差 Key / Model，配齐才能开聊）");
     });
   }
   el("filterRow").addEventListener("click", function(e){
