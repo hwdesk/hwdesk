@@ -382,24 +382,19 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         「WorkBuddy（本地代理）」保留旧流程：可代登录学在城院完成提交。
       </p>
     </div>
-    <div class="section-title"><h2>Agent 对话 API</h2><span class="hint">作业卡「💬 对话」用的直连接口；Key 只存本机 localStorage</span></div>
+    <div class="section-title"><h2>Agent 对话 API</h2><span class="hint">作业卡「💬 对话」直连大模型，Key 只存本机 localStorage</span></div>
     <div class="card" style="padding:14px">
-      <label class="f" style="max-width:280px">预设
-        <select id="agPreset" style="width:100%"></select>
-      </label>
-      <label class="f" style="max-width:420px">Base URL
-        <input id="agUrl" placeholder="https://api.deepseek.com/v1" style="width:100%">
-      </label>
-      <label class="f" style="max-width:420px">API Key
-        <input id="agKey" type="password" placeholder="sk-…" style="width:100%">
-      </label>
-      <label class="f" style="max-width:420px">模型
-        <input id="agModel" placeholder="deepseek-chat" style="width:100%">
-      </label>
-      <p class="hint" id="agHint" style="margin:8px 0 0"></p>
-      <p style="margin:6px 0 0"><a id="agKeyLink" target="_blank" rel="noopener" class="hint">申请 API Key →</a></p>
-      <footer class="ops" style="margin:10px 0 0">
-        <button class="btn sm primary" id="agSave">保存 Agent 配置</button>
+      <div style="display:grid;gap:10px;max-width:520px">
+        <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
+          <span class="hint" id="agHint"></span></div>
+        <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
+        <div><label class="f">API Key（只写本机，不进页面源码、不上传）</label><input type="password" id="agKey" placeholder="sk-...">
+          <span class="hint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
+        <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
+      </div>
+      <p class="hint" style="margin:8px 0 0">浏览器直连第三方接口可能被 CORS 拦；被拦时改用本机代理网关，或在设置里填自建网关地址。</p>
+      <footer class="ops" style="margin:12px 0 0">
+        <button class="btn sm primary" id="agSave">保存配置</button>
       </footer>
     </div>
     <div class="section-title"><h2>数据管理</h2></div>
@@ -431,6 +426,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div style="text-align:right;margin-top:10px">
       <button class="btn sm" id="aiPickerCancel">取消</button>
     </div>
+    <div class="hint" style="margin-top:8px;line-height:1.5">点一行 = 本次用它执行；「设为默认」= 记住选择并派发；Esc 或点弹窗外空白处 = 取消</div>
   </div>
 </div>
 <style>
@@ -899,6 +895,7 @@ function dispatchToAi(cmd, category, taskName){
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
 function doDispatch(plan, cmd, taskName){
+  showToast("正在派发给 " + plan.label + "…");
   copyText(cmd);
   if(plan.action === "open+copy"){ window.open(plan.url, "_blank"); }
   showToast(Bridge.toastText(plan));
@@ -914,9 +911,9 @@ function openAiPicker(cmd, category, taskName){
   var html = "";
   Bridge.ORDER.forEach(function(id){
     var ai = Bridge.AI[id];
-    html += '<div class="ai-pick-item" data-ai="' + id + '">'
+    html += '<div class="ai-pick-item" data-ai="' + id + '" role="button" tabindex="0">'
       + '<span><b>' + esc(ai.label) + '</b><span class="hint">' + esc(ai.desc) + '</span></span>'
-      + '<button class="btn sm" data-setdef="' + id + '">设为默认</button></div>';
+      + '<button class="btn sm" type="button" data-setdef="' + id + '">设为默认</button></div>';
   });
   el("aiPickerList").innerHTML = html;
   el("aiPicker").style.display = "flex";
@@ -945,7 +942,6 @@ function refreshDefaultAiSelect(){
   Bridge.load();
   sel.value = Bridge.prefs.defaultAi || "";
 }
-/* ---------- 作业 Agent 对话（agent.js + OpenAI 兼容 API） ---------- */
 var _chatId = null, _chatBusy = false, _chatRiskScore = null;
 function buildAgentCtx(it){
   var ctx = {};
@@ -1101,18 +1097,23 @@ function onChatSubmit(){
   var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
   var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
   if(typeof DB !== "undefined"){
+    /* 与全仓一致：成稿进审批队列（review=待自查 / dispatched=待执行），
+     * 确认学在城院回执后才置 submitted —— 工作台写入 ≠ 平台已收到 */
     DB.insert("submissions", {
       itemId: it.id, name: it.name, course: it.course,
       ai: "Agent对话·" + preset.label,
-      status: needsReview ? "pending" : "submitted", risk: _chatRiskScore, time: nowStr()
+      status: "pending", stage: needsReview ? "review" : "dispatched",
+      risk: _chatRiskScore, time: nowStr()
     });
   }
   it.ai = true;
-  it.status = needsReview ? "review" : "submitted";   // 送审时列表与审批队列状态一致
-  addLog("Agent 对话成稿" + (needsReview ? "送审" : "并提交") + "：" + it.name);
+  it.status = "review";   // 无论待自查还是待执行，都还没拿到平台回执
+  addLog("Agent 对话成稿" + (needsReview ? "送审" : "派发") + "：" + it.name);
   saveState(); refreshAll();
   closeChat();
-  showToast(needsReview ? "草稿已进审批队列，自查通过后交付" : "已通过工作台提交");
+  showToast(needsReview
+    ? "草稿已进审批队列，自查通过后交付"
+    : "成稿已进审批队列（待执行），拿到平台回执后点「确认已提交」");
 }
 function onChatClear(){
   if(_chatId === null) return;
@@ -1135,6 +1136,7 @@ function closeChat(){
 /* 设置页：Agent 对话 API 配置 */
 function fillAgentSettings(){
   if(typeof Agent === "undefined") return;
+  if(!el("agPreset")) return;   /* 设置区缺失时静默跳过，不打断初始化 */
   Agent.load();
   var sel = el("agPreset"), html = "";
   Agent.PRESET_ORDER.forEach(function(id){
@@ -1456,32 +1458,37 @@ function bind(){
 
   el("btnRisk").addEventListener("click", onRiskCheck);
 
-  /* ---------- AI 直连选择器 / 设置页默认 AI（bridge.js） ---------- */
+  /* AI 直连选择器（「选择执行 AI」）
+   * 之前这些控件一个监听器都没有 → 取消点不动、选 AI 无反应，只能刷新页面退出 */
   el("aiPickerCancel").addEventListener("click", closeAiPicker);
-  /* 点遮罩空白处关闭（点内部卡片不关） */
   el("aiPicker").addEventListener("click", function(e){
-    if(e.target === el("aiPicker")) closeAiPicker();
+    if(e.target === el("aiPicker")) closeAiPicker();          /* 点遮罩空白处 = 取消 */
   });
-  /* ESC 关闭 */
+  el("aiPickerList").addEventListener("click", function(e){
+    var setdef = e.target.closest("[data-setdef]");
+    if(setdef){ confirmAiPick(setdef.getAttribute("data-setdef"), true); return; }  /* 记住 + 派发 */
+    var row = e.target.closest(".ai-pick-item[data-ai]");
+    if(row) confirmAiPick(row.getAttribute("data-ai"), false);                      /* 仅本次 */
+  });
+  el("aiPickerList").addEventListener("keydown", function(e){
+    if(e.key !== "Enter" && e.key !== " ") return;
+    var row = e.target.closest(".ai-pick-item[data-ai]");
+    if(!row) return;
+    e.preventDefault();
+    confirmAiPick(row.getAttribute("data-ai"), false);
+  });
   document.addEventListener("keydown", function(e){
     if(e.key === "Escape" && el("aiPicker").style.display !== "none") closeAiPicker();
   });
-  /* 选择器列表：点 AI 项 = 本次用它派发；点「设为默认」= 设默认并派发 */
-  el("aiPickerList").addEventListener("click", function(e){
-    var item = e.target.closest(".ai-pick-item");
-    if(!item) return;
-    var id = item.getAttribute("data-ai");
-    if(!Bridge.AI[id]) return;
-    confirmAiPick(id, !!e.target.closest("[data-setdef]"));
-  });
-  /* 设置页「默认执行 AI」下拉 */
-  el("selDefaultAi").addEventListener("change", function(e){
-    var id = e.target.value;
-    Bridge.setPref("defaultAi", id);
-    addLog(id ? "已设默认执行 AI：" + Bridge.AI[id].label : "默认执行 AI 已改为每次询问");
-    saveState();
-  });
-
+  /* 设置页「默认执行 AI」下拉（bridge.js） */
+  if(el("selDefaultAi")){
+    el("selDefaultAi").addEventListener("change", function(e){
+      var id = e.target.value;
+      Bridge.setPref("defaultAi", id);
+      addLog(id ? "已设默认执行 AI：" + Bridge.AI[id].label : "默认执行 AI 已改为每次询问");
+      saveState();
+    });
+  }
 
   /* 作业 Agent 对话 */
   el("todayBox").addEventListener("click", function(e){
@@ -1509,26 +1516,34 @@ function bind(){
     if(e.key === "Escape") closeChat();
   });
 
-  /* 设置页：Agent 对话 API */
-  el("agPreset").addEventListener("change", function(e){
-    Agent.applyPreset(e.target.value);
-    fillAgentSettings();
-    addLog("Agent 预设切换为：" + Agent.PRESETS[e.target.value].label);
-  });
-  el("agSave").addEventListener("click", function(){
-    Agent.load();
-    Agent.config.preset = el("agPreset").value;
-    Agent.config.baseUrl = el("agUrl").value.trim();
-    Agent.config.apiKey = el("agKey").value.trim();
-    Agent.config.model = el("agModel").value.trim();
-    Agent.save();
-    addLog("Agent 对话 API 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "）");
-    showToast(Agent.ready() ? "已保存，作业卡的「💬 对话」可用了" : "已保存（还差 Key / Model，配齐才能开聊）");
-  });
+  /* 设置页：Agent 对话 API
+   * agent.js 没加载 / 设置区缺失时整段跳过。以前这里 el("agPreset") 是 null，
+   * 一抛错就把 bind() 剩下的绑定和整个页面初始化全带崩（表现为「按键没反应」） */
+  if(typeof Agent !== "undefined" && el("agPreset") && el("agSave")){
+    el("agPreset").addEventListener("change", function(e){
+      Agent.applyPreset(e.target.value);
+      fillAgentSettings();
+      addLog("Agent 预设切换为：" + Agent.PRESETS[e.target.value].label);
+    });
+    el("agSave").addEventListener("click", function(){
+      Agent.load();
+      Agent.config.preset = el("agPreset").value;
+      Agent.config.baseUrl = el("agUrl").value.trim();
+      Agent.config.apiKey = el("agKey").value.trim();
+      Agent.config.model = el("agModel").value.trim();
+      Agent.save();
+      addLog("Agent 对话 API 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "）");
+      showToast(Agent.ready() ? "已保存，作业卡的「💬 对话」可用了" : "已保存（还差 Key / Model，配齐才能开聊）");
+    });
+  }
   el("filterRow").addEventListener("click", function(e){
     var c = e.target.closest("[data-f]");
     if(c){ state.filter = c.getAttribute("data-f"); refreshAll(); }
   });
+}
+/* 初始化分步容错：任一步报错只记日志，不让工作台停在半初始化状态 */
+function safe(name, fn){
+  try { fn(); } catch(e){ console.error("[hwdesk] " + name + " failed:", e); }
 }
 document.addEventListener("DOMContentLoaded", function(){
   loadState();
@@ -1536,12 +1551,12 @@ document.addEventListener("DOMContentLoaded", function(){
   if(state.items.length >= 30){
     setTimeout(function(){ showToast("数据已积累 30 条，建议导出备份"); }, 800);
   }
-  bind();
-  refreshDefaultAiSelect();
-  fillAgentSettings();
-  refreshSsoStatus();
-  refreshAll();
-  switchView("overview");
+  safe("bind", bind);
+  safe("refreshDefaultAiSelect", function(){ if(typeof Bridge !== "undefined") refreshDefaultAiSelect(); });
+  safe("fillAgentSettings", function(){ if(typeof Agent !== "undefined") fillAgentSettings(); });
+  safe("refreshSsoStatus", function(){ if(typeof Sso !== "undefined") refreshSsoStatus(); });
+  safe("refreshAll", refreshAll);
+  safe("switchView", function(){ switchView("overview"); });
 });
 </script>
 </body>
