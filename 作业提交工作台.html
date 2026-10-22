@@ -1560,14 +1560,27 @@ function onLogin(){
   var err = el("loginErr"), btn = el("btnLogin");
   err.style.display = "none"; err.textContent = "";
   btn.disabled = true; btn.textContent = "正在向学在城院验证账号…";
+  /* 20s 超时：cx_login 是真登录请求，平台无响应时不能让按钮一直转圈 */
+  var ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var timer = ac ? setTimeout(function(){ ac.abort(); }, 20000) : null;
   fetch(DIRECT_URL + "/verify", {
     method: "POST",
     headers: { "Content-Type": "text/plain" },   /* 免 CORS 预检 */
-    body: JSON.stringify({ account: acc, password: pw })
-  }).then(function(r){ return r.json(); }).then(function(res){
+    body: JSON.stringify({ account: acc, password: pw }),
+    signal: ac ? ac.signal : undefined
+  }).then(function(r){
+    /* 带上 HTTP 状态：旧版 syncserver.py 没有 /verify，会回 404 {"error":"not found"}，
+       只有区分开才能让用户知道要重启本机桥，而不是对着 not found 无从下手 */
+    return r.json().then(function(res){ return { status: r.status, res: res }; });
+  }).then(function(w){
+    if(timer) clearTimeout(timer);
     btn.disabled = false; btn.textContent = "登录进入工作台";
+    var res = w.res;
     if(!res.ok){
-      err.textContent = "✗ " + (res.error || "账号或密码不正确");
+      var msg = res.error || "账号或密码不正确";
+      err.textContent = "✗ " + ((w.status === 404 || msg === "not found")
+        ? "本机桥是旧版（没有 /verify 接口），请关掉旧窗口重新运行 python syncserver.py 后再登录"
+        : msg);
       err.style.display = "block";
       addLog("登录被拒（平台验证失败）：" + SSO.mask(acc));
       return;
@@ -1578,12 +1591,17 @@ function onLogin(){
     refreshSsoStatus();
     addLog("登录工作台（平台验证通过）：" + SSO.mask(acc));
     showToast("已登录：" + SSO.mask(acc));
-  }).catch(function(){
+  }).catch(function(e){
+    if(timer) clearTimeout(timer);
     btn.disabled = false; btn.textContent = "登录进入工作台";
-    err.innerHTML = "✗ 连不上本机验证服务（127.0.0.1:8765），无法核对账号密码。"
-      + "请在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着）后再登录。";
+    if(e && e.name === "AbortError"){
+      err.textContent = "✗ 验证超时（20 秒无响应）：学在城院可能连不上，检查网络后重试。";
+    }else{
+      err.innerHTML = "✗ 连不上本机验证服务（127.0.0.1:8765），无法核对账号密码。"
+        + "请在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着）后再登录。";
+    }
     err.style.display = "block";
-    addLog("登录被拒（本机验证服务未启动）");
+    addLog("登录被拒（本机验证服务未启动或超时）");
   });
 }
 function onLogout(){
