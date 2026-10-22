@@ -106,4 +106,33 @@ test("startup runs each step through safe() so one failure cannot abort init", (
   }
 });
 
+/* ---------- 5. 流式对话的失败恢复与落盘（回归：失败一次按钮永久卡死） ---------- */
+test("streamChat failure path resets _chatBusy and the send button", () => {
+  has(/\.catch\(function\(err\)\{\s*resetChatBtn\(\);/, "catch() -> resetChatBtn() before rendering");
+  has(/function resetChatBtn\(\)\{[\s\S]{0,160}_chatBusy = false;/, "resetChatBtn() clears _chatBusy");
+  has(/function resetChatBtn\(\)\{[\s\S]{0,300}b\.textContent = "发送"/, 'resetChatBtn() restores the "发送" label');
+});
+test("streaming persists partial output instead of saving only at the end", () => {
+  has(/Date\.now\(\) - _lastSave > 1000\)\{ _lastSave = Date\.now\(\); Agent\.saveChat\(_chatId, chat\); \}/,
+      "periodic Agent.saveChat() while streaming");
+  has(/function closeChat\(\)\{[\s\S]{0,200}if\(_chatBusy[\s\S]{0,120}Agent\.saveChat\(_chatId, c\);/,
+      "closeChat() flushes a half-finished answer");
+});
+
+/* ---------- 6. 交付二次确认（回归：「好的已修改」被当成交付） ---------- */
+test("submitting without a 【最终交付】 block asks for confirmation", () => {
+  has(/if\(!info\.confirmed\)\{[\s\S]{0,400}window\.confirm\(/, "confirm() when the deliverable is only a fallback");
+  has(/Agent\.extractDeliverableInfo\(chat\.messages\)/, "onChatSubmit uses extractDeliverableInfo()");
+});
+test("needsReview keeps the card and the approval queue in sync", () => {
+  has(/if\(needsReview\)\{[\s\S]{0,200}it\.reviewPending = true;/, "item flagged reviewPending");
+  has(/it\.status = "submitted"; it\.reviewPending = false;/, "approval clears the flag");
+});
+
+/* ---------- 7. CORS 标注 ---------- */
+test("preset dropdown is annotated with the browser-direct (CORS) status", () => {
+  has(/Agent\.corsLabel\(id\)/, "corsLabel() used when rendering the preset options");
+  has(/浏览器直连：/, "hint line carries the CORS status");
+});
+
 console.log("\n" + passed + " passed");
