@@ -106,4 +106,41 @@ test("startup runs each step through safe() so one failure cannot abort init", (
   }
 });
 
+/* ---------- 5. AI 代提交 = 工作台内对话（回归：跳到 AI 网页版） ---------- */
+test("dispatch never opens an AI website", () => {
+  assert.ok(!/window\.open\(/.test(app), "workbench must not window.open an AI web page");
+});
+test("dispatch routes through startAgentChat (in-workbench chat)", () => {
+  has(/function startAgentChat\(id, aiId, starterCmd\)/, "startAgentChat(taskId, aiId, starterCmd)");
+  has(/if\(startAgentChat\(taskId, plan\.ai, cmd\)\) return \{ action: "chat"/,
+      "doDispatch() opens the in-workbench chat");
+});
+test("AI picker hands the task id to the chat so it opens in-workbench", () => {
+  has(/function openAiPicker\(cmd, category, taskName, taskId\)/, "openAiPicker takes taskId");
+  has(/doDispatch\(Bridge\.describe\(\{ ai: id \}\), ctx\.cmd, ctx\.taskName, ctx\.taskId\)/,
+      "confirmAiPick() forwards ctx.taskId");
+});
+test("bridge AI ids map onto Agent presets", () => {
+  has(/var AI_PRESET_MAP = \{[^}]*deepseek: "deepseek"[^}]*\}/, "AI_PRESET_MAP covers the direct-connect AIs");
+});
+
+/* ---------- 6. 对话内选产出 + 一键提交 ---------- */
+test("chat drawer exposes the output picker and one-click submit", () => {
+  for (const id of ["chatFormat", "chatPickHint", "chatSubmit"]) {
+    assert.ok(ids.has(id), "#" + id + " missing from the chat drawer");
+  }
+  assert.ok(/⚡ 一键提交/.test(html), "one-click submit button missing");
+});
+test("assistant replies are selectable as the deliverable", () => {
+  has(/data-pick="' \+ i \+ '"/, "each assistant bubble carries data-pick");
+  has(/el\("chatMsgs"\)\.addEventListener\("click"[\s\S]{0,200}\[data-pick\]/,
+      "chatMsgs click handler picks a reply");
+  has(/function chatDeliverable\(chat\)[\s\S]{0,260}_chatPick >= 0/, "chatDeliverable() prefers the picked reply");
+});
+test("one-click submit writes the deliverable with its format", () => {
+  has(/function deliveryFile\(it, text, fmt\)/, "deliveryFile() produces the file");
+  has(/format: file\.label, file: file\.name/, "submission record stores format + file name");
+  has(/function downloadFile\(name, mime, body\)/, "downloadFile() writes the chosen file type");
+});
+
 console.log("\n" + passed + " passed");
