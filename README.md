@@ -72,11 +72,20 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
+node test/bridge.test.mjs     # AI 直连桥：12 项
 ```
+
+## AI 直连（bridge.js）
+
+点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**），派发 = 自动复制指令（含上下文与去AI化要求）+ 打开对应 AI 网页对话，粘贴（Ctrl+V）发送即可。
+
+- 目标挑选优先级：按 Laya 路由类别的单独指定 > 设置页的「默认执行 AI」> 注册表自动匹配；两者都未设时弹出选择器（可在选择器里一键「设为默认」）
+- 「WorkBuddy（本地代理）」保留旧复制流程——只有它能代登录学在城院完成真正的平台提交
+- 偏好存 `wb_hwdesk_bridge` 键；`Bridge.pick(category)` / `Bridge.describe(pick)` 为纯计算 API，DOM 无关、可单测
 
 ## 桌面安装（Windows）
 
-1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
+1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js` 放到同一稳定目录（如 `C:\Users\<你>\hwdesk\`）
 2. 生成应用图标：仓库内 `hwdesk.ico` 可直接使用
 3. 生成桌面快捷方式（Chrome 应用模式）：
 
