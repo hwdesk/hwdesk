@@ -235,6 +235,20 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <h2>数据获取 · 学在城院平台采集</h2>
       <span class="hint">代理用你登录时保存的本机凭据（每人自己的账号）</span>
     </div>
+    <div class="section-title"><h2>本机直连获取</h2><span class="hint">不用复制指令，一键把学在城院数据拉进工作台</span></div>
+    <div class="card" style="padding:14px">
+      <div class="grid2">
+        <div style="display:flex;align-items:flex-end"><button class="btn primary" id="btnDirectSync" style="width:100%">⚡ 从学在城院一键获取</button></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn" id="btnDirectHealth" style="width:100%">检查本机服务状态</button></div>
+        <div class="full ai-note" id="directOut" style="display:none;margin:0;white-space:pre-wrap"></div>
+        <div class="full ai-note" style="margin:0">
+          <b>首次使用：</b>在本项目目录运行 <b>python syncserver.py</b>（保持窗口开着），再点上面的按钮。
+          服务只监听本机 127.0.0.1:8765；页面用<b>登录门禁</b>保存的账号密码向<b>本机服务</b>发起登录采集，
+          密码不落盘、不写日志、不出本机。拉到的待办作业自动进作业库、已提交的自动进采集库留档，
+          之后的 Laya 决策与上下文简报会自动引用。服务没开时，仍可用下方「生成采集指令」由 AI 代理代采。
+        </div>
+      </div>
+    </div>
     <div class="card" style="padding:14px">
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1;min-width:220px">
@@ -554,6 +568,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 <script src="sso.js"></script>
 <script src="agents.js"></script>
 <script src="sync.js"></script>
+<script src="platform.js"></script>
 <script>
 "use strict";
 /* ---------- 数据层 ---------- */
@@ -724,7 +739,8 @@ function renderList(){
     html += '<div class="hw-item">'
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
-      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span></div>'
+      + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
+      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
   });
@@ -1102,6 +1118,7 @@ function refreshDefaultAiSelect(){
   Bridge.load();
   sel.value = Bridge.prefs.defaultAi || "";
 }
+/* ---------- 作业 Agent 对话（agent.js + OpenAI 兼容 API） ---------- */
 var _chatId = null, _chatBusy = false, _chatRiskScore = null;
 function buildAgentCtx(it){
   var ctx = {};
@@ -1165,9 +1182,15 @@ function onChatSend(){
   renderChat(chat);
   streamChat(chat);
 }
+function resetChatBtn(){
+  _chatBusy = false;
+  var b = el("chatSend");
+  if(b){ b.disabled = false; b.textContent = "发送"; }
+}
 function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
+  var _lastSave = Date.now();
   var cfg = Agent.config;
   var url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
   var body = JSON.stringify({
@@ -1181,7 +1204,6 @@ function streamChat(chat){
   })
   .then(function(body){
     var reader = body.getReader(), dec = new TextDecoder(), buf = "";
-    var lastSave = 0;
     function pump(){
       return reader.read().then(function(r){
         if(r.done){ finishChat(); return; }
@@ -1196,11 +1218,11 @@ function streamChat(chat){
             var j = JSON.parse(payload);
             var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
             if(d){
-              chat.messages[chat.messages.length - 1].content += d;
-              renderChatTail();
-              var now = Date.now();
-              if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
-            }
+            chat.messages[chat.messages.length - 1].content += d;
+            renderChatTail();
+            /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
+            if(Date.now() - _lastSave > 1000){ _lastSave = Date.now(); Agent.saveChat(_chatId, chat); }
+          }
           }catch(e){ /* 忽略半包 */ }
         });
         return pump();
@@ -1209,8 +1231,7 @@ function streamChat(chat){
     return pump();
   })
   .catch(function(err){
-    _chatBusy = false;
-    el("chatSend").disabled = false; el("chatSend").textContent = "发送";
+    resetChatBtn();                       /* 失败一次后按钮不再永久卡死 */
     chat = Agent.loadChat(_chatId);
     if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
     Agent.saveChat(_chatId, chat);
@@ -1232,7 +1253,8 @@ function finishChat(){
   showChatRisk(chat);
 }
 function showChatRisk(chat){
-  var d = Agent.extractDeliverable(chat.messages);
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
   var out = el("chatRisk");
   if(!d){ out.style.display = "none"; _chatRiskScore = null; return; }
   _chatRiskScore = null;
@@ -1241,6 +1263,10 @@ function showChatRisk(chat){
     var r = Humanize.risk(d);
     if(r){ _chatRiskScore = r.score; text = "成稿检测风险：" + r.score + " / 100（" + r.label + "）" + (r.label !== "低风险" ? " · 建议退回 Agent 重写命中段落" : " · ✓ 可以交付"); }
   }
+  if(!info.confirmed){
+    text = "未检测到【最终交付】定稿块，当前只能取最后一条回复（" + d.length + " 字）作为交付内容，"
+      + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
+  }
   if(!text) text = "成稿已就绪（" + d.length + " 字），点「用最终结果提交」交付。";
   out.textContent = text;
   out.style.display = "block";
@@ -1248,10 +1274,15 @@ function showChatRisk(chat){
 function onChatSubmit(){
   if(_chatId === null) return;
   var chat = Agent.loadChat(_chatId);
-  var d = Agent.extractDeliverable(chat.messages);
+  var info = Agent.extractDeliverableInfo(chat.messages);
+  var d = info.text;
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
-  var marked = (typeof Agent.deliverableMarked === "function") ? Agent.deliverableMarked(chat.messages) : true;
-  if(!marked && !window.confirm("最后一条回复没有【最终交付】标记（可能只是简短确认语，而非成稿）。\n确认把整条回复作为交付提交？")) return;
+  if(!info.confirmed){
+    /* fallback 到「好的已修改」这类短句时不再直接当交付，先二次确认 */
+    var preview = d.length > 60 ? d.slice(0, 60) + "…" : d;
+    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把最后一条回复（" + d.length + " 字）作为交付内容：\n「"
+      + preview + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
+  }
   var it = findItem(_chatId);
   if(!it) return;
   var needsReview = (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
@@ -1268,6 +1299,12 @@ function onChatSubmit(){
   }
   it.ai = true;
   it.status = "review";   // 无论待自查还是待执行，都还没拿到平台回执
+  if(needsReview){
+    /* 进审批队列的作业，列表状态同步标为待自查，避免「列表是待完成 / 审批里是待审」不一致 */
+    it.reviewPending = true;
+  }else{
+    it.reviewPending = false;
+  }
   addLog("Agent 对话成稿" + (needsReview ? "送审" : "派发") + "：" + it.name);
   saveState(); refreshAll();
   closeChat();
@@ -1290,6 +1327,10 @@ function onChatClear(){
   showToast("对话已清空");
 }
 function closeChat(){
+  if(_chatBusy && _chatId !== null && typeof Agent !== "undefined"){
+    var c = Agent.loadChat(_chatId);
+    Agent.saveChat(_chatId, c);          /* 生成中途关抽屉也保留已收到的内容 */
+  }
   el("chatPanel").style.display = "none";
   _chatId = null;
 }
@@ -1300,7 +1341,9 @@ function fillAgentSettings(){
   Agent.load();
   var sel = el("agPreset"), html = "";
   Agent.PRESET_ORDER.forEach(function(id){
-    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label) + '</option>';
+    var tag = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(id) : "";
+    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label)
+      + (tag ? '（' + esc(tag) + '）' : '') + '</option>';
   });
   sel.innerHTML = html;
   el("agPreset").value = Agent.config.preset;
@@ -1311,7 +1354,13 @@ function fillAgentSettings(){
 }
 function updateAgentHint(){
   var p = Agent.PRESETS[Agent.config.preset] || {};
-  el("agHint").textContent = p.hint || "";
+  var cors = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(Agent.config.preset) : "";
+  var txt = p.hint || "";
+  if(cors) txt += "｜浏览器直连：" + cors;
+  if(p.cors === "proxy" || p.cors === "custom"){
+    txt += "｜若被 CORS 拦截，baseUrl 改填本地代理（例如 http://127.0.0.1:8787/v1）。";
+  }
+  el("agHint").textContent = txt;
   el("agKeyLink").href = p.keyUrl || "#";
   el("agKeyLink").style.display = p.keyUrl ? "" : "none";
 }
@@ -1438,6 +1487,74 @@ function onSyncImport(){
   saveState(); refreshAll();
   showToast("同步结果已导入工作台");
 }
+
+/* ---------- 本机直连获取（syncserver.py，127.0.0.1:8765） ---------- */
+var DIRECT_URL = "http://127.0.0.1:8765";
+function directOut(){
+  var out = el("directOut");
+  out.style.display = "";
+  return out;
+}
+function directHelp(){
+  return "✗ 连不上本机同步服务（127.0.0.1:8765）。请在本项目目录运行 python syncserver.py 后重试（详见 README「本机直连获取」）。";
+}
+function onDirectHealth(){
+  var out = directOut();
+  out.textContent = "正在检查本机同步服务…";
+  fetch(DIRECT_URL + "/health").then(function(r){ return r.json(); }).then(function(res){
+    out.textContent = res.ok
+      ? "✓ 本机同步服务运行中（v" + res.version + "），可以一键获取了"
+      : "✗ 服务响应异常，请重启 python syncserver.py";
+  }).catch(function(){
+    out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
+  });
+}
+function onDirectSync(){
+  if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
+  var out = directOut();
+  out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
+  var body = {};
+  if(typeof SSO !== "undefined" && SSO.has()){
+    var st = SSO.get();
+    body.account = st.creds.account;      /* 只发往本机 127.0.0.1，不落盘、不写日志 */
+    body.password = st.creds.password;
+  }
+  fetch(DIRECT_URL + "/data", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res.ok){
+        out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
+        showToast("获取失败：" + (res.error || "").slice(0, 40));
+        return;
+      }
+      applyPlatformPayload(res.payload);
+    })
+    .catch(function(){
+      out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
+      showToast("本机同步服务未启动");
+    });
+}
+function applyPlatformPayload(payload){
+  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  var ops = PlatformKit.mergeOps(payload, DB.list("captures"), state.items);
+  ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
+  ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
+  ops.itemsToUpdate.forEach(function(u){
+    state.items.forEach(function(it){
+      if([it.course, it.name].join("|") === u.key) Object.assign(it, u.patch);
+    });
+  });
+  addLog("学在城院一键获取：作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
+    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条");
+  saveState();
+  refreshAll();
+  var out = directOut();
+  out.textContent = "✓ " + (payload.fetchedAt || "") + "：课程 " + (payload.courses || []).length
+    + "，作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
+    + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+  if((payload.errors || []).length) out.textContent += "\n⚠ 部分内容未取到：" + payload.errors.join("；");
+  showToast("已从学在城院获取 " + ops.stats.items + " 项");
+}
 function onCaptureSave(){
   var title = el("cTitle").value.trim();
   if(!title){ showToast("请填写标题"); return; }
@@ -1499,7 +1616,7 @@ function onApprove(id){
   DB.update("submissions", id, { status: "submitted", stage: "confirmed" });
   DB.insert("reviews", { itemId: s.itemId, name: s.name, decision: "approved", note: "", time: nowStr() });
   var it = findItem(s.itemId);
-  if(it && it.status !== "submitted"){ it.status = "submitted"; }
+  if(it){ it.status = "submitted"; it.reviewPending = false; }
   addLog((wasDispatched ? "确认已提交：" : "审批通过并交付：") + s.name);
   saveState(); refreshAll();
   showToast(wasDispatched ? "已确认提交，交付记录置为已交付" : "已通过，任务交付学在城院");
@@ -1645,7 +1762,7 @@ function onDelete(id){
 function onToggleDone(id, toDone){
   var it = findItem(id);
   if(!it) return;
-  if(toDone){ it.status = "submitted"; addLog("标记已提交：" + it.name); }
+  if(toDone){ it.status = "submitted"; it.reviewPending = false; addLog("标记已提交：" + it.name); }
   else{ it.status = "todo"; addLog("撤回为待办：" + it.name); }
   saveState(); refreshAll();
 }
@@ -1743,6 +1860,8 @@ function bind(){
   });
 
   el("btnCapGen").addEventListener("click", onCaptureGen);
+  el("btnDirectSync").addEventListener("click", onDirectSync);
+  el("btnDirectHealth").addEventListener("click", onDirectHealth);
 
   /* 登录门禁 */
   el("btnLogin").addEventListener("click", onLogin);
@@ -1815,7 +1934,6 @@ function bind(){
     });
   }
 
-  /* 作业 Agent 对话 */
   /* AI 对话（多 Agent） */
   el("chatTask").addEventListener("change", function(e){
     state.chat.taskId = e.target.value ? +e.target.value : null;
@@ -1855,6 +1973,12 @@ function bind(){
     if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
   });
   el("hubInput").addEventListener("keydown", function(e){
+    if(e.key === "Escape") closeChat();
+  });
+  el("chatInput").addEventListener("keydown", function(e){
+    if((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); onChatSend(); }
+  });
+  el("chatInput").addEventListener("keydown", function(e){
     if(e.key === "Escape") closeChat();
   });
 
