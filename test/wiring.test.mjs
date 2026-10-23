@@ -326,4 +326,41 @@ test("auto run is marked before fetching (crash-safe throttle state)", () => {
       "markRun() happens before runDirectSync({auto:true})");
 });
 
+/* ---------- 9. issue #25：选用此版 / 输出格式选择 / ⚡一键提交闭环 ---------- */
+test("assistant replies expose 选用此版 and the picked reply is the deliverable", () => {
+  has(/data-pick="/, "pick button rendered on assistant bubbles");
+  has(/function onChatPick\(i\)/, "onChatPick(i) exists");
+  has(/chat\.pick = \(chat\.pick === i\) \? null : i;/, "pick toggles and persists on the chat");
+  has(/function chatDeliverable\(\)/, "chatDeliverable() exists");
+  assert.ok(/chat\.pick != null[\s\S]{0,300}Agent\.extractDeliverableInfo/.test(app),
+      "deliverable extraction honors chat.pick before the default rule");
+  has(/el\("chatMsgs"\)\.addEventListener\(\s*"click"/, "pick buttons delegated on the message list");
+  has(/chat-b ' \+ m\.role \+ \(picked \? " picked" : ""\)/, "picked bubble gets the picked style");
+});
+test("output-format select produces .doc/.md/.txt and stores format+file", () => {
+  for (const id of ["chatFmt", "chatQuick"]) assert.ok(ids.has(id), "#" + id + " missing");
+  for (const opt of ['<option value="doc">', '<option value="md">', '<option value="txt">']) {
+    assert.ok(html.includes(opt), "format option missing: " + opt);
+  }
+  has(/function deliverFile\(fmt, text, it\)/, "deliverFile(fmt, text, it)");
+  has(/urn:schemas-microsoft-com:office:word/, ".doc uses an HTML container Word can open");
+  has(/function downloadDeliver\(f\)/, "downloadDeliver(f) writes the file locally");
+  has(/format: fmtLabel\(fmt, it\)/, "submission record stores format");
+  has(/file: f \? f\.name : ""/, "submission record stores the file name");
+  has(/localStorage\.setItem\("hwdesk_chatFmt"/, "last format choice is remembered");
+});
+test("⚡ 一键提交 closes the loop without leaving the workbench", () => {
+  has(/el\("chatQuick"\)\.addEventListener\(\s*"click",\s*onChatQuickSubmit\s*\)/, "chatQuick wired");
+  has(/function onChatQuickSubmit\(\)/, "onChatQuickSubmit exists");
+  has(/function submitDeliverable\(text, fmt, direct\)/, "shared delivery path submitDeliverable");
+  has(/it\.status = direct \? "submitted" : "review";/, "pending delivery flips the item to the review queue");
+  has(/status: direct \? "submitted" : "pending"/, "submission stays pending until the platform receipt");
+  assert.ok(!/window\.open\(/.test(app), "still no window.open anywhere");
+});
+test("UI cleanup: long help paragraphs are gone", () => {
+  assert.ok(!/怎么用？/.test(html), "行动 long how-to paragraph removed");
+  assert.ok(!/发送后到所选 AI 自己的窗口/.test(html), "old copy-flow long hint removed");
+  assert.ok(!/点开即聊）。想用你自己的模型服务时才填这里/.test(html), "chat setup long hint removed");
+});
+
 console.log("\n" + passed + " passed");

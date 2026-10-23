@@ -391,7 +391,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI</button>
         <button class="btn sm" id="btnChatReply">📥 记录 AI 回复</button>
       </div>
-      <div class="hint" style="margin-top:8px">发送后到所选 AI 自己的窗口（网页版或客户端）粘贴发送；回复粘回上方输入框点「记录 AI 回复」。觉得效果满意时，点回复气泡上的「✅ 一键交付」。</div>
+      <div class="hint" style="margin-top:8px">元宝 / WorkBuddy 走复制流程：指令粘到 AI 窗口，回复粘回记录，满意点「✅ 一键交付」。</div>
     </div>
   </section>
 
@@ -413,10 +413,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <h2>行动 · 执行与交付</h2>
       <span class="hint">按 Laya 执行计划分派 AI，完成后自动交付</span>
     </div>
-    <div class="card ai-note" style="margin:0 0 10px">
-      <b>AI 一键提交 & Laya 决策怎么用？</b><br>
-      ① 「工作流」区块按<b>交付时间 / 紧急度 / 复杂度</b>排序待办并为每项任务推荐最合适的 AI，标记需你自查的任务；② 「数据获取 / 数据资产」登记<b>学在城院的课件、作业要求、历史作业</b>作为上下文，提高正确率；③ 「AI 对话」可跟<b>任意 AI（千问 / DeepSeek / Kimi / 豆包 / 即梦 / Qoder / Claude / WorkBuddy）</b>逐项讨论，回复满意后点气泡上「一键交付」；④ 点「生成执行计划」复制完整指令（含上下文简报 + <b>去AI化润色要求</b>）粘贴给 WorkBuddy，按计划分派执行并自动提交；⑤ 需自查的任务先出草稿，到「审批」区块确认后交付。
-    </div>
+    <div class="card ai-note" style="margin:0 0 10px">工作流排优先级并推荐 AI → 数据获取登记上下文 → AI 对话产出成稿（可选用此版）→ ⚡一键提交或生成执行计划分派 → 需自查的到审批区确认。</div>
     <div class="section-title"><h2>交付记录</h2><span class="hint">AI 代提交后自动写入</span></div>
     <div class="card"><div id="subBox"></div></div>
   </section>
@@ -538,7 +535,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
     <div id="chatSetup" style="display:none;padding:12px 16px;border-bottom:1px solid #eef0f4;background:#fffdf5">
-      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认走云端通道（免配置，点开即聊）。想用你自己的模型服务时才填这里：选接口 → 填 API Key（只存本机 localStorage，不上传），保存后这里会消失</div>
+      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认云端免配置直聊；要用自己的模型才填 Key（只存本机）。</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
         <label class="f" style="flex:1;min-width:130px">接口<select id="csPreset"></select></label>
         <label class="f" style="flex:2;min-width:190px">API Key<input type="password" id="csKey" autocomplete="off" placeholder="sk-…"></label>
@@ -560,7 +557,14 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     </div>
     <div class="chat-foot">
       <textarea id="chatInput" placeholder="给 Agent 补充资料 / 修改意见（Ctrl+Enter 发送）"></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px">
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        <select id="chatFmt" title="交付文件格式：自动 = 按作业要求，不生成文件">
+          <option value="auto">按作业要求（自动）</option>
+          <option value="doc">Word 文稿（.doc）</option>
+          <option value="md">Markdown（.md）</option>
+          <option value="txt">纯文本（.txt）</option>
+        </select>
+        <button class="btn sm primary" id="chatQuick" title="选用版成稿 → 按格式落文件 → 进审批队列">⚡ 一键提交</button>
         <button class="btn sm primary" id="chatSubmit">📤 用最终结果提交</button>
         <button class="btn sm" id="chatSend">发送</button>
       </div>
@@ -575,6 +579,9 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .chat-b{max-width:86%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
   .chat-b.user{align-self:flex-end;background:var(--pri,#2f6bff);color:#fff;border-bottom-right-radius:4px}
   .chat-b.assistant{align-self:flex-start;background:#fff;border:1px solid #e8eaf0;border-bottom-left-radius:4px}
+  .chat-b.assistant.picked{border-color:#1a9e5c;box-shadow:0 0 0 2px rgba(26,158,92,.15)}
+  .chat-b .b-ops{margin-top:8px;display:flex;justify-content:flex-end}
+  .chat-b .b-ops .btn{font-size:12px;padding:4px 10px}
   .chat-b.assistant.thinking{color:#98a0b3}
   .chat-foot{border-top:1px solid #eef0f4;padding:12px 16px;background:#fff}
   .chat-foot textarea{width:100%;min-height:70px;resize:vertical}
@@ -1372,12 +1379,17 @@ function onChatSetupSave(){
 function renderChat(chat){
   var box = el("chatMsgs"), html = "";
   if(!chat.messages.length){
-    html = '<div class="empty">与 Agent 聊出成稿后，点下方「用最终结果提交」直接交付</div>';
+    html = '<div class="empty">与 Agent 聊出成稿后，点「⚡ 一键提交」或「用最终结果提交」直接交付</div>';
   }
   chat.messages.forEach(function(m, i){
     var last = (i === chat.messages.length - 1 && m.role === "assistant");
-    html += '<div class="chat-b ' + m.role + (last ? '" id="chatLast' : '') + '">'
-      + esc(m.content || (last ? "思考中…" : "")) + '</div>';
+    var picked = (m.role === "assistant" && m.content && chat.pick === i);
+    var ops = (m.role === "assistant" && m.content)
+      ? '<div class="b-ops"><button class="btn sm' + (picked ? " primary" : "") + '" data-pick="' + i + '">'
+        + (picked ? "✓ 已选用此版 · 再点取消" : "选用此版") + '</button></div>'
+      : "";
+    html += '<div class="chat-b ' + m.role + (picked ? " picked" : "") + (last ? '" id="chatLast' : '') + '">'
+      + esc(m.content || (last ? "思考中…" : "")) + ops + '</div>';
   });
   box.innerHTML = html;
   box.scrollTop = box.scrollHeight;
@@ -1511,8 +1523,20 @@ function finishChat(){
   }
   showChatRisk(chat);
 }
+/* 交付内容提取：显式「选用此版」优先（学生自己挑的版本即为交付物），
+ * 否则沿用【最终交付】定稿块 / 最后一条回复的提取规则 */
+function chatDeliverable(){
+  var chat = Agent.loadChat(_chatId);
+  if(chat.pick != null){
+    var pm = chat.messages[chat.pick];
+    if(pm && pm.role === "assistant" && pm.content) return { text: pm.content, confirmed: true, picked: true };
+  }
+  return Agent.extractDeliverableInfo(chat.messages);
+}
 function showChatRisk(chat){
-  var info = Agent.extractDeliverableInfo(chat.messages);
+  var info = (chat.pick != null && chat.messages[chat.pick] && chat.messages[chat.pick].role === "assistant" && chat.messages[chat.pick].content)
+    ? { text: chat.messages[chat.pick].content, confirmed: true, picked: true }
+    : Agent.extractDeliverableInfo(chat.messages);
   var d = info.text;
   var out = el("chatRisk");
   if(!d){ out.style.display = "none"; _chatRiskScore = null; return; }
@@ -1526,7 +1550,8 @@ function showChatRisk(chat){
     text = "未检测到【最终交付】定稿块，当前只能取最后一条回复（" + d.length + " 字）作为交付内容，"
       + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
   }
-  if(!text) text = "成稿已就绪（" + d.length + " 字），点「用最终结果提交」交付。";
+  if(!text) text = (info.picked ? "已选用此版（" + d.length + " 字），提交时用它。" : "成稿已就绪（" + d.length + " 字），")
+    + "点「⚡ 一键提交」或「用最终结果提交」交付。";
   out.textContent = text;
   out.style.display = "block";
 }
@@ -1536,12 +1561,11 @@ function closeChatFinal(){
 }
 function onChatSubmitOpen(){
   if(_chatId === null) return;
-  var chat = Agent.loadChat(_chatId);
-  var info = Agent.extractDeliverableInfo(chat.messages);
+  var info = chatDeliverable();
   var d = info.text;
   if(!d){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
   _chatRiskScore = null;
-  var riskText = "共 " + d.length + " 字，提交前可删改";
+  var riskText = (info.picked ? "已选用此版 · " : "") + "共 " + d.length + " 字，提交前可删改";
   if(typeof Humanize !== "undefined"){
     var r = Humanize.risk(d);
     if(r){ _chatRiskScore = r.score; riskText = "检测风险 " + r.score + " / 100（" + r.label + "）· 提交前可删改"; }
@@ -1551,32 +1575,51 @@ function onChatSubmitOpen(){
   el("chatFinal").style.display = "block";
   el("chatFinalText").focus();
 }
-function onChatFinal(mode){
-  if(_chatId === null) return;
-  var text = el("chatFinalText").value.trim();
-  if(!text){ showToast("提交内容是空的"); return; }
-  if(_chatId !== null && typeof Agent.extractDeliverableInfo === "function"){
-    var info = Agent.extractDeliverableInfo(Agent.loadChat(_chatId).messages);
-    if(!info.confirmed){
-      /* 无【最终交付】定稿块（fallback 到「好的已修改」这类短句）时先二次确认 */
-      var _pv = text.length > 60 ? text.slice(0, 60) + "…" : text;
-      if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把预览内容（" + text.length + " 字）作为交付内容：\n「"
-        + _pv + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】。")) return;
-    }
+/* 交付文件：fmt = doc / md / txt；auto = 不生成文件（按作业要求，纯文本交付）。
+ * Word 用 Word 能直接打开的 HTML 容器（.doc 扩展名），其余按纯文本写 */
+function deliverFile(fmt, text, it){
+  if(!fmt || fmt === "auto") return null;
+  var base = ((it && it.name) || "作业交付").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+  var name = base + "." + fmt;
+  if(fmt === "doc"){
+    var paras = text.split(/\n/).map(function(p){ return "<p>" + esc(p) + "&nbsp;</p>"; }).join("");
+    return { name: name, mime: "application/msword",
+      body: '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">'
+        + '<head><meta charset="utf-8"><title>' + esc(base) + '</title></head><body>' + paras + '</body></html>' };
   }
+  return { name: name, mime: "text/plain", body: text };
+}
+function downloadDeliver(f){
+  var blob = new Blob(["\ufeff" + f.body], { type: f.mime });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = f.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 3000);
+}
+function fmtLabel(fmt, it){
+  if(!fmt || fmt === "auto") return (it && it.format) || "文字";
+  return fmt === "doc" ? "Word文档" : fmt === "md" ? "Markdown" : "纯文本";
+}
+/* 共享交付路径：⚡ 一键提交与提交预览都走这里。
+ * direct = 工作台内确认后直接置已提交；否则记 pending 交付（审批队列，拿到平台回执才算完），
+ * 作业条目同步翻到待自查 / 已提交，闭环不离开工作台 */
+function submitDeliverable(text, fmt, direct){
   var it = findItem(_chatId);
   if(!it) return;
   var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
-  var direct = (mode === "direct");
+  var f = deliverFile(fmt, text, it);
+  if(f) downloadDeliver(f);
   var needsReview = !direct && (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
   if(typeof DB !== "undefined"){
-    /* direct = 工作台内确认后直接置已提交；review = 维持审批队列语义（拿到平台回执才算完） */
     DB.insert("submissions", {
       itemId: it.id, name: it.name, course: it.course,
       ai: "Agent对话·" + preset.label,
       status: direct ? "submitted" : "pending",
       stage: direct ? "direct" : (needsReview ? "review" : "dispatched"),
-      risk: _chatRiskScore, time: nowStr()
+      risk: _chatRiskScore, time: nowStr(),
+      format: fmtLabel(fmt, it),
+      file: f ? f.name : ""
     });
   }
   it.ai = true;
@@ -1589,11 +1632,42 @@ function onChatFinal(mode){
   }else{
     it.reviewPending = false;
   }
-  addLog((direct ? "Agent 成稿已直接提交" : "Agent 成稿送审批") + "：" + it.name);
+  addLog((direct ? "Agent 成稿已直接提交" : "⚡ 成稿已交付待审") + "：" + it.name + (f ? "（" + f.name + "）" : ""));
   saveState(); refreshAll();
   closeChatFinal();
   closeChat();
-  showToast(direct ? "已提交 ✓（交付记录里可撤回）" : "已送审批队列");
+  showToast(direct ? "已提交 ✓（交付记录里可撤回）" : "已送审批队列" + (f ? "，文件已下载：" + f.name : ""));
+}
+/* ⚡ 一键提交：不打开预览，选用版（或最后回复）成稿按所选格式落文件并进审批队列 */
+function onChatQuickSubmit(){
+  if(_chatId === null) return;
+  var info = chatDeliverable();
+  if(!info.text){ showToast("还没有可提交的结果，先和 Agent 聊出成稿"); return; }
+  submitDeliverable(info.text, el("chatFmt").value || "auto", false);
+}
+/* 「选用此版」：把这条回复标记为交付物（再点一次取消），提交/风险检测都用它 */
+function onChatPick(i){
+  if(_chatId === null) return;
+  var chat = Agent.loadChat(_chatId);
+  if(!(chat.messages[i] && chat.messages[i].role === "assistant" && chat.messages[i].content)) return;
+  chat.pick = (chat.pick === i) ? null : i;
+  Agent.saveChat(_chatId, chat);
+  renderChat(chat);
+  showChatRisk(chat);
+  showToast(chat.pick === i ? "已选用此版，提交时用它" : "已取消选用");
+}
+function onChatFinal(mode){
+  if(_chatId === null) return;
+  var text = el("chatFinalText").value.trim();
+  if(!text){ showToast("提交内容是空的"); return; }
+  var info = chatDeliverable();
+  if(!info.confirmed){
+    /* 无【最终交付】定稿块且未显式选用（fallback 到「好的已修改」这类短句）时先二次确认 */
+    var _pv = text.length > 60 ? text.slice(0, 60) + "…" : text;
+    if(!window.confirm("没有检测到【最终交付】定稿块。\n\n将把预览内容（" + text.length + " 字）作为交付内容：\n「"
+      + _pv + "」\n\n确定用它提交吗？建议回对话让 Agent 重新输出【最终交付】，或在回复上点「选用此版」。")) return;
+  }
+  submitDeliverable(text, el("chatFmt").value || "auto", mode === "direct");
 }
 function onChatClear(){
   if(_chatId === null) return;
@@ -2376,6 +2450,14 @@ function bind(){
   el("chatClear").addEventListener("click", onChatClear);
   el("chatSend").addEventListener("click", onChatSend);
   el("chatSubmit").addEventListener("click", onChatSubmitOpen);
+  el("chatQuick").addEventListener("click", onChatQuickSubmit);
+  el("chatMsgs").addEventListener("click", function(e){
+    var b = e.target.closest("[data-pick]");
+    if(b) onChatPick(+b.getAttribute("data-pick"));
+  });
+  var _fmtSel = el("chatFmt");
+  _fmtSel.value = localStorage.getItem("hwdesk_chatFmt") || "auto";
+  _fmtSel.addEventListener("change", function(){ localStorage.setItem("hwdesk_chatFmt", _fmtSel.value); });
   el("chatFinalSend").addEventListener("click", function(){ onChatFinal("direct"); });
   el("chatFinalReview").addEventListener("click", function(){ onChatFinal("review"); });
   el("chatFinalCancel").addEventListener("click", closeChatFinal);
