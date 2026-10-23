@@ -40,6 +40,19 @@
     return out;
   };
 
+  /* 按课程过滤 payload（纯计算）：course 为空 / "全部课程" 时原样返回全量。
+   * 用于「数据」页的单课程精拉：选择器里选了某一门课时，
+   * 只合并该课程的作业与材料，其他课程的数据不进工作台。 */
+  PlatformKit.filterCourse = function (raw, course) {
+    var p = PlatformKit.normalize(raw);
+    var c = (course == null ? "" : String(course)).trim();
+    if (!c || c === "全部课程") return p;
+    p.courses = p.courses.filter(function (x) { return x.name === c; });
+    p.assignments = p.assignments.filter(function (a) { return a.course === c; });
+    p.materials = p.materials.filter(function (m) { return m.course === c; });
+    return p;
+  };
+
   /* 规整后的平台数据 → 工作台增量操作（与既有采集库/作业库语义一致）：
    *   待办/状态未知的作业、考试 → 新作业或截止日期更新（已提交项永不改动）
    *   已提交的历史作业、课件材料 → 采集库（去重键：课程+类型+标题）

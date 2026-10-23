@@ -176,4 +176,37 @@ test("stats summarize the whole merge", () => {
   assert.equal(r.stats.items, 2);
 });
 
+/* ---------- filterCourse ---------- */
+test("filterCourse keeps everything for empty / 全部课程 selectors", () => {
+  for (const sel of [null, undefined, "", "全部课程"]) {
+    const p = PlatformKit.filterCourse(PAYLOAD, sel);
+    assert.equal(p.assignments.length, 3);
+    assert.equal(p.materials.length, 1);
+  }
+});
+
+test("filterCourse narrows assignments and materials to the chosen course", () => {
+  const p = PlatformKit.filterCourse(PAYLOAD, "电力电子技术");
+  assert.equal(p.assignments.length, 2);          /* 实验1 todo + dedupe 条目 */
+  assert.ok(p.assignments.every((a) => a.course === "电力电子技术"));
+  assert.equal(p.materials.length, 1);
+  assert.equal(p.materials[0].title, "第3章 Buck变换器课件");
+  assert.equal(p.courses.length, 0);              /* PAYLOAD.courses 为空数组 */
+});
+
+test("filterCourse on a course with no data yields an empty payload", () => {
+  const p = PlatformKit.filterCourse(PAYLOAD, "不存在的课程");
+  assert.deepEqual(p.assignments, []);
+  assert.deepEqual(p.materials, []);
+});
+
+test("filterCourse output still merges through mergeOps (pipeline check)", () => {
+  const filtered = PlatformKit.filterCourse(PAYLOAD, "电机与拖动");
+  const r = PlatformKit.mergeOps(filtered, [], []);
+  assert.equal(r.itemsToAdd.length, 0);           /* 课堂练习3 已提交 → 只进采集库 */
+  const hist = r.capturesToAdd.filter((c) => c.kind === "历史作业");
+  assert.equal(hist.length, 1);
+  assert.equal(hist[0].course, "电机与拖动");
+});
+
 console.log("\n" + passed + " passed");
