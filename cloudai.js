@@ -70,6 +70,13 @@
   /* 错误转人话（按官方错误码前缀约定） */
   CloudAI.errText = function (err) {
     var code = (err && err.error && err.error.code) || "";
+    if (code === "gateway_network_error") {
+      var ep = (CloudAI.config && CloudAI.config.endpoint) || "云端发布站点";
+      return "无法连接云端网关（gateway_network_error）：本页到 " + ep +
+        " 的请求没有得到任何响应。常见原因：① 本页不是从发布后的网址打开（file:// 本地打开没有云端权限）；" +
+        "② 网络/代理拦截了该域名；③ 发布站点已下线（打开会提示「链接已失效」）。" +
+        "请核对打开方式与网络后重试；若持续出现，说明发布链接已失效，请联系维护者重新发布，或在设置里填自己的 API Key。";
+    }
     if (code.indexOf("auth_") === 0) return "云端通道鉴权失败（" + code + "）：请从发布后的网址打开本页使用；本地 file:// 打开没有云端权限。也可以在设置里填自己的 API Key。";
     if (code.indexOf("quota_") === 0) return "云端通道额度受限（" + code + "），稍后再试，或在设置里填自己的 API Key。";
     if (code.indexOf("gateway_") === 0 || code.indexOf("model_") === 0) return "模型服务暂时不可用（" + code + "），请重试一次。";
