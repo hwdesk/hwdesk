@@ -321,9 +321,24 @@ test("settings expose the auto-sync toggle and last-run time", () => {
   has(/AutoSync\.setEnabled\(el\("asEnabled"\)\.checked\)/, "checkbox writes back");
   has(/renderAutoSyncHint\(\)/, "last-run hint is rendered");
 });
-test("auto run is marked before fetching (crash-safe throttle state)", () => {
-  has(/AutoSync\.markRun\(\);\s*renderAutoSyncHint\(\);[\s\S]{0,400}runDirectSync\(\{ auto: true \}\)/,
-      "markRun() happens before runDirectSync({auto:true})");
+test("auto sync marks lastRun only after data actually lands (retry on next login)", () => {
+  /* 回归：旧版在 runDirectSync 之前就 markRun()，首次失败也被记成「已同步」，
+   * 30 分钟节流把后续重试全吞掉 —— 表现为「登录后不自动同步」。 */
+  const marks = [...app.matchAll(/AutoSync\.markRun\(\)/g)].length;
+  assert.equal(marks, 1, "AutoSync.markRun() should appear exactly once, got " + marks);
+  has(/function applyPlatformPayload[\s\S]*?AutoSync\.markRun\(\)/,
+      "markRun() lives in applyPlatformPayload() (success path)");
+  const autoFn = app.slice(app.indexOf("function autoSyncAfterLogin"), app.indexOf("function renderAutoSyncHint"));
+  assert.ok(!autoFn.includes("AutoSync.markRun()"),
+      "autoSyncAfterLogin() must not mark before fetching");
+});
+test("failed/empty auto sync becomes visible in the 数据获取 view", () => {
+  has(/if\(auto\)\{\s*addLog\("自动同步失败："[\s\S]{0,80}switchView\("capture"\);/,
+      "platform-error path switches to the capture view (auto mode)");
+  has(/addLog\("自动同步未执行：[\s\S]{0,200}switchView\("capture"\);/,
+      "bridge-offline path switches to the capture view (auto mode)");
+  has(/if\(auto && !ops\.stats\.items && !ops\.stats\.captures\)\{[\s\S]{0,400}switchView\("capture"\);/,
+      "empty-result path switches to the capture view (auto mode)");
 });
 
 /* ---------- 9. issue #25：选用此版 / 输出格式选择 / ⚡一键提交闭环 ---------- */
