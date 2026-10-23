@@ -109,12 +109,12 @@ node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
 node test/bridge.test.mjs     # AI 直连桥：14 项
 node test/agent.test.mjs      # 作业 Agent 对话：23 项
 node test/sso.test.mjs        # 学在城院登录凭据：12 项
-node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + Agent 切换确认 + 初始化容错 + 选用此版/格式/一键提交）：46 项
+node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + Agent 切换确认 + 初始化容错 + 选用此版/格式/一键提交）：48 项
 node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：66 项
 node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
 node test/autosync.test.mjs   # 登录后自动同步（节流/设置持久化/摘要）：16 项
 node test/platform.test.mjs   # 学在城院数据进工作台（normalize/去重/已提交保护）：14 项
-node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck）：20 项
+node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck）：21 项
 ```
 
 `wiring.test.mjs` 静态解析 `作业提交工作台.html`，守住两类只在运行时才暴露的问题：

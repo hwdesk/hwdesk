@@ -162,12 +162,17 @@
                   (err && err.error && err.error.message) || "";
       return "无法连接云端网关（gateway_network_error）：本页到 " + ep +
         " 的请求没有得到任何响应。常见原因：① 本页不是从发布后的网址打开（file:// 本地打开没有云端权限）；" +
-        "② 网络/代理拦截了该域名；③ 发布站点已下线（打开会提示「链接已失效」）。" +
-        "请核对打开方式与网络后重试；若持续出现，说明发布链接已失效，请联系维护者重新发布，或在设置里填自己的 API Key。" +
+        "② 网络/代理拦截了该域名；③ 发布链接不完整或站点已下线（打开会提示「链接不完整」或「链接已失效」）。" +
+        "请核对打开方式与网络后重试；若持续出现，说明发布链接不完整或已失效，请联系维护者重新发布，或在设置里填自己的 API Key。" +
         (cause ? "〔底层错误：" + cause.slice(0, 140) + "〕" : "");
     }
     if (code.indexOf("auth_") === 0) return "云端通道鉴权失败（" + code + "）：请从发布后的网址打开本页使用；本地 file:// 打开没有云端权限。也可以在设置里填自己的 API Key。";
     if (code.indexOf("quota_") === 0) return "云端通道额度受限（" + code + "），稍后再试，或在设置里填自己的 API Key。";
+    if (code === "gateway_http_403" || code === "gateway_http_404") {
+      return code === "gateway_http_403"
+        ? "无法打开云端发布站点（gateway_http_403）：链接不完整——当前访问的地址缺少分享参数。请用带 sharecode 的完整分享链接重新打开本页。"
+        : "无法打开云端发布站点（gateway_http_404）：链接已失效——发布站点可能已下线或重新发布过。请联系维护者获取新的分享链接。";
+    }
     if (code.indexOf("gateway_") === 0 || code.indexOf("model_") === 0) return "模型服务暂时不可用（" + code + "），请重试一次。";
     if (code.indexOf("request_") === 0) return "请求参数问题（" + code + "），请联系维护者检查版本。";
     return "云端通道请求失败：" + (err && err.message ? String(err.message).slice(0, 120) : JSON.stringify(err).slice(0, 120));
