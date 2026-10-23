@@ -7,8 +7,8 @@
   /* publicConfig：仅含应用标识与数据面端点（无任何密钥；服务端按 Origin 严格校验，
    * 只有本应用的发布域名能调用） */
   CloudAI.config = {
-    endpoint: "https://hwdesk-workbench.app.workbuddy.link",
-    publishableKey: "wbpk_cIRRjD7zaHD9yWWXfuZCgU_UM4d98zb1tqnmCXA2KOmbmgL3l4eMhZY"
+    endpoint: "https://hwdesk-workbench-95242.app.workbuddy.host",
+    publishableKey: "wbpk_0652K6obEFhp5et4I5yT2w_IjSxXY3b9DNEc6z4OmhsrJT9RXA0P9NC"
   };
 
   CloudAI.client = null;
