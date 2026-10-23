@@ -15,11 +15,64 @@
   CloudAI.models = [];      /* 已过滤 disabled 的可用模型 */
   CloudAI.model = null;     /* 当前默认模型 */
 
+  /* —— 按机覆盖（#45）：发布站点换域名时，任一机器可不等新版直接顶上 —— */
+  CloudAI.OVERRIDES_KEY = "hwdesk.cloudai.overrides";
+
+  function validEndpoint(v) {
+    if (typeof v !== "string") return false;
+    try { return new URL(v).protocol === "https:"; } catch (e) { return false; }
+  }
+  function validKey(v) {
+    return typeof v === "string" && v.indexOf("wbpk_") === 0 && v.length > 5;
+  }
+
+  /* 合法覆盖合并进 config + 落盘本机 localStorage + 重建客户端；非法整单拒绝（零改动） */
+  CloudAI.applyConfig = function (overrides) {
+    if (!overrides || typeof overrides !== "object") return { ok: false, code: "invalid_input" };
+    var patch = {};
+    if (overrides.endpoint !== undefined) {
+      if (!validEndpoint(overrides.endpoint)) return { ok: false, code: "invalid_endpoint" };
+      patch.endpoint = overrides.endpoint;
+    }
+    if (overrides.publishableKey !== undefined) {
+      if (!validKey(overrides.publishableKey)) return { ok: false, code: "invalid_publishable_key" };
+      patch.publishableKey = overrides.publishableKey;
+    }
+    for (var k in overrides) {
+      if (k !== "endpoint" && k !== "publishableKey") return { ok: false, code: "unknown_key" };
+    }
+    var stored = {};
+    try { stored = JSON.parse(global.localStorage.getItem(CloudAI.OVERRIDES_KEY)) || {}; }
+    catch (e) { stored = {}; }
+    var key2;
+    for (key2 in patch) stored[key2] = patch[key2];
+    try { global.localStorage.setItem(CloudAI.OVERRIDES_KEY, JSON.stringify(stored)); }
+    catch (e) { /* 隐私模式写不进去：本次会话内仍然生效 */ }
+    for (key2 in stored) CloudAI.config[key2] = stored[key2];
+    CloudAI.client = null;   /* 下次 init() 按新配置重建 */
+    return { ok: true, overrides: stored };
+  };
+
+  /* init() 前读本机覆盖（无 localStorage / 脏数据都安全跳过） */
+  CloudAI.loadOverrides = function () {
+    var raw = null;
+    try { raw = global.localStorage.getItem(CloudAI.OVERRIDES_KEY); } catch (e) { raw = null; }
+    if (!raw) return;
+    try {
+      var o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        if (o.endpoint !== undefined && validEndpoint(o.endpoint)) CloudAI.config.endpoint = o.endpoint;
+        if (o.publishableKey !== undefined && validKey(o.publishableKey)) CloudAI.config.publishableKey = o.publishableKey;
+      }
+    } catch (e) { /* 脏数据直接忽略 */ }
+  };
+
   CloudAI.ok = function () {
     return !!(global.WorkBuddyCloud && global.WorkBuddyCloud.createWorkBuddyCloud);
   };
   CloudAI.init = function () {
     if (!CloudAI.ok()) return null;
+    CloudAI.loadOverrides();
     if (!CloudAI.client) {
       CloudAI.client = global.WorkBuddyCloud.createWorkBuddyCloud({
         endpoint: CloudAI.config.endpoint,
@@ -65,6 +118,33 @@
       }
     })();
     return function () { controller.abort(); };
+  };
+
+  /* 体检（#45）：开聊前主动探网关，别等用户打字才发现发布链接已失效。
+   * 探 GET {endpoint}/.cloud/llm/models（带 publishable key 头 + 可中止超时），
+   * 返回 { ok:true, models } 或 { ok:false, code }：
+   * gateway_network_error（连不上）/ gateway_timeout（超时）/ gateway_http_<状态码>（非 2xx） */
+  CloudAI.healthCheck = async function (timeoutMs) {
+    if (typeof global.fetch !== "function") return { ok: false, code: "gateway_network_error" };
+    var ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 8000;
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, ms);
+    try {
+      var res = await global.fetch(CloudAI.config.endpoint + "/.cloud/llm/models", {
+        method: "GET",
+        headers: { "x-wb-webapp-access-key": CloudAI.config.publishableKey },
+        signal: controller.signal
+      });
+      if (!res.ok || res.status < 200 || res.status >= 300) {
+        return { ok: false, code: "gateway_http_" + res.status };
+      }
+      var models = await res.json();
+      return { ok: true, models: models };
+    } catch (err) {
+      return { ok: false, code: err && err.name === "AbortError" ? "gateway_timeout" : "gateway_network_error" };
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   /* 错误转人话（按官方错误码前缀约定） */

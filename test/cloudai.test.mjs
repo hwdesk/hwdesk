@@ -1,11 +1,16 @@
 /*
- * cloudai.js 云端通道错误转人话回归测试（零依赖，Node >= 16）
+ * cloudai.js 云端通道回归测试（零依赖，Node >= 16）
  * 运行：node test/cloudai.test.mjs
  *
  * 背景（#42）：gateway_network_error 是浏览器 fetch() 连响应都没拿到的
  * 网络层失败（发布站点下线 / 非发布页打开 / 代理拦截），却被
  * errText() 的 gateway_* 兜底误标成「模型服务暂时不可用，请重试一次」，
  * 误导排查方向。这里守住：网络层失败必须说清真实原因，其余前缀分支不回退。
+ *
+ * 背景（#45）：发布链接全体同时失效是单点故障——守住三件加固：
+ * ① applyConfig 按机覆盖（合法才合并落盘、非法整单拒绝、init() 启动即读）；
+ * ② healthCheck 主动体检（ok/network-fail/timeout/http-error 四路稳定错误码）；
+ * ③ errText 文案不回退（原有 8 项断言原样保留）。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,23 +23,49 @@ const root = path.join(__dirname, "..");
 
 /* 在 vm 沙箱里执行 cloudai.js（浏览器 IIFE：window.CloudAI） */
 const src = readFileSync(path.join(root, "cloudai.js"), "utf8");
-const sandbox = { window: {} };
-vm.runInNewContext(src, sandbox);
-const CloudAI = sandbox.window.CloudAI;
+
+/* 默认实例：errText 文案断言用（无需 localStorage / fetch） */
+const plainSandbox = { window: {} };
+vm.runInNewContext(src, plainSandbox);
+const CloudAI = plainSandbox.window.CloudAI;
 
 assert.ok(CloudAI && typeof CloudAI.errText === "function", "cloudai.js 应在 window.CloudAI 上暴露 errText()");
 
 let passed = 0;
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log("  ok - " + name);
-  } catch (e) {
-    console.error("  FAIL - " + name + "\n    " + String(e.message).split("\n")[0]);
-    process.exitCode = 1;
-  }
+
+/* —— #45 沙箱脚手架：可注入 localStorage / fetch / WorkBuddyCloud 的全新实例 —— */
+function mockStorage(initial) {
+  const m = new Map(Object.entries(initial || {}));
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
+    _map: m,
+  };
 }
+function mockCloudSdk() {
+  const calls = [];
+  return {
+    calls,
+    WorkBuddyCloud: {
+      createWorkBuddyCloud: (cfg) => { calls.push(cfg); return { cfg, fake: true }; },
+    },
+  };
+}
+function makeCloudAI(mocks) {
+  const sandbox = {
+    window: {},
+    URL, Promise, setTimeout, clearTimeout, AbortController, console,
+  };
+  Object.assign(sandbox.window, mocks || {});
+  vm.runInNewContext(src, sandbox);
+  return sandbox.window.CloudAI;
+}
+
+const tests = [];
+function test(name, fn) { tests.push({ name, fn }); }
+
+/* ============ errText 文案（#42，原 8 项原样保留） ============ */
 const err = (code) => ({ error: { code } });
 const text = (code) => CloudAI.errText(err(code));
 
@@ -85,4 +116,139 @@ test("无错误码 / 未知结构走通用兜底，且原样透出 message", () 
   assert.ok(t2.includes("云端通道请求失败"), "null 也不能抛异常");
 });
 
-console.log("\ncloudai.test.mjs: " + passed + " passed" + (process.exitCode ? " (with failures)" : ""));
+/* ============ applyConfig / loadOverrides 按机覆盖（#45） ============ */
+
+test("applyConfig 合法覆盖：合并 + 客户端重建，init() 用新 endpoint", async () => {
+  const sdk = mockCloudSdk();
+  const C = makeCloudAI({ localStorage: mockStorage(), ...sdk });
+  C.init();                                   /* 先用内置配置建一次客户端 */
+  assert.equal(sdk.calls.length, 1);
+  const r = C.applyConfig({ endpoint: "https://new-gw.example.com" });
+  assert.ok(r.ok === true, "合法覆盖应成功: " + JSON.stringify(r));
+  assert.equal(C.config.endpoint, "https://new-gw.example.com", "config 应已合并覆盖");
+  assert.equal(C.client, null, "客户端应被重置等待重建");
+  C.init();
+  assert.equal(sdk.calls.length, 2, "init() 应重建客户端");
+  assert.equal(sdk.calls[1].endpoint, "https://new-gw.example.com", "重建必须用新 endpoint");
+});
+
+test("applyConfig 落盘本机 localStorage（hwdesk.cloudai.overrides）", async () => {
+  const store = mockStorage();
+  const C = makeCloudAI({ localStorage: store });
+  const r = C.applyConfig({ endpoint: "https://ov.example.com", publishableKey: "wbpk_abc123" });
+  assert.ok(r.ok === true);
+  const raw = store.getItem("hwdesk.cloudai.overrides");
+  assert.ok(raw, "覆盖应持久化到 localStorage");
+  const saved = JSON.parse(raw);
+  assert.equal(saved.endpoint, "https://ov.example.com");
+  assert.equal(saved.publishableKey, "wbpk_abc123");
+});
+
+test("applyConfig 非法输入整单拒绝：config / 落盘零改动", async () => {
+  const store = mockStorage();
+  const C = makeCloudAI({ localStorage: store });
+  const r0 = C.applyConfig({ endpoint: "https://good.example.com" });
+  assert.ok(r0.ok === true);
+  const before = JSON.stringify(C.config);
+  const rawBefore = store.getItem("hwdesk.cloudai.overrides");
+
+  assert.ok(C.applyConfig({ endpoint: "http://insecure.example.com" }).ok === false, "非 https 拒绝");
+  assert.ok(C.applyConfig({ publishableKey: "sk-not-wbpk" }).ok === false, "非 wbpk_ 前缀拒绝");
+  const mixed = C.applyConfig({ endpoint: "https://also-good.example.com", publishableKey: "bad" });
+  assert.ok(mixed.ok === false, "同单混入非法值 → 整单拒绝");
+  assert.equal(C.config.endpoint, "https://good.example.com", "合法的一半也不许合并进来");
+  assert.ok(C.applyConfig({ endpoint: "https://x.example.com", evil: 1 }).ok === false, "未知键拒绝");
+  assert.equal(JSON.stringify(C.config), before, "config 不得被非法调用改动");
+  assert.equal(store.getItem("hwdesk.cloudai.overrides"), rawBefore, "落盘不得被非法调用改动");
+});
+
+test("init() 启动即读本机覆盖（换站点不等新版）", async () => {
+  const sdk = mockCloudSdk();
+  const store = mockStorage({
+    "hwdesk.cloudai.overrides": JSON.stringify({
+      endpoint: "https://transition-gw.example.com",
+      publishableKey: "wbpk_transient",
+    }),
+  });
+  const C = makeCloudAI({ localStorage: store, ...sdk });
+  const c = C.init();
+  assert.ok(c && c.fake, "init() 应建客户端");
+  assert.equal(sdk.calls[0].endpoint, "https://transition-gw.example.com");
+  assert.equal(sdk.calls[0].publishableKey, "wbpk_transient");
+});
+
+test("loadOverrides 忽略脏数据（坏 JSON / 非法值不炸不生效）", async () => {
+  const sdk = mockCloudSdk();
+  const store = mockStorage({ "hwdesk.cloudai.overrides": "{not json" });
+  const C = makeCloudAI({ localStorage: store, ...sdk });
+  C.init();
+  assert.equal(sdk.calls[0].endpoint, C.config.endpoint, "脏 JSON 不抛异常");
+
+  const store2 = mockStorage({ "hwdesk.cloudai.overrides": JSON.stringify({ endpoint: "ftp://bad" }) });
+  const C2 = makeCloudAI({ localStorage: store2, ...sdk });
+  C2.init();
+  assert.notEqual(sdk.calls[sdk.calls.length - 1].endpoint, "ftp://bad", "非法覆盖值不生效");
+});
+
+/* ============ healthCheck 主动体检（#45） ============ */
+
+test("healthCheck 网关正常 → ok:true + models（含覆盖后的 endpoint 与正确认证头）", async () => {
+  let seenUrl = "", seenHeaders = null;
+  const fetchMock = async (url, opts) => {
+    seenUrl = url; seenHeaders = opts.headers;
+    return { ok: true, status: 200, json: async () => [{ id: "auto" }, { id: "hy4-preview" }] };
+  };
+  const C = makeCloudAI({ fetch: fetchMock, localStorage: mockStorage() });
+  C.applyConfig({ endpoint: "https://probe-gw.example.com" });
+  const r = await C.healthCheck(500);
+  assert.ok(r.ok === true, "应探活成功: " + JSON.stringify(r));
+  assert.deepEqual(r.models.map((m) => m.id), ["auto", "hy4-preview"]);
+  assert.equal(seenUrl, "https://probe-gw.example.com/.cloud/llm/models", "探测地址 = 覆盖后 endpoint + 模型目录");
+  assert.equal(seenHeaders["x-wb-webapp-access-key"], C.config.publishableKey, "认证头必须是 x-wb-webapp-access-key");
+});
+
+test("healthCheck fetch 拒绝 → gateway_network_error", async () => {
+  const C = makeCloudAI({ fetch: async () => { throw new Error("ECONNREFUSED"); }, localStorage: mockStorage() });
+  const r = await C.healthCheck(500);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "gateway_network_error");
+});
+
+test("healthCheck 超时 → gateway_timeout（AbortController 真实生效）", async () => {
+  const fetchHangs = (url, opts) => new Promise((resolve, reject) => {
+    opts.signal.addEventListener("abort", () => {
+      const e = new Error("The operation was aborted");
+      e.name = "AbortError";
+      reject(e);
+    });
+  });
+  const C = makeCloudAI({ fetch: fetchHangs, localStorage: mockStorage() });
+  const r = await C.healthCheck(20);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "gateway_timeout");
+});
+
+test("healthCheck 非 2xx → gateway_http_<状态码>", async () => {
+  const C = makeCloudAI({
+    fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    localStorage: mockStorage(),
+  });
+  const r = await C.healthCheck(500);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "gateway_http_404");
+});
+
+/* ============ runner（异步感知） ============ */
+(async () => {
+  for (const t of tests) {
+    try {
+      await t.fn();
+      passed++;
+      console.log("  ok - " + t.name);
+    } catch (e) {
+      console.error("  FAIL - " + t.name + "\n    " + String(e.message).split("\n")[0]);
+      process.exitCode = 1;
+    }
+  }
+  console.log("\ncloudai.test.mjs: " + passed + " passed" + (process.exitCode ? " (with failures)" : ""));
+})();
