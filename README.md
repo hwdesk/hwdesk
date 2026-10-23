@@ -106,11 +106,11 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 node test/db.test.mjs         # 库管理 + 交付状态机：10 项
 node test/laya.test.mjs       # 决策引擎：22 项
 node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
-node test/bridge.test.mjs     # AI 直连桥：13 项
-node test/agent.test.mjs      # 作业 Agent 对话：17 项
+node test/bridge.test.mjs     # AI 直连桥：14 项
+node test/agent.test.mjs      # 作业 Agent 对话：23 项
 node test/sso.test.mjs        # 学在城院登录凭据：12 项
-node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + 初始化容错）：12 项
-node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：59 项
+node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 选择器事件 + Agent 切换确认 + 初始化容错 + 选用此版/格式/一键提交）：46 项
+node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：66 项
 node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
 ```
 
