@@ -114,7 +114,7 @@ node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：66 项
 node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
 node test/autosync.test.mjs   # 登录后自动同步（节流/设置持久化/摘要）：16 项
 node test/platform.test.mjs   # 学在城院数据进工作台（normalize/去重/已提交保护）：14 项
-node test/cloudai.test.mjs    # 云端网关错误转人话（errText 全分支）：8 项
+node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck）：17 项
 ```
 
 `wiring.test.mjs` 静态解析 `作业提交工作台.html`，守住两类只在运行时才暴露的问题：
@@ -174,6 +174,31 @@ python make_lnk_com.py   # 需要 pywin32：pip install pywin32
 或使用无依赖的纯 Python 版：`python make_lnk.py`（手工构造 .lnk 二进制）。
 
 双击桌面图标 → 独立窗口打开，无地址栏。
+
+## 云端 AI 通道（cloudai.js）
+
+「点开即聊」的免密钥 AI 通道：`cloudai.js` 内置 `CloudAI.config`（endpoint + publishableKey，均为公开值），指向维护者发布在本机 WorkBuddy 账号下的工作台应用；服务端按 **Origin 精确匹配**校验，只有从发布网址打开的页面才能调用（本地 `file://` 打开请在设置里填自己的 API Key）。
+
+**过期症状**：发布链接失效后，聊天报 `gateway_network_error`（浏览器直开发布域名会看到「链接已失效」404 页）。该通道所有机器共用同一个发布链接，失效是**全体同时**的，与个人电脑无关（2026-10-23 实际发生过一次，见 #42 / #44）。
+
+**恢复步骤（runbook）**：
+
+1. 重新发布工作台；若域名未变，直接跳第 3 步
+2. 更新 `cloudai.js` 里 `CloudAI.config` 的 `endpoint` + `publishableKey`（过渡期可先用下面的按机覆盖顶住）
+3. 验证数据面（认证头是 `x-wb-webapp-access-key`，不是 Bearer）：
+
+```
+curl "https://<新域名>/.cloud/llm/models" \
+  -H "x-wb-webapp-access-key: <新 publishableKey>" \
+  -H "Origin: https://<新域名>"
+# 期望 200 + 模型目录
+```
+
+4. 在页面上开聊一轮，确认流式输出正常
+
+**按机覆盖（换站点不等新版）**：任一机器可在控制台执行 `CloudAI.applyConfig({ endpoint: "https://<新域名>", publishableKey: "wbpk_…" })`——合法覆盖合并进配置、存入本机 `localStorage["hwdesk.cloudai.overrides"]` 并立即重建客户端；非法输入（非 https、key 不以 `wbpk_` 开头、未知键）**整单拒绝、零改动**。`init()` 每次启动都先读本机覆盖，脏数据安全跳过。
+
+**开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>`），不必等用户打字才发现发布链接已失效。
 
 ## 技术要点
 
