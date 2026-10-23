@@ -123,7 +123,8 @@
   /* 体检（#45）：开聊前主动探网关，别等用户打字才发现发布链接已失效。
    * 探 GET {endpoint}/.cloud/llm/models（带 publishable key 头 + 可中止超时），
    * 返回 { ok:true, models } 或 { ok:false, code }：
-   * gateway_network_error（连不上）/ gateway_timeout（超时）/ gateway_http_<状态码>（非 2xx） */
+   * gateway_network_error（连不上）/ gateway_timeout（超时）/ gateway_http_<状态码>（非 2xx）
+   * / gateway_invalid_response（响应不是合法 JSON） */
   CloudAI.healthCheck = async function (timeoutMs) {
     if (typeof global.fetch !== "function") return { ok: false, code: "gateway_network_error" };
     var ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 8000;
@@ -138,7 +139,12 @@
       if (!res.ok || res.status < 200 || res.status >= 300) {
         return { ok: false, code: "gateway_http_" + res.status };
       }
-      var models = await res.json();
+      var models;
+      try {
+        models = await res.json();
+      } catch (jerr) {
+        return { ok: false, code: "gateway_invalid_response" };
+      }
       return { ok: true, models: models };
     } catch (err) {
       return { ok: false, code: err && err.name === "AbortError" ? "gateway_timeout" : "gateway_network_error" };
@@ -152,10 +158,13 @@
     var code = (err && err.error && err.error.code) || "";
     if (code === "gateway_network_error") {
       var ep = (CloudAI.config && CloudAI.config.endpoint) || "云端发布站点";
+      var cause = (err && err.message && String(err.message)) ||
+                  (err && err.error && err.error.message) || "";
       return "无法连接云端网关（gateway_network_error）：本页到 " + ep +
         " 的请求没有得到任何响应。常见原因：① 本页不是从发布后的网址打开（file:// 本地打开没有云端权限）；" +
         "② 网络/代理拦截了该域名；③ 发布站点已下线（打开会提示「链接已失效」）。" +
-        "请核对打开方式与网络后重试；若持续出现，说明发布链接已失效，请联系维护者重新发布，或在设置里填自己的 API Key。";
+        "请核对打开方式与网络后重试；若持续出现，说明发布链接已失效，请联系维护者重新发布，或在设置里填自己的 API Key。" +
+        (cause ? "〔底层错误：" + cause.slice(0, 140) + "〕" : "");
     }
     if (code.indexOf("auth_") === 0) return "云端通道鉴权失败（" + code + "）：请从发布后的网址打开本页使用；本地 file:// 打开没有云端权限。也可以在设置里填自己的 API Key。";
     if (code.indexOf("quota_") === 0) return "云端通道额度受限（" + code + "），稍后再试，或在设置里填自己的 API Key。";
