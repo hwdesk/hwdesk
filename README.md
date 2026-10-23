@@ -161,6 +161,38 @@ node test/cloudai.test.mjs    # 云端网关错误转人话（errText 全分支�
 - 端点：`GET /health`、`GET/POST /data`、`POST /ingest`（外部采集结果也可直接投递，AI 代理可用 `curl` 回报）
 - 首次使用：`python syncserver.py` 保持窗口开着 → 回到工作台「数据获取」点「⚡ 从学在城院一键获取」；服务没开时旧指令流程仍然可用
 
+## 云端 AI 通道（cloudai.js）运维手册
+
+「AI 对话」默认走**免密钥云端通道**：`cloudai.js` 内置 `CloudAI.config`（`endpoint` + `publishableKey`），指向发布在 WorkBuddy 的一个应用；服务端按 **Origin 精确匹配**校验，只有从发布网址打开的页面能调用。
+
+**失效症状**：对话报「无法连接云端网关（gateway_network_error）」= 发布链接已过期/下线（Issue #42/#45）。这是**全局性的**——发布链接失效时所有电脑同时挂，与用户本机无关。
+
+**恢复步骤（维护者）**：
+
+1. 在 WorkBuddy 重新发布工作台页面（`index.html` + `作业提交工作台.html` + 全部 js），并为其开通云服务（LLM 能力），拿到新的 `endpoint` 与 `publishableKey`（`wbpk_` 开头）
+2. 更新 `cloudai.js` 的 `CloudAI.config` 两行，提交发布
+3. 验证（注意 key 放 **`x-wb-webapp-access-key`** 头，不是 Authorization）：
+
+```bash
+curl "https://<新域名>/.cloud/llm/models" \
+  -H "x-wb-webapp-access-key: wbpk_…" -H "Origin: https://<新域名>"
+```
+
+返回模型列表即通；`POST /.cloud/llm/chat/completions`（`stream:true`）可做端到端验证。`CloudAI.healthCheck()` 已把这套探测封装成 API，可在 UI 启动时调用。
+
+**过渡期按机覆盖（无需等新版本发布）**：任一台电脑在浏览器控制台执行一次即可切到新网关，值持久化在本机 localStorage，优先级高于源码内置配置：
+
+```js
+window.CloudAI.applyConfig({
+  endpoint: "https://<新域名>",
+  publishableKey: "wbpk_…"
+});
+```
+
+非法值（非 https、key 不以 `wbpk_` 开头）会被拒绝且不落盘；清除覆盖用 `localStorage.removeItem("hwdesk.cloudai.overrides")`。
+
+**本地 file:// 打开**：永远过不了 Origin 校验，必须在设置里填自己的 API Key（OpenAI 兼容直连，不经云端网关）。
+
 ## 桌面安装（Windows）
 
 1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js`、`agent.js`、`agents.js`、`sso.js`、`sync.js` 放到同一稳定目录（如 `C://Users//<你>//hwdesk//`）
