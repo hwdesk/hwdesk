@@ -237,7 +237,7 @@ test("onLogin verifies credentials via the bridge /verify before SSO.set", () =>
   has(/登录工作台（平台验证通过）/, "audit log marks the platform-verified login");
 });
 test("bridge /verify only logs in (no collection) and returns ok/error JSON", () => {
-  pyHas(/def do_POST[\s\S]{0,600}"\/verify"/, "syncserver handles POST /verify");
+  pyHas(/def do_POST[\s\S]{0,1000}"\/verify"/, "syncserver handles POST /verify");
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
         "/verify calls hzcu_login with the request creds");
   pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
@@ -248,7 +248,7 @@ test("syncserver logs in via the ZUCC unified-auth CAS into the Tronclass LMS", 
   pyHas(/URL_CAS = "https:\/\/ca\.hzcu\.edu\.cn"/, "CAS endpoint of ca.hzcu.edu.cn");
   pyHas(/URL_LMS = "https:\/\/courses\.hzcu\.edu\.cn"/, "data lives on the Tronclass LMS host");
   pyHas(/def hzcu_login\(account, password\)/, "hzcu_login() submits the CAS form");
-  pyHas(/"execution": form_info\["execution"\], "_eventId": "submit"/, "CAS form carries execution/_eventId");
+  pyHas(/"execution": form_info\["execution"\],\s*"_eventId": "submit"/, "CAS form carries execution/_eventId");
   pyHas(/CAS_AES_KEY = b"c6dda3852e2d4be2"/, "CAS password is AES-128-ECB encrypted with the page key");
   pyHas(/class="\[\^"\]\*errorMsg/, "CAS error page is parsed for a readable reason");
   pyHas(/登录后未能建立课程端会话/, "session probe rejects a logged-out shell");
