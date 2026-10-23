@@ -237,7 +237,7 @@ test("onLogin verifies credentials via the bridge /verify before SSO.set", () =>
   has(/登录工作台（平台验证通过）/, "audit log marks the platform-verified login");
 });
 test("bridge /verify only logs in (no collection) and returns ok/error JSON", () => {
-  pyHas(/def do_POST[\s\S]*?startswith\("\/verify"\)/, "syncserver handles POST /verify");
+  pyHas(/def do_POST[\s\S]*?self\.path\.startswith\("\/verify"\)/, "syncserver handles POST /verify");
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
         "/verify calls hzcu_login with the request creds");
   pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
