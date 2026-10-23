@@ -114,7 +114,7 @@ node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：66 项
 node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
 node test/autosync.test.mjs   # 登录后自动同步（节流/设置持久化/摘要）：16 项
 node test/platform.test.mjs   # 学在城院数据进工作台（normalize/去重/已提交保护）：14 项
-node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck）：17 项
+node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck）：20 项
 ```
 
 `wiring.test.mjs` 静态解析 `作业提交工作台.html`，守住两类只在运行时才暴露的问题：
@@ -198,7 +198,9 @@ curl "https://<新域名>/.cloud/llm/models" \
 
 **按机覆盖（换站点不等新版）**：任一机器可在控制台执行 `CloudAI.applyConfig({ endpoint: "https://<新域名>", publishableKey: "wbpk_…" })`——合法覆盖合并进配置、存入本机 `localStorage["hwdesk.cloudai.overrides"]` 并立即重建客户端；非法输入（非 https、key 不以 `wbpk_` 开头、未知键）**整单拒绝、零改动**。`init()` 每次启动都先读本机覆盖，脏数据安全跳过。
 
-**开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>`），不必等用户打字才发现发布链接已失效。
+**开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>` / `gateway_invalid_response`），不必等用户打字才发现发布链接已失效。
+
+**干净配置启动器（launch-hwdesk-online.vbs）**：双击后以独立 Chrome profile + 直连代理打开发布站点（绕开本机坏代理 / 旧扩展的干扰，链接里已带完整访问参数），顺带拉起本机桥；首次运行会在桌面生成「hwdesk online」快捷方式。
 
 ## 技术要点
 

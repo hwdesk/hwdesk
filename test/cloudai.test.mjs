@@ -116,6 +116,17 @@ test("无错误码 / 未知结构走通用兜底，且原样透出 message", () 
   assert.ok(t2.includes("云端通道请求失败"), "null 也不能抛异常");
 });
 
+test("gateway_network_error 透出底层错误便于定位（截 140 字）", () => {
+  const t = CloudAI.errText({ message: "Network error: Failed to fetch", error: { code: "gateway_network_error" } });
+  assert.ok(t.includes("底层错误"), "应有底层错误段落: " + t);
+  assert.ok(t.includes("Failed to fetch"), "应包含底层 cause: " + t);
+});
+
+test("无底层信息时不追加空的底层错误段落", () => {
+  const t = text("gateway_network_error");
+  assert.ok(!t.includes("底层错误"), "不该有空段落: " + t);
+});
+
 /* ============ applyConfig / loadOverrides 按机覆盖（#45） ============ */
 
 test("applyConfig 合法覆盖：合并 + 客户端重建，init() 用新 endpoint", async () => {
@@ -236,6 +247,16 @@ test("healthCheck 非 2xx → gateway_http_<状态码>", async () => {
   const r = await C.healthCheck(500);
   assert.equal(r.ok, false);
   assert.equal(r.code, "gateway_http_404");
+});
+
+test("healthCheck 响应不是合法 JSON → gateway_invalid_response", async () => {
+  const C = makeCloudAI({
+    fetch: async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token"); } }),
+    localStorage: mockStorage(),
+  });
+  const r = await C.healthCheck(500);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "gateway_invalid_response");
 });
 
 /* ============ runner（异步感知） ============ */
