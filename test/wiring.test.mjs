@@ -349,13 +349,13 @@ test("auto sync marks lastRun only after data actually lands (retry on next logi
   assert.ok(!autoFn.includes("AutoSync.markRun()"),
       "autoSyncAfterLogin() must not mark before fetching");
 });
-test("failed/empty auto sync becomes visible in the 数据获取 view", () => {
-  has(/if\(auto\)\{\s*addLog\("自动同步失败："[\s\S]{0,80}switchView\("capture"\);/,
-      "platform-error path switches to the capture view (auto mode)");
-  has(/addLog\("自动同步未执行：[\s\S]{0,200}switchView\("capture"\);/,
-      "bridge-offline path switches to the capture view (auto mode)");
-  has(/if\(auto && !ops\.stats\.items && !ops\.stats\.captures\)\{[\s\S]{0,400}switchView\("capture"\);/,
-      "empty-result path switches to the capture view (auto mode)");
+test("failed/empty auto sync becomes visible in the 数据 view", () => {
+  has(/if\(auto\)\{\s*addLog\("自动同步失败："[\s\S]{0,80}switchView\("data"\);/,
+      "platform-error path switches to the data view (auto mode)");
+  has(/addLog\("自动同步未执行：[\s\S]{0,200}switchView\("data"\);/,
+      "bridge-offline path switches to the data view (auto mode)");
+  has(/if\(auto && !ops\.stats\.items && !ops\.stats\.captures\)\{[\s\S]{0,400}switchView\("data"\);/,
+      "empty-result path switches to the data view (auto mode)");
 });
 
 /* ---------- 9. issue #25：选用此版 / 输出格式选择 / ⚡一键提交闭环 ---------- */

@@ -1768,7 +1768,7 @@ function runDirectSync(opts){
         showToast("获取失败：" + (res.error || "").slice(0, 40));
         if(auto){
           addLog("自动同步失败：" + (res.error || "").slice(0, 60));
-          switchView("capture");   /* 失败要看得见：切到数据获取视图展示原因，别让登录后"静默无数据" */
+          switchView("data");   /* 失败要看得见：切到数据视图展示原因，别让登录后"静默无数据" */
         }
         return;
       }
@@ -1779,7 +1779,7 @@ function runDirectSync(opts){
       showToast(auto ? "自动同步跳过：本机同步服务未启动" : "本机同步服务未启动");
       if(auto){
         addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "python syncserver.py 未启动"));
-        switchView("capture");
+        switchView("data");
         renderAutoSyncHint();
       }
     });
@@ -1797,7 +1797,7 @@ function applyPlatformPayload(payload, auto, course){
     ? PlatformKit.filterCourse(payload, course || "") : PlatformKit.normalize(payload);
   var ops = PlatformKit.mergeOps(filtered, DB.list("captures"), state.items);
   /* 空结果（auto 模式）：当作没同步成功 —— 不记 lastRun（下次登录自动重试），
-   * 并切到「数据获取」视图把原因亮出来，不让登录后"静默无数据"。
+   * 并切到「数据」视图把原因亮出来，不让登录后"静默无数据"。
    * （#51 语义保留：markRun 全页仅出现在本函数成功入库路径，恰好 1 次） */
   if(auto && !ops.stats.items && !ops.stats.captures){
     var outEmpty = directOut();
@@ -1805,9 +1805,9 @@ function applyPlatformPayload(payload, auto, course){
       + ((payload.errors || []).length ? "：" + payload.errors.join("；")
         : "（账号下暂无可见作业，或平台返回为空）")
       + "\n可点「⚡ 从学在城院一键获取」手动重试。";
-    switchView("capture");
-    addLog("自动同步空结果：作业/采集均为 0 项，已切到数据获取视图");
-    showToast("自动同步未取到数据，已切到数据获取");
+    switchView("data");
+    addLog("自动同步空结果：作业/采集均为 0 项，已切到数据视图");
+    showToast("自动同步未取到数据，已切到数据视图");
     renderAutoSyncHint();
     return false;
   }
