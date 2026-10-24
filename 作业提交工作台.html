@@ -1936,7 +1936,10 @@ function runDirectSync(opts){
       if(!res.ok){
         out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
         showToast("获取失败：" + (res.error || "").slice(0, 40));
-        if(auto) addLog("自动同步失败：" + (res.error || "").slice(0, 60));
+        if(auto){
+          addLog("自动同步失败：" + (res.error || "").slice(0, 60));
+          switchView("capture");   /* 失败要看得见：切到数据获取视图展示原因，别让登录后"静默无数据" */
+        }
         return;
       }
       applyPlatformPayload(res.payload, auto);
@@ -1944,15 +1947,32 @@ function runDirectSync(opts){
     .catch(function(){
       out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
       showToast(auto ? "自动同步跳过：本机同步服务未启动" : "本机同步服务未启动");
-      if(auto) addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "python syncserver.py 未启动"));
-      if(auto) renderAutoSyncHint();
+      if(auto){
+        addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "python syncserver.py 未启动"));
+        switchView("capture");
+        renderAutoSyncHint();
+      }
     });
 }
 function onDirectSync(){ runDirectSync({ auto: false }); }
 function applyPlatformPayload(payload, auto){
-  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return; }
+  if(typeof DB === "undefined"){ showToast("db.js 未加载"); return false; }
   auto = !!auto;
   var ops = PlatformKit.mergeOps(payload, DB.list("captures"), state.items);
+  /* 空结果（auto 模式）：当作没同步成功 —— 不记 lastRun（下次登录自动重试），
+   * 并切到「数据获取」视图把原因亮出来，不让登录后"静默无数据"。 */
+  if(auto && !ops.stats.items && !ops.stats.captures){
+    var outEmpty = directOut();
+    outEmpty.textContent = "⚠ 自动同步没有取到任何作业/采集数据"
+      + ((payload.errors || []).length ? "：" + payload.errors.join("；")
+        : "（账号下暂无可见作业，或平台返回为空）")
+      + "\n可点「⚡ 从学在城院一键获取」手动重试。";
+    switchView("capture");
+    addLog("自动同步空结果：作业/采集均为 0 项，已切到数据获取视图");
+    showToast("自动同步未取到数据，已切到数据获取");
+    renderAutoSyncHint();
+    return false;
+  }
   ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
   ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
   ops.itemsToUpdate.forEach(function(u){
@@ -1964,6 +1984,7 @@ function applyPlatformPayload(payload, auto){
     ? AutoSync.summarize(ops.stats, payload.errors || [])
     : "作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
       + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+  if(typeof AutoSync !== "undefined") AutoSync.markRun();   /* 成功入库才记 lastRun：失败/空结果下次登录自动重试 */
   addLog("学在城院" + (auto ? "自动同步" : "一键获取") + "：" + sum);
   saveState();
   refreshAll();
@@ -1992,7 +2013,9 @@ function autoSyncAfterLogin(opts){
     }
     return false;
   }
-  AutoSync.markRun();
+  /* 不在这里 markRun：只有数据真正入库（applyPlatformPayload 成功）才算同步过。
+   * 失败/空结果保持 lastRun 不变 → 下次登录 shouldRun() 直接放行，自动重试。
+   * （回归：旧版在拉取前就标记，首次失败也被记成「已同步」，30 分钟节流把重试全吞掉） */
   renderAutoSyncHint();
   addLog("登录后自动同步开始");
   showToast("正在自动同步学在城院数据…");
