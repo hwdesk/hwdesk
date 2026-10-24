@@ -102,18 +102,35 @@ test("Agent bindings are guarded so a missing block cannot abort bind()", () => 
       "fillAgentSettings() bails out when the block is absent");
 });
 
-/* ---------- 4. Agent 独立板块（配置搬家：设置页不再放 Agent 配置） ---------- */
-test("nav exposes a dedicated Agent view hosting the config blocks", () => {
-  assert.ok(html.includes('data-view="agent"'), "nav button data-view=agent missing");
-  const agentStart = html.indexOf('id="view-agent"');
+/* ---------- 4. 板块合并（10 → 5：导航收敛，Agent 配置并入 AI 视图） ---------- */
+test("nav exposes exactly 5 merged views in the fixed order", () => {
+  const navs = [...html.matchAll(/data-view="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(navs, ["overview", "data", "workflow", "chat", "settings"]);
+});
+test("legacy per-section views are gone from the markup", () => {
+  for (const gone of ['id="view-capture"', 'id="view-assets"', 'id="view-approvals"',
+                      'id="view-actions"', 'id="view-insights"', 'id="view-agent"']) {
+    assert.ok(!html.includes(gone), gone + " should be merged away");
+  }
+});
+test("AI view hosts the chat, risk-check and agent-config blocks", () => {
+  const chatStart = html.indexOf('id="view-chat"');
   const settingsStart = html.indexOf('id="view-settings"');
-  assert.ok(agentStart !== -1 && settingsStart !== -1 && agentStart < settingsStart,
-      "view-agent section missing or misordered");
-  const agentView = html.slice(agentStart, settingsStart);
-  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi"]) {
-    assert.ok(agentView.includes('id="' + id + '"'), "#" + id + " not inside the Agent view");
+  assert.ok(chatStart !== -1 && settingsStart !== -1 && chatStart < settingsStart,
+      "view-chat section missing or misordered");
+  const chatView = html.slice(chatStart, settingsStart);
+  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi", "rText", "btnRisk", "chatLog"]) {
+    assert.ok(chatView.includes('id="' + id + '"'), "#" + id + " not inside the AI view");
   }
   assert.ok(!html.slice(settingsStart).includes('id="agPreset"'), "agPreset still inside settings view");
+});
+test("workflow view hosts the approval / delivery / review boxes", () => {
+  const wfStart = html.indexOf('id="view-workflow"');
+  const chatStart = html.indexOf('id="view-chat"');
+  const wfView = html.slice(wfStart, chatStart);
+  for (const id of ["layaBox", "approvalBox", "subBox", "reviewBox"]) {
+    assert.ok(wfView.includes('id="' + id + '"'), "#" + id + " not inside the workflow view");
+  }
 });
 
 /* ---------- 5. 极简 Agent 选择器（AI 代提交：只选 Agent，选完工作台内开聊） ---------- */
@@ -133,7 +150,7 @@ test("agent picker closes via mask click / Escape / 管理配置 button", () => 
   has(/e\.target === el\("agPick"\)\s*\)\s*closeAgPick\(\)/, "mask click -> closeAgPick()");
   has(/e\.key === "Escape" && el\("agPick"\)\.style\.display !== "none"/, "Escape closes agPick");
   has(/el\("agPickCfg"\)\.addEventListener\(\s*"click"/, "agPickCfg wired");
-  has(/closeAgPick\(\); switchView\("agent"\); fillAgentSettings\(\);/, "管理配置 jumps to the Agent view");
+  has(/closeAgPick\(\); switchView\("chat"\); fillAgentSettings\(\);/, "管理配置 jumps to the AI view");
 });
 
 /* ---------- 6. AI 代提交改走工作台内嵌对话（不再开浏览器） ---------- */
@@ -162,7 +179,7 @@ test("Laya 执行计划 also opens the in-workbench drawer (top task context)", 
 });
 test("AI 代提交 with multiple usable agents opens the picker; unconfigured nudges to Agent view", () => {
   has(/openAgPick\(id\); return;/, "multiple usable agents -> openAgPick");
-  has(/switchView\("agent"\); fillAgentSettings\(\); return;/, "not-configured path jumps to Agent view");
+  has(/switchView\("chat"\); fillAgentSettings\(\); return;/, "not-configured path jumps to the AI view");
 });
 
 /* ---------- 7. 对话抽屉：提交预览（选择性提交） ---------- */
@@ -310,8 +327,8 @@ test("boot with saved creds auto-syncs too (throttled by autosync.js)", () => {
 });
 test("manual and auto direct-sync share one fetch pipeline", () => {
   has(/function runDirectSync\(opts\)\{[\s\S]{0,200}var auto = !!opts\.auto;/, "runDirectSync(opts) with auto flag");
-  has(/function onDirectSync\(\)\{ runDirectSync\(\{ auto: false \}\); \}/, "manual click goes through the shared pipeline");
-  has(/applyPlatformPayload\(res\.payload, auto\)/, "auto flag reaches applyPlatformPayload()");
+  has(/function onDirectSync\(\)\{[\s\S]{0,300}runDirectSync\(\{ auto: false/, "manual click goes through the shared pipeline");
+  has(/applyPlatformPayload\(res\.payload, auto(, opts\.course)?\)/, "auto flag reaches applyPlatformPayload()");
 });
 test("settings expose the auto-sync toggle and last-run time", () => {
   for (const id of ["asEnabled", "asLast"]) {
@@ -394,6 +411,39 @@ test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(!/F:\\hwdesk/.test(vbs), "no hardcoded F:\\hwdesk repo path");
   assert.ok(!/C:\\Users/.test(vbs), "no hardcoded user-directory python path");
   assert.ok(/py\.exe/.test(vbs) && /where python/.test(vbs), "python resolved via py launcher or PATH");
+});
+
+/* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
+test("data view keeps only the refresh button + course selector + status", () => {
+  const dataStart = html.indexOf('id="view-data"');
+  const wfStart = html.indexOf('id="view-workflow"');
+  assert.ok(dataStart !== -1 && wfStart !== -1 && dataStart < wfStart, "view-data missing");
+  const dataView = html.slice(dataStart, wfStart);
+  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut", "capBox", "matBox", "btnMat"]) {
+    assert.ok(dataView.includes('id="' + id + '"'), "#" + id + " missing from the data view");
+  }
+  for (const gone of ["btnDirectHealth", "btnSync", "btnCapGen", "ssoIncPw", "syncImportBox",
+                      "syncPayload", "btnSyncImport", "btnSyncCancel", "btnCap", "capForm",
+                      "cKind", "cCourse", "cTitle", "cNote"]) {
+    assert.ok(!html.includes('id="' + gone + '"'), "#" + gone + " clutter is back in the markup");
+  }
+});
+test("manual refresh honors the course selector via the shared pipeline", () => {
+  has(/function onDirectSync\(\)\{[\s\S]{0,300}runDirectSync\(\{ auto: false, course:/,
+      "onDirectSync passes the selected course through runDirectSync");
+  has(/applyPlatformPayload\(res\.payload, auto, opts\.course\)/, "course filter reaches applyPlatformPayload()");
+  has(/PlatformKit\.filterCourse\(payload, course \|\| ""\)/, "applyPlatformPayload applies PlatformKit.filterCourse");
+  has(/el\("btnDirectSync"\)\.addEventListener\(\s*"click",\s*onDirectSync\s*\)/, "btnDirectSync wired to onDirectSync");
+});
+test("legacy instruction-flow functions are fully removed from the page script", () => {
+  for (const fn of ["function onSync(", "function onSyncImport(", "function onCaptureGen(",
+                    "function onDirectHealth(", "function onCaptureSave("]) {
+    assert.ok(!app.includes(fn), fn + ") should be deleted");
+  }
+  for (const orphan of ['el("btnSync")', 'el("btnCapGen")', 'el("btnDirectHealth")',
+                        'el("btnCap")', 'el("cSave")']) {
+    assert.ok(!app.includes(orphan), "orphan listener " + orphan + " still bound");
+  }
 });
 
 console.log("\n" + passed + " passed");
