@@ -363,4 +363,22 @@ test("UI cleanup: long help paragraphs are gone", () => {
   assert.ok(!/点开即聊）。想用你自己的模型服务时才填这里/.test(html), "chat setup long hint removed");
 });
 
+/* ---------- 10. cloudai 体检接线：发送前 healthCheck 拦下失效链接 ---------- */
+test("cloud send probes the gateway with healthCheck before the first chat", () => {
+  has(/CloudAI\.healthCheck\(8000\)/, "streamChat probes the gateway via CloudAI.healthCheck(8000)");
+  has(/if\(CloudAI\._hcOk\)\{ doCloudChat\(\); return; \}\s*CloudAI\.healthCheck\(8000\)\.then/,
+      "the only chat call is gated behind the healthCheck probe");
+  has(/var doCloudChat = function\(\)/, "chat call wrapped in doCloudChat for the probe gate");
+  has(/cloudChatFail\(chat, \{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
+      "failed probe lands in cloudChatFail with the real healthCheck code");
+  has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
+});
+const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
+test("online launcher has no machine-specific hardcoding", () => {
+  assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");
+  assert.ok(!/F:\\hwdesk/.test(vbs), "no hardcoded F:\\hwdesk repo path");
+  assert.ok(!/C:\\Users/.test(vbs), "no hardcoded user-directory python path");
+  assert.ok(/py\.exe/.test(vbs) && /where python/.test(vbs), "python resolved via py launcher or PATH");
+});
+
 console.log("\n" + passed + " passed");

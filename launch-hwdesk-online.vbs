@@ -1,21 +1,31 @@
-' hwdesk online launcher (ASCII only) - v2, isolated clean profile
+' hwdesk online launcher (ASCII only) - v3, no machine-specific paths
 ' Opens the PUBLISHED workbench in a dedicated Chrome profile with:
 '   - separate user-data-dir  -> no extensions / stale settings from the daily profile
 '   - --proxy-server=direct:// -> bypasses any broken proxy config (Issue #45 diagnosis)
 ' 1) starts local bridge syncserver.py (for login gate / local data fetch)
 ' 2) opens the published workbench in Chrome app mode
 Option Explicit
-Dim fso, sh, repo, py, bridge, url, chrome, profile, lnk, desk, sc
+Dim fso, sh, repo, pyCmd, bridge, url, chrome, profile, lnk, desk, sc
 
-repo     = "F:\hwdesk"
-py       = "C:\Users\liyuanyang\.local\bin\python3.12.exe"
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set sh  = CreateObject("WScript.Shell")
+
+' repo = the folder this script lives in
+repo = fso.GetParentFolderName(WScript.ScriptFullName)
+If repo = "" Then repo = sh.CurrentDirectory
 bridge   = repo & "\syncserver.py"
 url      = "https://hwdesk-workbench-95242.app.workbuddy.host/?sharecode=COAVIMSN3Z"
 chrome   = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 profile  = repo & "\.chrome-hwdesk-profile"
 
-Set fso = CreateObject("Scripting.FileSystemObject")
-Set sh  = CreateObject("WScript.Shell")
+' python: prefer the py launcher, then any python on PATH; skip the bridge if neither exists
+If fso.FileExists(sh.SystemFolder & "\py.exe") Then
+  pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
+ElseIf sh.Run("cmd /c where python >nul 2>nul", 0, True) = 0 Then
+  pyCmd = "python"
+Else
+  pyCmd = ""
+End If
 
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -24,8 +34,8 @@ If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Microsoft\Edge\App
 sh.CurrentDirectory = repo
 
 ' start the local bridge (minimized) so login gate / local fetch keeps working
-If fso.FileExists(py) And fso.FileExists(bridge) Then
-  sh.Run """" & py & """ """ & bridge & """", 7, False
+If pyCmd <> "" And fso.FileExists(bridge) Then
+  sh.Run pyCmd & " """ & bridge & """", 7, False
   WScript.Sleep 1800
 End If
 

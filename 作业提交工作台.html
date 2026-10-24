@@ -1434,18 +1434,26 @@ function streamChat(chat){
       return;
     }
     var lastSave = 0;
-    CloudAI.chat({
-      messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
-      conversationId: "hwdesk-chat-" + _chatId,
-      onDelta: function(d){
-        chat.messages[chat.messages.length - 1].content += d;
-        renderChatTail();
-        var now = Date.now();
-        if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
-      },
-      onDone: function(){ finishChat(); },
-      onErr: function(err){ cloudChatFail(chat, err); }
-    });
+    var doCloudChat = function(){
+      CloudAI.chat({
+        messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
+        conversationId: "hwdesk-chat-" + _chatId,
+        onDelta: function(d){
+          chat.messages[chat.messages.length - 1].content += d;
+          renderChatTail();
+          var now = Date.now();
+          if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
+        },
+        onDone: function(){ finishChat(); },
+        onErr: function(err){ cloudChatFail(chat, err); }
+      });
+    };
+    /* 开聊前先体检网关（#45/#48）：链接不完整/已失效在发送前拦下，别等打完字才报错 */
+    if(CloudAI._hcOk){ doCloudChat(); return; }
+    CloudAI.healthCheck(8000).then(function(hc){
+      if(hc && hc.ok){ CloudAI._hcOk = true; doCloudChat(); }
+      else cloudChatFail(chat, { error: { code: (hc && hc.code) || "gateway_network_error" } });
+    }).catch(function(){ cloudChatFail(chat, { error: { code: "gateway_network_error" } }); });
     return;
   }
   var cfg = Agent.config;

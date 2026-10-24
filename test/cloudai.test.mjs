@@ -259,6 +259,18 @@ test("healthCheck 响应不是合法 JSON → gateway_invalid_response", async (
   assert.equal(r.code, "gateway_invalid_response");
 });
 
+test("errText: 403 → 链接不完整 / 404 → 链接已失效（不掉进「模型服务暂时不可用」兜底）", () => {
+  const t403 = CloudAI.errText(err("gateway_http_403"));
+  assert.ok(t403.includes("链接不完整"), "403 must say 链接不完整");
+  assert.ok(!t403.includes("模型服务暂时不可用"), "403 must not hit the gateway_ fallback");
+  const t404 = CloudAI.errText(err("gateway_http_404"));
+  assert.ok(t404.includes("链接已失效"), "404 must say 链接已失效");
+  assert.ok(!t404.includes("模型服务暂时不可用"), "404 must not hit the gateway_ fallback");
+  assert.ok(!t404.includes("链接不完整"), "404 must not tell users to re-open with sharecode");
+  const tn = CloudAI.errText(err("gateway_network_error"));
+  assert.ok(tn.includes("链接不完整") && tn.includes("链接已失效"), "network_error copy covers both states");
+});
+
 /* ============ runner（异步感知） ============ */
 (async () => {
   for (const t of tests) {
