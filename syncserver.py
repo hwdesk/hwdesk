@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -430,6 +430,89 @@ def course_to_entry(c):
     return {"id": str(c.get("id") or "").strip(), "name": str(c.get("name") or "").strip()}
 
 
+# ---------------------------------------------------------------- 课件（资料目录）采集
+MATERIALS_MAX = 400   # 单课程课件条目上限（接口异常返回超大列表时防爆炸）
+FOLDERS_MAX = 20      # 资料目录一级展开上限
+
+
+def _strip_html(text, limit=200):
+    """HTML 片段 → 纯文本摘要（课件描述 / 作业要求共用，#57）
+    去 tag → 反转义 → 空白压成单空格 → 删除与中文相邻的空格（换行断词残留）"""
+    t = re.sub(r"<[^>]+>", " ", str(text or ""))
+    t = html_lib.unescape(t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return re.sub(r" ?([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]) ?", r"\1", t)[:limit]
+
+
+def _material_to_entry(m, course_name, folder=""):
+    """Tronclass 资料条目 → payload.materials 条目（宽松容错，无标题返回 None）"""
+    if not isinstance(m, dict):
+        return None
+    title = str(m.get("title") or m.get("name") or m.get("file_name") or "").strip()
+    if not title:
+        return None
+    if folder:
+        title = folder + " · " + title
+    note = _strip_html(m.get("description") or m.get("intro") or "", 200)
+    if not note:
+        ftype = str(m.get("material_type") or m.get("file_type") or m.get("type") or "").strip()
+        if ftype:
+            note = "文件类型：" + ftype
+    return {"course": str(course_name or "").strip() or "通用", "title": title, "kind": "课件", "note": note}
+
+
+def _materials_page(s, cid, folder_id):
+    """拉课程资料目录的一页。Tronclass 返回 {materials: [...], folders: [...]}；
+    平台改版返回裸数组 / 字段改名时宽松兜底，拿不到就返回空（绝不抛 KeyError）。"""
+    data = api_json(s, "/api/courses/%s/materials?folder_id=%s&page=1&page_size=100" % (cid, folder_id))
+    if isinstance(data, list):
+        return [], data
+    if not isinstance(data, dict):
+        return [], []
+    mats = data.get("materials") if isinstance(data.get("materials"), list) else []
+    folders = data.get("folders") if isinstance(data.get("folders"), list) else []
+    return folders, mats
+
+
+def collect_course_materials(s, cid, cname, errors):
+    """某门课的课件（资料目录）采集：单项失败只记 errors，不阻断整体（#57）。
+    根目录拉一页后，对目录（folder）一级展开；条目总量受 MATERIALS_MAX 限制。"""
+    out = []
+    try:
+        folders, mats = _materials_page(s, cid, 0)
+    except SessionLost:
+        raise
+    except SyncError as e:
+        errors.append("%s（课件）：%s" % (cname, e))
+        return out
+    for m in mats:
+        e = _material_to_entry(m, cname)
+        if e:
+            out.append(e)
+        if len(out) >= MATERIALS_MAX:
+            return out
+    for f in folders[:FOLDERS_MAX]:
+        if not isinstance(f, dict):
+            continue
+        fname = str(f.get("name") or f.get("title") or "").strip()
+        fid = str(f.get("id") or "").strip()
+        if not fid:
+            continue
+        try:
+            _, sub = _materials_page(s, cid, fid)
+        except SessionLost:
+            raise
+        except SyncError:
+            continue          # 单个目录失败不算课程失败
+        for m in sub:
+            e = _material_to_entry(m, cname, fname)
+            if e:
+                out.append(e)
+            if len(out) >= MATERIALS_MAX:
+                return out
+    return out
+
+
 # ---------------------------------------------------------------- 采集
 def hzcu_collect(s):
     """拉取课程 / 待办 / 每门课作业；单项失败不阻断整体，逐条记入 errors"""
@@ -449,6 +532,7 @@ def hzcu_collect(s):
 
     by_key = {}
     order = []
+    materials = []
 
     def put(a):
         if not a["title"]:
@@ -483,13 +567,15 @@ def hzcu_collect(s):
             raise
         except SyncError as e:
             errors.append("%s：%s" % (cname, e))
+        # 课件（资料目录）：与作业采集相互独立，任一失败只记 errors（#57）
+        materials.extend(collect_course_materials(s, cid, cname, errors))
 
     return {
         "fetchedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "source": "hzcu-xzc",
         "courses": [course_to_entry(c) for c in courses if isinstance(c, dict)],
         "assignments": [by_key[k] for k in order],
-        "materials": [],   # 预留：课程资料目录接口按需扩展（见 README）
+        "materials": materials,   # 课程课件（资料目录，含目录一级展开）
         "errors": errors,
     }
 
@@ -728,6 +814,50 @@ def self_test():
     ce = course_to_entry({"id": "12345", "name": "电机与拖动"})
     good = ce == {"id": "12345", "name": "电机与拖动"}
     print(("ok  - course_to_entry extracts id/name" if good else "FAIL - course_to_entry: %r" % ce))
+    ok &= good
+
+    # 8) 课件映射（#57）：标题兜底字段、HTML 摘要、目录前缀、无标题丢弃
+    m1 = _material_to_entry({"name": "第3章 Buck变换器", "description": "<p>开关频率<b>20kHz</b>，报告需含波形图</p>"},
+                            "电力电子技术")
+    good = m1 == {"course": "电力电子技术", "title": "第3章 Buck变换器", "kind": "课件",
+                  "note": "开关频率20kHz，报告需含波形图"}
+    print(("ok  - _material_to_entry maps name/description with html stripped" if good
+           else "FAIL - _material_to_entry: %r" % m1))
+    ok &= good
+    m2 = _material_to_entry({"file_name": "讲义.pdf", "file_type": "pdf"}, "课程X", "第1章 基础")
+    good = m2 and m2["title"] == "第1章 基础 · 讲义.pdf" and m2["note"] == "文件类型：pdf"
+    print(("ok  - _material_to_entry folder prefix + file type note" if good
+           else "FAIL - _material_to_entry folder: %r" % m2))
+    ok &= good
+    m3 = _material_to_entry({"description": "<i>没有标题的条目</i>"}, "课程X")
+    good = m3 is None
+    print(("ok  - _material_to_entry drops title-less entries" if good
+           else "FAIL - _material_to_entry none: %r" % m3))
+    ok &= good
+
+    # 9) _strip_html（#57）
+    good = _strip_html("<p>A&nbsp;B</p>  C") == "A B C" and _strip_html(None) == "" and \
+        _strip_html("x" * 500) == "x" * 200
+    print(("ok  - _strip_html unescapes/squeezes/truncates" if good
+           else "FAIL - _strip_html: %r" % _strip_html("<p>A&nbsp;B</p>  C")))
+    ok &= good
+
+    # 10) _materials_page 宽松兜底（打桩模块级 api_json，测完还原）
+    real_api = api_json
+    try:
+        globals()["api_json"] = lambda s, path: {"materials": [{"title": "课件A"}], "folders": [{"id": 7, "name": "目录B"}]}
+        folds, ms = _materials_page(object(), "1", 0)
+        good = len(ms) == 1 and len(folds) == 1
+        globals()["api_json"] = lambda s, path: [{"title": "裸数组兜底"}]
+        folds2, ms2 = _materials_page(object(), "1", 0)
+        good &= len(ms2) == 1 and folds2 == []
+        globals()["api_json"] = lambda s, path: "垃圾响应"
+        folds3, ms3 = _materials_page(object(), "1", 0)
+        good &= folds3 == [] and ms3 == []
+    finally:
+        globals()["api_json"] = real_api
+    print(("ok  - _materials_page tolerates dict/list/garbage responses" if good
+           else "FAIL - _materials_page fallback"))
     ok &= good
 
     print("SELF-TEST " + ("PASS" if ok else "FAIL"))
