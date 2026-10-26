@@ -148,6 +148,13 @@ test("summarize：空 stats / 无 errors 不炸", () => {
   assert.equal(AutoSync.summarize({}, []).includes("未取到"), false);
 });
 
+test("summarize：capturesUpdated 附加在采集入库之后（#58）", () => {
+  const s = AutoSync.summarize({ items: 2, added: 1, updated: 0, captures: 3, capturesUpdated: 5 }, []);
+  assert.match(s, /入库 3 条/);
+  assert.match(s, /更新 5 条课程记忆/);
+  assert.equal(AutoSync.summarize({ captures: 1 }, []).includes("课程记忆"), false);
+});
+
 test("offlineHint 指向 syncserver.py", () => {
   assert.match(AutoSync.offlineHint(), /syncserver\.py/);
 });

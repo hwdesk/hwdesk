@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.1.0"
+VERSION = "2.3.0"
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -394,6 +394,15 @@ def _type_cn(t):
     return TYPE_CN.get(t) or (t if t else "作业")
 
 
+def _strip_html(text, limit=200):
+    """HTML 片段 → 纯文本摘要（作业要求 / 详情描述共用，#58）
+    去 tag → 反转义 → 空白压成单空格 → 删除与中文相邻的空格（换行断词残留）"""
+    t = re.sub(r"<[^>]+>", " ", str(text or ""))
+    t = html_lib.unescape(t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return re.sub(r" ?([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]) ?", r"\1", t)[:limit]
+
+
 def todo_to_assignment(t):
     """/api/todos 的 todo_list 条目 → payload.assignments 条目（未完成待办）"""
     return {
@@ -407,22 +416,81 @@ def todo_to_assignment(t):
 
 
 def hw_to_assignment(hw, course_name):
-    """/api/courses/{id}/homework-activities 条目 → payload.assignments 条目"""
+    """/api/courses/{id}/homework-activities 条目 → payload.assignments 条目
+    （#58：列表里已有的要求描述直接进 note；id 透传供详情补拉）"""
     if hw.get("submitted"):
         status = "submitted"
     elif hw.get("is_closed"):
         status = "unknown"   # 已截止未提交：平台不再接受，标记未知由页面归档
     else:
         status = "todo"
-    note = "进行中" if hw.get("is_in_progress") else ""
+    notes = []
+    if hw.get("is_in_progress"):
+        notes.append("进行中")
+    desc = _strip_html(hw.get("description") or hw.get("intro") or "", 300)
+    if desc:
+        notes.append("要求：" + desc)
     return {
         "course": str(course_name or "").strip() or "通用",
         "title": str(hw.get("title") or "").strip(),
         "kind": _type_cn(hw.get("type")),
         "due": to_bj_time(hw.get("end_time") or hw.get("deadline")),
         "status": status,
-        "note": note,
+        "id": str(hw.get("id") or ""),
+        "note": "；".join(notes),
     }
+
+
+def _detail_note_parts(data):
+    """作业详情响应 → (要求, 成绩, 批语) 三元组（宽松容错，找不到给空串，#58）
+    成绩/批语优先取 student_submission 子对象，退化取顶层同名字段。"""
+    if not isinstance(data, dict):
+        return "", "", ""
+    desc = _strip_html(data.get("description") or data.get("intro") or "", 300)
+    sub = data.get("student_submission") if isinstance(data.get("student_submission"), dict) else {}
+    score = ""
+    for k in ("score", "grade", "final_score"):
+        if sub.get(k) is not None:
+            score = str(sub[k]).strip()
+            break
+    if not score:
+        for k in ("score", "grade"):
+            if data.get(k) is not None:
+                score = str(data[k]).strip()
+                break
+    comment = ""
+    for k in ("comment", "teacher_comment", "feedback"):
+        if sub.get(k) or data.get(k):
+            comment = _strip_html(sub.get(k) or data.get(k) or "", 200)
+            break
+    return desc, score, comment
+
+
+def hw_detail_enrich(s, a, errors, failed_courses):
+    """已提交作业按 id 拉详情，把要求原文/成绩/老师批语补进 note（#58）。
+    失败不阻断：每个课程只记一条 errors（防几十条作业刷屏），薄记忆保留。"""
+    if not a.get("id"):
+        return a
+    try:
+        data = api_json(s, "/api/homework-activities/%s" % a["id"])
+    except SessionLost:
+        raise
+    except SyncError as e:
+        if a["course"] not in failed_courses:
+            failed_courses.add(a["course"])
+            errors.append("%s（作业详情未取到，仅保留标题记忆）：%s" % (a["course"], e))
+        return a
+    desc, score, comment = _detail_note_parts(data)
+    extra = []
+    if desc and "要求：" not in a["note"]:
+        extra.append("要求：" + desc)
+    if score:
+        extra.append("成绩：" + score)
+    if comment:
+        extra.append("批语：" + comment)
+    if extra:
+        a["note"] = (a["note"] + "；" if a["note"] else "") + "；".join(extra)
+    return a
 
 
 def course_to_entry(c):
@@ -483,6 +551,12 @@ def hzcu_collect(s):
             raise
         except SyncError as e:
             errors.append("%s：%s" % (cname, e))
+
+    # 已提交作业补详情：要求原文 / 成绩 / 老师批语 → note（#58）
+    failed_courses = set()
+    for a in by_key.values():
+        if a.get("status") == "submitted" and a.get("id"):
+            hw_detail_enrich(s, a, errors, failed_courses)
 
     return {
         "fetchedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -710,18 +784,52 @@ def self_test():
            else "FAIL - todo_to_assignment: %r" % row))
     ok &= good
 
-    # 6) 作业映射：已提交/已截止/进行中三种状态
-    r1 = hw_to_assignment({"title": "作业A", "type": "homework", "submitted": True,
+    # 6) 作业映射：已提交/已截止/进行中三种状态 + 要求描述进 note + id 透传（#58）
+    r1 = hw_to_assignment({"id": 88, "title": "作业A", "type": "homework", "submitted": True,
                         "end_time": "2026-10-01T01:00:00.000Z"}, "课程X")
     r2 = hw_to_assignment({"title": "作业B", "type": "exam", "submitted": False,
                         "is_closed": True, "end_time": ""}, "课程X")
     r3 = hw_to_assignment({"title": "作业C", "type": "quiz", "submitted": False,
                         "is_in_progress": True, "deadline": "2026-12-31 12:00"}, "课程X")
-    good = r1["status"] == "submitted" and r1["due"] == "2026-10-01 09:00" and \
+    r4 = hw_to_assignment({"title": "作业D", "type": "homework", "submitted": True,
+                        "description": "<p>提交<b>实验代码</b>与报告</p>"}, "课程X")
+    good = r1["status"] == "submitted" and r1["due"] == "2026-10-01 09:00" and r1["id"] == "88" and \
         r2["status"] == "unknown" and r2["kind"] == "考试" and \
-        r3["status"] == "todo" and r3["due"] == "2026-12-31 12:00" and r3["note"] == "进行中"
-    print(("ok  - hw_to_assignment maps submitted/closed/in-progress" if good
-           else "FAIL - hw_to_assignment: %r %r %r" % (r1, r2, r3)))
+        r3["status"] == "todo" and r3["due"] == "2026-12-31 12:00" and r3["note"] == "进行中" and \
+        r4["note"] == "要求：提交实验代码与报告"
+    print(("ok  - hw_to_assignment maps submitted/closed/in-progress (+desc/id #58)" if good
+           else "FAIL - hw_to_assignment: %r %r %r %r" % (r1, r2, r3, r4)))
+    ok &= good
+
+    # 6b) 详情字段提取（#58）：要求/成绩/批语，子对象优先，垃圾输入零输出
+    d1 = _detail_note_parts({"description": "<p>用 Multisim 仿真</p>",
+                             "student_submission": {"score": 92, "comment": "<i>波形图缺失</i>"}})
+    d2 = _detail_note_parts({"score": 88, "teacher_comment": "注意单位"})
+    d3 = _detail_note_parts("垃圾响应")
+    good = d1 == ("用Multisim仿真", "92", "波形图缺失") \
+        and d2 == ("", "88", "注意单位") and d3 == ("", "", "")
+    print(("ok  - _detail_note_parts extracts desc/score/comment tolerantly" if good
+           else "FAIL - _detail_note_parts: %r %r %r" % (d1, d2, d3)))
+    ok &= good
+
+    # 6c) 详情补拉（#58）：note 注入 + 无 id / 失败时不炸且每课程只记一条 error
+    real_api2 = api_json
+    try:
+        globals()["api_json"] = lambda s, path: {"description": "<p>要求原文</p>",
+                                                 "student_submission": {"score": 95, "comment": "很好"}}
+        a = hw_to_assignment({"id": 5, "title": "作业E", "type": "homework", "submitted": True}, "课程Y")
+        errs, failed = [], set()
+        hw_detail_enrich(object(), a, errs, failed)
+        good = a["note"].index("要求：要求原文") != -1 and "成绩：95" in a["note"] and "批语：很好" in a["note"]
+        globals()["api_json"] = lambda s, path: (_ for _ in ()).throw(SyncError("接口 404"))
+        b = hw_to_assignment({"id": 6, "title": "作业F", "type": "homework", "submitted": True}, "课程Z")
+        hw_detail_enrich(object(), b, errs, failed)
+        hw_detail_enrich(object(), b, errs, failed)
+        good &= b["note"] == "" and len([e for e in errs if "课程Z" in e]) == 1
+    finally:
+        globals()["api_json"] = real_api2
+    print(("ok  - hw_detail_enrich injects note & dedupes per-course errors" if good
+           else "FAIL - hw_detail_enrich: %r" % errs))
     ok &= good
 
     # 7) 课程映射

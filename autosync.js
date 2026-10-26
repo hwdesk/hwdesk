@@ -66,6 +66,7 @@
     stats = stats || {};
     var s = "作业/考试 " + (stats.items || 0) + " 项（新增 " + (stats.added || 0)
       + "、更新截止 " + (stats.updated || 0) + "），采集入库 " + (stats.captures || 0) + " 条";
+    if (stats.capturesUpdated) s += "（更新 " + stats.capturesUpdated + " 条课程记忆）";
     if (errors && errors.length) s += "；部分未取到：" + errors.join("；");
     return s;
   };

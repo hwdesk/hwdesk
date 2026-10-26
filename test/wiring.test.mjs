@@ -354,8 +354,8 @@ test("failed/empty auto sync becomes visible in the 数据 view", () => {
       "platform-error path switches to the data view (auto mode)");
   has(/addLog\("自动同步未执行：[\s\S]{0,200}switchView\("data"\);/,
       "bridge-offline path switches to the data view (auto mode)");
-  has(/if\(auto && !ops\.stats\.items && !ops\.stats\.captures\)\{[\s\S]{0,400}switchView\("data"\);/,
-      "empty-result path switches to the data view (auto mode)");
+  has(/if\(auto && !ops\.stats\.items && !ops\.stats\.captures && !ops\.stats\.capturesUpdated\)\{[\s\S]{0,400}switchView\("data"\);/,
+      "empty-result path switches to the data view (auto mode, updates-only counts as success #58)");
 });
 
 /* ---------- 9. issue #25：选用此版 / 输出格式选择 / ⚡一键提交闭环 ---------- */

@@ -1799,7 +1799,7 @@ function applyPlatformPayload(payload, auto, course){
   /* 空结果（auto 模式）：当作没同步成功 —— 不记 lastRun（下次登录自动重试），
    * 并切到「数据」视图把原因亮出来，不让登录后"静默无数据"。
    * （#51 语义保留：markRun 全页仅出现在本函数成功入库路径，恰好 1 次） */
-  if(auto && !ops.stats.items && !ops.stats.captures){
+  if(auto && !ops.stats.items && !ops.stats.captures && !ops.stats.capturesUpdated){
     var outEmpty = directOut();
     outEmpty.textContent = "⚠ 自动同步没有取到任何作业/采集数据"
       + ((payload.errors || []).length ? "：" + payload.errors.join("；")
@@ -1812,6 +1812,16 @@ function applyPlatformPayload(payload, auto, course){
     return false;
   }
   ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
+  /* 采集记录更新（#58）：同去重键下平台带回更丰富的 note → 合并进既有记忆 */
+  (ops.capturesToUpdate || []).forEach(function(u){
+    var caps = DB.list("captures");
+    for(var i = 0; i < caps.length; i++){
+      if([caps[i].course, caps[i].kind, caps[i].title].join("|") === u.key){
+        DB.update("captures", caps[i].id, u.patch);
+        break;
+      }
+    }
+  });
   ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
   ops.itemsToUpdate.forEach(function(u){
     state.items.forEach(function(it){
@@ -1821,7 +1831,8 @@ function applyPlatformPayload(payload, auto, course){
   var sum = (typeof AutoSync !== "undefined" && AutoSync.summarize)
     ? AutoSync.summarize(ops.stats, payload.errors || [])
     : "作业/考试 " + ops.stats.items + " 项（新增 " + ops.stats.added
-      + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条";
+      + "、更新截止 " + ops.stats.updated + "），采集入库 " + ops.stats.captures + " 条"
+      + (ops.stats.capturesUpdated ? "（更新 " + ops.stats.capturesUpdated + " 条课程记忆）" : "");
   if(typeof AutoSync !== "undefined") AutoSync.markRun();   /* 成功入库才记 lastRun：失败/空结果下次登录自动重试 */
   addLog("学在城院" + (auto ? "自动同步" : "一键获取") + "：" + sum);
   saveState();
