@@ -413,6 +413,32 @@ test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/py\.exe/.test(vbs) && /where python/.test(vbs), "python resolved via py launcher or PATH");
 });
 
+/* ---------- 10b. issue #64：内联表单展开后必须滚进视野（「＋ 添加材料/添加作业」点了没反应） ---------- */
+test("addForm / matForm toggles go through togglePanel, not bare classList.toggle", () => {
+  has(/function togglePanel\(id\)\{[\s\S]{0,400}classList\.toggle\("open"\)/,
+      "togglePanel(id) helper exists");
+  has(/el\("btnAdd"\)\.addEventListener\(\s*"click",\s*function\(\)\{ togglePanel\("addForm"\); \}\)/,
+      "btnAdd -> togglePanel(addForm)");
+  has(/el\("btnMat"\)\.addEventListener\(\s*"click",\s*function\(\)\{ togglePanel\("matForm"\); \}\)/,
+      "btnMat -> togglePanel(matForm)");
+  assert.ok(!app.includes('el("addForm").classList.toggle("open")'),
+      "btnAdd fell back to the bare toggle (form opens out of viewport again)");
+  assert.ok(!app.includes('el("matForm").classList.toggle("open")'),
+      "btnMat fell back to the bare toggle (form opens out of viewport again)");
+});
+test("togglePanel scrolls the opened form into view and focuses its first field", () => {
+  has(/togglePanel\(id\)\{[\s\S]{0,200}scrollIntoView\(\{\s*behavior:\s*"smooth",\s*block:\s*"nearest"\s*\}\)/,
+      "expanded form is scrolled into view");
+  has(/togglePanel\(id\)\{[\s\S]{0,400}querySelector\("input, select, textarea"\)/,
+      "first input control is looked up");
+  has(/first\.focus\(\{\s*preventScroll:\s*true\s*\}\)/, "focus uses preventScroll to keep the smooth scroll");
+  /* 收起路径（btnCancel / mCancel）不做滚动，仍走 classList.remove("open") */
+  has(/el\("btnCancel"\)\.addEventListener\(\s*"click",\s*function\(\)\{ el\("addForm"\)\.classList\.remove\("open"\); \}\)/,
+      "btnCancel keeps the plain close");
+  has(/el\("mCancel"\)\.addEventListener\(\s*"click",\s*function\(\)\{ el\("matForm"\)\.classList\.remove\("open"\); \}\)/,
+      "mCancel keeps the plain close");
+});
+
 /* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
 test("data view keeps only the refresh button + course selector + status", () => {
   const dataStart = html.indexOf('id="view-data"');
