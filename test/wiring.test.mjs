@@ -446,4 +446,39 @@ test("legacy instruction-flow functions are fully removed from the page script",
   }
 });
 
+/* ---------- 11. issue #62：截止日期展示 + 忽略作业（同步不复活） ---------- */
+test("dueText always shows the concrete due date (YYYY年M月D日)", () => {
+  has(/function fmtDueFull\(/, "fmtDueFull builds YYYY年M月D日 from the due string");
+  has(/逾期 " \+ \(-n\) \+ " 天 · 截止 " \+ full/, "overdue text includes the concrete due date");
+  has(/今天截止 · " \+ full/, "today text includes the concrete due date");
+  has(/明天截止 · " \+ full/, "tomorrow text includes the concrete due date");
+  has(/还剩 " \+ n \+ " 天 · 截止 " \+ full/, "remaining-days text includes the concrete due date");
+});
+test("ignore: card button, handlers and delegation are wired", () => {
+  has(/data-ignore="' \+ it\.id \+ '">忽略</, "renderList emits a 忽略 button on every todo card");
+  has(/function onIgnore\(/, "onIgnore handler exists");
+  has(/it\.ignored = true;/, "onIgnore marks the item ignored");
+  has(/function onUnignore\(/, "onUnignore handler exists");
+  has(/it\.ignored = false;/, "onUnignore clears the ignored flag");
+  has(/closest\("\[data-ignore\]"\)\)\) onIgnore\(/, "hwList delegation wires data-ignore -> onIgnore");
+  has(/closest\("\[data-unignore\]"\)\)\) onUnignore\(/, "hwList delegation wires data-unignore -> onUnignore");
+  has(/data-unignore="' \+ it\.id \+ '">恢复</, "renderList emits a 恢复 button on ignored cards");
+});
+test("ignore: hidden from today list, default filters and stats, visible under 已忽略 chip", () => {
+  has(/\[\["all","全部"\],\["todo","待完成"\],\["overdue","逾期"\],\["submitted","已提交"\],\["ignored","已忽略"\]\]/,
+      "filter chips include 已忽略");
+  has(/if\(f === "ignored"\) return !!it\.ignored;/, "ignored filter shows only ignored items");
+  has(/if\(it\.ignored\) return false;/, "default filters hide ignored items");
+  has(/if\(it\.ignored\) return; \/\/ 已忽略/, "todayItems skips ignored items");
+  has(/if\(it\.ignored\) return; \/\/ 已忽略：不计入任何统计/, "stats skip ignored items");
+});
+test("ignore: sync never revives an ignored assignment", () => {
+  has(/var ignoreSet = \{\};[\s\S]{0,200}ignoreSet\[\[it\.course, it\.name\]\.join\("\|"\)\] = 1;/,
+      "applyPlatformPayload builds the ignored-key set");
+  has(/ops\.itemsToAdd = ops\.itemsToAdd\.filter\(function\(it\)\{\s*\n\s*if\(ignoreSet\[\[it\.course, it\.name\]\.join\("\|"\)\]\)\{ skippedIgnored\+\+; return false; \}/,
+      "itemsToAdd drops ignored keys before insertion");
+  has(/if\(\[it\.course, it\.name\]\.join\("\|"\) === u\.key\)\{ if\(it\.ignored\) return; Object\.assign\(it, u\.patch\); \}/,
+      "due updates are not written into ignored items");
+});
+
 console.log("\n" + passed + " passed");
