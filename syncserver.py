@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"  # 2.2.0: 新增 AI 代理网关 /v1/*（issue #55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -583,6 +583,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._json(200, {"ok": True, "version": VERSION, "service": "hwdesk-syncserver",
                              "platform": "学在城院 courses.hzcu.edu.cn (Tronclass)"})
+        elif self.path.startswith("/v1/models"):
+            ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
+                                                 self.headers.get("Origin"))
+            if not ok:
+                self._json(401 if "token" in reason else 403,
+                           {"error": {"message": reason, "type": "proxy_auth"}})
+            else:
+                self._json(200, {"object": "list",
+                                 "data": [{"id": m, "object": "model"} for m in proxy_available_models()]})
         elif self.path.startswith("/data"):
             payload, cached = _STATE["last"], bool(_STATE["last"])
             if payload is None:
@@ -596,6 +605,76 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"ok": False, "error": "not found"})
 
+    def _proxy_chat(self, raw):
+        """OpenAI 兼容反代（issue #55）：鉴权 → 配额 → 路由 → 直连上游；stream 逐块透传"""
+        ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
+                                             self.headers.get("Origin"))
+        if not ok:
+            self._json(401 if "token" in reason else 403,
+                       {"error": {"message": reason, "type": "proxy_auth"}})
+            return
+        allowed, used = proxy_quota_bump(token)
+        if not allowed:
+            self._json(429, {"error": {"message": "今日代理额度已用完（%d/%d）" % (used, proxy_daily_limit()),
+                                       "type": "proxy_quota"}})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8", "replace")) if raw else {}
+            model = str(body.get("model") or "")
+            if not model:
+                raise ValueError("model is required")
+        except (ValueError, UnicodeDecodeError) as e:
+            self._json(400, {"error": {"message": "bad request: %s" % e, "type": "proxy_request"}})
+            return
+        provider, url, env = proxy_route(model)
+        key = proxy_upstream_key(env)
+        if not key:
+            self._json(502, {"error": {"message": "provider '%s' not configured on host (set %s)"
+                                                % (provider, env), "type": "proxy_config"}})
+            return
+        req = urllib.request.Request(
+            url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + key,
+                     "Accept": "text/event-stream" if body.get("stream") else "application/json"})
+        try:
+            upstream = _proxy_opener().open(req, timeout=120)
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:4000]  # 透传上游错误码；key 不出现在任何输出里
+            self.send_response(e.code)
+            self._cors()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(detail)))
+            self.end_headers()
+            self.wfile.write(detail)
+            return
+        except Exception as e:
+            self._json(502, {"error": {"message": "upstream %s unreachable: %s" % (provider, e),
+                                       "type": "proxy_upstream"}})
+            return
+        code = getattr(upstream, "status", None) or upstream.getcode() or 200
+        ctype = upstream.headers.get("Content-Type", "application/json")
+        self.send_response(code)
+        self._cors()
+        self.send_header("Content-Type", ctype)
+        if body.get("stream"):
+            # SSE：不设 Content-Length，逐块透传（HTTP/1.0 由连接关闭收尾）
+            self.end_headers()
+            try:
+                while True:
+                    chunk = upstream.read(1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except Exception:
+                pass  # 客户端中途断开属正常
+        else:
+            payload = upstream.read()
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
@@ -607,6 +686,9 @@ class Handler(BaseHTTPRequestHandler):
                     creds = body
         except ValueError:
             pass
+        if self.path.startswith("/v1/chat/completions"):
+            self._proxy_chat(raw)
+            return
         if self.path.startswith("/data"):
             try:
                 payload, _ = collect_payload(creds)
@@ -651,6 +733,177 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": False, "error": "ingest 失败：%s" % e})
         else:
             self._json(404, {"ok": False, "error": "not found"})
+
+
+# ---------------------------------------------------------------- AI 代理网关（issue #55）
+# ByteFolk 式「凭据留在宿主」：真实厂商 key 只存在于本机环境变量，页面/仓库永远拿不到。
+# 页面侧（agent.js cloud-proxy 预设）只需指到 http://127.0.0.1:8765/v1 即可零配置开聊。
+CLOUDAI_ENDPOINT = "https://hwdesk-workbench-95242.app.workbuddy.host"
+QUOTA_FILE = os.path.join(HERE, "wb_proxy_quota.json")
+
+# (provider, model 前缀元组, 上游 chat/completions 地址, key 的环境变量名)；None 前缀 = 兜底路由
+PROXY_ROUTES = [
+    ("deepseek", ("deepseek",),
+     "https://api.deepseek.com/v1/chat/completions", "HWDESK_PROXY_DEEPSEEK_KEY"),
+    ("moonshot", ("moonshot", "kimi"),
+     "https://api.moonshot.cn/v1/chat/completions", "HWDESK_PROXY_MOONSHOT_KEY"),
+    ("dashscope", ("qwen",),
+     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+     "HWDESK_PROXY_DASHSCOPE_KEY"),
+    ("ark", None,
+     "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "HWDESK_PROXY_ARK_KEY"),
+]
+
+def proxy_route(model):
+    """model → (provider, upstream_url, env_key)；前缀未命中走方舟兜底（接入点 ID 原样透传）"""
+    m = (model or "").strip().lower()
+    for name, prefixes, url, env in PROXY_ROUTES:
+        if prefixes and any(m.startswith(p) for p in prefixes):
+            return name, url, env
+    name, _, url, env = PROXY_ROUTES[-1]
+    return name, url, env
+
+
+def proxy_tokens():
+    """HWDESK_PROXY_TOKENS（逗号分隔）；未设置 = 本机信任模式（服务只监听 127.0.0.1，免 token）"""
+    raw = os.environ.get("HWDESK_PROXY_TOKENS", "")
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def proxy_origin_ok(origin):
+    """Origin 白名单：空/null（file:// 与 curl）、localhost/127.0.0.1、发布站点、HWDESK_PROXY_ORIGINS 追加"""
+    if not origin or origin == "null":
+        return True
+    try:
+        host = urllib.parse.urlparse(origin).hostname or ""
+    except ValueError:
+        return False
+    if host in ("127.0.0.1", "localhost"):
+        return True
+    try:
+        pub = urllib.parse.urlparse(CLOUDAI_ENDPOINT).hostname
+    except ValueError:
+        pub = ""
+    if host == pub:
+        return True
+    extra = [h.strip() for h in os.environ.get("HWDESK_PROXY_ORIGINS", "").split(",") if h.strip()]
+    return host in extra
+
+
+def proxy_check_auth(auth_header, origin, tokens=None):
+    """纯函数：→ (ok, token, reason)。信任模式 token 记 'local'"""
+    if tokens is None:
+        tokens = proxy_tokens()
+    if not proxy_origin_ok(origin):
+        return False, "", "origin not allowed: %s" % origin
+    if not tokens:
+        return True, "local", ""
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return False, "", "missing bearer token"
+    tok = auth_header[7:].strip()
+    if tok not in tokens:
+        return False, "", "invalid token"
+    return True, tok, ""
+
+
+def proxy_daily_limit():
+    try:
+        return max(1, int(os.environ.get("HWDESK_PROXY_DAILY_LIMIT", "200")))
+    except ValueError:
+        return 200
+
+
+def proxy_quota_allow(token, limit, today, state):
+    """纯函数：→ (allowed, count)。state 为当日计数 dict（按天分桶），命中返回自增后的值"""
+    day_map = state.get(today) if isinstance(state.get(today), dict) else {}
+    used = int(day_map.get(token, 0))
+    if used >= limit:
+        return False, used
+    day_map[token] = used + 1
+    state[today] = day_map
+    return True, day_map[token]
+
+
+def proxy_quota_bump(token):
+    """带持久化的配额判定：读 wb_proxy_quota.json → 判定 → 写回（只保留当天，防文件膨胀）"""
+    today = datetime.date.today().isoformat()
+    try:
+        with open(QUOTA_FILE, encoding="utf-8") as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    ok, n = proxy_quota_allow(token, proxy_daily_limit(), today, state)
+    if ok:
+        try:
+            with open(QUOTA_FILE, "w", encoding="utf-8") as f:
+                json.dump({today: state.get(today)}, f, ensure_ascii=False)
+        except OSError:
+            pass  # 磁盘写不进去就只在内存里限，本次进程内仍生效
+    return ok, n
+
+
+def proxy_upstream_key(env_name):
+    return os.environ.get(env_name, "")
+
+
+def proxy_available_models():
+    """配置了哪些厂商 key 就暴露哪些模型（绝不返回 key 本身）"""
+    out = []
+    if proxy_upstream_key("HWDESK_PROXY_DEEPSEEK_KEY"):
+        out += ["deepseek-chat", "deepseek-reasoner"]
+    if proxy_upstream_key("HWDESK_PROXY_MOONSHOT_KEY"):
+        out += ["moonshot-v1-8k"]
+    if proxy_upstream_key("HWDESK_PROXY_DASHSCOPE_KEY"):
+        out += ["qwen-plus"]
+    return out
+
+
+def _proxy_opener():
+    """强制直连上游（同 Session：系统代理 Clash 会把国内厂商请求带进 502）"""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def self_test_proxy():
+    ok = True
+
+    # 8) 路由表：前缀命中与方舟兜底
+    r1 = proxy_route("deepseek-chat")
+    r2 = proxy_route("kimi-x")
+    r3 = proxy_route("qwen-plus")
+    r4 = proxy_route("ep-20260101-abc123")   # 方舟接入点 ID → 兜底
+    good = r1[0] == "deepseek" and r2[0] == "moonshot" and r3[0] == "dashscope" and r4[0] == "ark"
+    print(("ok  - proxy_route maps deepseek/moonshot/qwen prefixes, ark fallback" if good
+           else "FAIL - proxy_route: %r %r %r %r" % (r1, r2, r3, r4)))
+    ok &= good
+
+    # 9) 鉴权：token 模式 / 信任模式 / Origin 白名单
+    t = ["tok-a", "tok-b"]
+    good = proxy_check_auth("Bearer tok-a", None, t)[0] \
+        and proxy_check_auth("Bearer tok-b", "http://localhost:9999", t)[0] \
+        and not proxy_check_auth("Bearer nope", None, t)[0] \
+        and not proxy_check_auth(None, None, t)[0] \
+        and proxy_check_auth(None, "null", [])[0] \
+        and proxy_check_auth(None, "https://" + urllib.parse.urlparse(CLOUDAI_ENDPOINT).hostname, [])[0] \
+        and not proxy_check_auth(None, "https://evil.example.com", [])[0] \
+        and proxy_check_auth(None, None, [])[1] == "local"
+    print(("ok  - proxy_check_auth token/origin rules (trust mode, file://, published host)" if good
+           else "FAIL - proxy_check_auth rules"))
+    ok &= good
+
+    # 10) 配额：限额内放行、超限拒绝、次日重置
+    st = {}
+    a1 = proxy_quota_allow("t", 2, "2026-10-26", st)
+    a2 = proxy_quota_allow("t", 2, "2026-10-26", st)
+    a3 = proxy_quota_allow("t", 2, "2026-10-26", st)
+    a4 = proxy_quota_allow("t", 2, "2026-10-27", st)
+    good = a1 == (True, 1) and a2 == (True, 2) and a3 == (False, 2) and a4 == (True, 1)
+    print(("ok  - proxy_quota_allow caps per token per day, resets next day" if good
+           else "FAIL - proxy_quota_allow: %r %r %r %r" % (a1, a2, a3, a4)))
+    ok &= good
+
+    return ok
 
 
 # ---------------------------------------------------------------- 自检
@@ -730,6 +983,8 @@ def self_test():
     print(("ok  - course_to_entry extracts id/name" if good else "FAIL - course_to_entry: %r" % ce))
     ok &= good
 
+    ok &= self_test_proxy()
+
     print("SELF-TEST " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -744,6 +999,8 @@ def main():
     print("  GET  /data        取缓存或用 wb_local.json 拉取")
     print("  POST /data        请求体可带 {\"account\",\"password\"}（仅本次内存使用）")
     print("  POST /ingest      外部采集结果投递")
+    print("  GET  /v1/models   AI 代理：已配置的模型目录（issue #55）")
+    print("  POST /v1/chat/completions  AI 代理：OpenAI 兼容反代，厂商 key 全在环境变量")
     print("  凭据文件：%s（不要提交）" % CFG_FILE)
     print("  Ctrl+C 退出")
     try:
