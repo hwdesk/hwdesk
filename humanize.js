@@ -131,56 +131,86 @@
 
   /* ==================== ContextKit ==================== */
   var ContextKit = {};
-  ContextKit.VERSION = "1.0.0";
+  ContextKit.VERSION = "1.1.0";
+
+  /* 预算（#59）：课程记忆库条目会随学期增长，简报必须有硬上限，
+   * 否则一次同步几百条课件会把提示词撑爆 */
+  ContextKit.BRIEF_LIMIT = 2600;   // 简报总长（字符）
+  ContextKit.MAX_MATERIALS = 12;   // 进入简报的材料条数上限
+  ContextKit.MAX_HISTORY = 8;      // 进入简报的历史任务条数上限
+  ContextKit.NOTE_LIMIT = 160;     // 单条摘要截断
 
   /*
    * item      当前任务
    * items     全部作业（含已提交，用于同课程历史）
    * materials 上下文库材料 [{title, course, kind, note}]
+   * 优先级：本课程材料 → 本课程历史作业 → 通用材料（#59）
    * 返回 { brief, historyCount, materialCount }
    */
   ContextKit.pack = function (item, items, materials) {
     items = items || []; materials = materials || [];
+    var course = item.course || "";
 
     /* 1) 同课程历史已完成任务（风格锚点 + 范围提示） */
     var history = [];
     items.forEach(function (it) {
-      if (it.status === "submitted" && it.course === item.course && it.id !== item.id) {
+      if (it.status === "submitted" && it.course === course && it.id !== item.id) {
         history.push(it);
       }
     });
 
-    /* 2) 匹配材料：同课程 或 通用材料 */
-    var matched = materials.filter(function (m) {
-      return m.course === item.course || m.course === "通用";
+    /* 2) 匹配材料：本课程优先，通用材料殿后 */
+    var courseMats = [], generalMats = [];
+    materials.forEach(function (m) {
+      if (m.course === course) courseMats.push(m);
+      else if (m.course === "通用") generalMats.push(m);
     });
 
-    if (!history.length && !matched.length) {
+    if (!history.length && !courseMats.length && !generalMats.length) {
       return { brief: "", historyCount: 0, materialCount: 0 };
     }
 
     var lines = [];
     lines.push("【上下文参考（来自学在城院与本工作台，用于提高正确率并贴合我的文风）】");
-    if (matched.length) {
-      lines.push("· 课程材料：");
-      matched.forEach(function (m) {
-        lines.push("  - " + m.kind + "「" + m.title + "」（" + m.course + "）" +
-          (m.note ? "：" + String(m.note).slice(0, 200) : ""));
-      });
+    var omitted = 0;
+    function addMat(m) {
+      lines.push("  - " + m.kind + "「" + m.title + "」（" + m.course + "）" +
+        (m.note ? "：" + String(m.note).slice(0, ContextKit.NOTE_LIMIT) : ""));
+    }
+    var shown = 0;
+    if (courseMats.length) {
+      lines.push("· 本课程材料：");
+      for (var i = 0; i < courseMats.length && shown < ContextKit.MAX_MATERIALS; i++, shown++) addMat(courseMats[i]);
+      if (courseMats.length > shown) omitted += courseMats.length - shown;
     }
     if (history.length) {
       lines.push("· 我之前已完成的同课程任务（文风与深度参考）：");
-      history.forEach(function (it) {
-        lines.push("  - 《" + it.name + "》（" + it.type + (it.note ? "，备注：" + it.note : "") + "）");
-      });
+      var hs = 0;
+      for (var j = 0; j < history.length && hs < ContextKit.MAX_HISTORY; j++, hs++) {
+        var it = history[j];
+        lines.push("  - 《" + it.name + "》（" + it.type + (it.note ? "，备注：" + String(it.note).slice(0, ContextKit.NOTE_LIMIT) : "") + "）");
+      }
+      if (history.length > hs) omitted += history.length - hs;
       lines.push("  完成本次任务时保持与上述任务一致的个人风格与详略程度。");
     }
+    if (generalMats.length) {
+      lines.push("· 通用材料：");
+      var gs = 0;
+      for (var k = 0; k < generalMats.length && shown + gs < ContextKit.MAX_MATERIALS + ContextKit.MAX_HISTORY; k++, gs++) addMat(generalMats[k]);
+      if (generalMats.length > gs) omitted += generalMats.length - gs;
+    }
     lines.push("· 优先依据上述课件与作业要求作答，不要凭通用知识自由发挥。");
+    if (omitted) lines.push("（另有 " + omitted + " 条同课程材料/历史未展开，需要时可让我调取）");
+
+    var brief = lines.join("\n");
+    if (brief.length > ContextKit.BRIEF_LIMIT) {
+      brief = brief.slice(0, ContextKit.BRIEF_LIMIT) + "\n…（上下文超出预算已截断）";
+    }
 
     return {
-      brief: lines.join("\n"),
+      brief: brief,
       historyCount: history.length,
-      materialCount: matched.length
+      materialCount: courseMats.length + generalMats.length
     };
   };
 

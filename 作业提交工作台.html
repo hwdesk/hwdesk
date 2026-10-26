@@ -128,6 +128,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .mat-title{font-weight:600;font-size:14px;word-break:break-all}
 .mat-meta{font-size:12px;color:var(--sub);margin-top:2px}
 .mat-note{font-size:12px;color:var(--sub);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap-course{margin-bottom:4px}
+.cap-course-head{font-size:13px;font-weight:700;color:var(--txt);margin:10px 0 2px;padding-left:2px}
 /* 交付 / 审批记录 */
 .sub-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
 .sub-row:last-child{border-bottom:none}
@@ -788,24 +790,37 @@ function renderMaterials(){
   });
   box.innerHTML = html;
 }
-/* 采集库渲染 */
+/* 采集库渲染（#59：课程记忆——自动同步维护的本地库，按课程分组呈现） */
 function renderCaptures(){
   var box = el("capBox");
   var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
   if(!caps.length){
-    box.innerHTML = '<div class="empty">暂无平台采集数据，点上方「🔄 同步」从学在城院拉取</div>';
+    box.innerHTML = '<div class="empty">课程记忆库还是空的：登录学在城院后会自动同步，各课程课件、已提交作业、成绩将自动入库（也可点上方「🔄 同步」立即拉取）。这里的记忆会注入 AI 提示词，让成稿贴合对应课程</div>';
     return;
   }
-  var html = "";
+  var byCourse = {}, order = [], latest = "";
   caps.forEach(function(m){
-    html += '<div class="mat-item">'
-      + '<span class="mat-kind">' + esc(m.kind) + '</span>'
-      + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
-      + '<div class="mat-meta">' + esc(m.course) + ' · 采集于 ' + esc(m.time || "-") + '</div>'
-      + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
-      + '</div>'
-      + '<button class="btn sm danger-ghost" data-cap-del="' + m.id + '">删除</button>'
-      + '</div>';
+    var c = m.course || "通用";
+    if(!byCourse[c]){ byCourse[c] = []; order.push(c); }
+    byCourse[c].push(m);
+    if(m.time && m.time > latest) latest = m.time;
+  });
+  var html = '<div class="hint" style="margin:2px 0 6px">🧠 课程记忆 · ' + order.length + ' 门课程 · '
+    + caps.length + ' 条 · 登录后自动同步维护，AI 执行任务时按课程取用'
+    + (latest ? ' · 最近采集 ' + esc(latest) : '') + '</div>';
+  order.forEach(function(c){
+    html += '<div class="cap-course"><div class="cap-course-head">' + esc(c) + '（' + byCourse[c].length + ' 条）</div>';
+    byCourse[c].forEach(function(m){
+      html += '<div class="mat-item">'
+        + '<span class="mat-kind">' + esc(m.kind) + '</span>'
+        + '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>'
+        + '<div class="mat-meta">' + esc(m.course) + ' · 采集于 ' + esc(m.time || "-") + '</div>'
+        + (m.note ? '<div class="mat-note">' + esc(m.note) + '</div>' : "")
+        + '</div>'
+        + '<button class="btn sm danger-ghost" data-cap-del="' + m.id + '">删除</button>'
+        + '</div>';
+    });
+    html += '</div>';
   });
   box.innerHTML = html;
 }

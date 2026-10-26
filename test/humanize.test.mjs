@@ -181,4 +181,33 @@ test("routing: polisher AI exists and can be routed to", () => {
   assert.equal(r.ai, "polisher");
 });
 
+/* ---------- ContextKit 预算与优先级（#59） ---------- */
+test("context: brief stays within the budget even with a huge course memory", () => {
+  const manyMats = [];
+  for (let i = 0; i < 300; i++) manyMats.push({ kind: "课件", course: "电力电子技术", title: "课件" + i, note: "x".repeat(400) });
+  const p = ContextKit.pack(base({ id: 3 }), [], manyMats);
+  assert.ok(p.materialCount === 300, "all materials counted");
+  assert.ok(p.brief.length <= ContextKit.BRIEF_LIMIT + 40, "brief length " + p.brief.length);
+  assert.ok(p.brief.indexOf("课件11") !== -1, "first materials shown");
+  assert.ok(p.brief.indexOf("课件299") === -1, "later materials omitted");
+});
+test("context: course materials come before history, general materials last", () => {
+  const mats = [
+    { kind: "范文", course: "通用", title: "通用范文" },
+    { kind: "课件", course: "电力电子技术", title: "本课课件" },
+  ];
+  const hist = [{ id: 9, name: "历史作业", course: "电力电子技术", status: "submitted", type: "附件+报告" }];
+  const p = ContextKit.pack(base({ id: 3 }), hist, mats);
+  const iCourse = p.brief.indexOf("本课课件");
+  const iHist = p.brief.indexOf("历史作业");
+  const iGeneral = p.brief.indexOf("通用范文");
+  assert.ok(iCourse !== -1 && iHist !== -1 && iGeneral !== -1);
+  assert.ok(iCourse < iHist && iHist < iGeneral, "priority order");
+});
+test("context: long notes are truncated per entry", () => {
+  const p = ContextKit.pack(base({ id: 3 }), [],
+    [{ kind: "课件", course: "电力电子技术", title: "T", note: "y".repeat(500) }]);
+  assert.ok(p.brief.indexOf("y".repeat(200)) === -1, "note capped at NOTE_LIMIT");
+});
+
 console.log(passed + " passed, " + (process.exitCode ? "FAILED" : "0 failed"));
