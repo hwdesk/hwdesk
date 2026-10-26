@@ -48,6 +48,21 @@ function pyHas(re, what) {
 
 console.log("wiring | ids: " + ids.size + ", inline script: " + app.length + " chars");
 
+/* ============ #54 云端通道开机自检（横幅 + 状态行 + safe 接线） ============ */
+test("#54 自检横幅与状态行元素齐全", () => {
+  ["cloudBanner", "cloudBannerMsg", "cloudBannerCopy", "cloudBannerClose", "cloudStatus"].forEach((id) => {
+    assert.ok(ids.has(id), "missing id: " + id);
+  });
+});
+test("#54 开机自检已定义、经 safe() 容错接线、用上 contextHints + healthCheck", () => {
+  has(/function cloudSelfCheck\(/, "cloudSelfCheck() defined");
+  has(/safe\("cloudSelfCheck"/, "boot wires cloudSelfCheck via safe()");
+  has(/CloudAI\.contextHints\(/, "cloudSelfCheck reads contextHints");
+  has(/CloudAI\.healthCheck\(8000\)/, "cloudSelfCheck runs healthCheck(8000)");
+  has(/cloudBannerCopy/, "banner has copy-full-link affordance");
+});
+
+
 /* ---------- 1. el() 引用的 id 必须真的存在 ---------- */
 test('every el("id") in the inline script resolves to a real element', () => {
   const refs = [...new Set([...app.matchAll(/\bel\(\s*"([^"]+)"\s*\)/g)].map((m) => m[1]))];
