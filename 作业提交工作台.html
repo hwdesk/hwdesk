@@ -1338,8 +1338,10 @@ function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
   var _lastSave = Date.now();
-  /* 云端免密钥通道：没填自己的 Key 就走这里（点开即聊） */
-  if((!Agent.config || !Agent.config.apiKey) && typeof CloudAI !== "undefined" && CloudAI.ok()){
+  /* 云端免密钥通道：Agent 层不可用（cloudproxy 未选中且没填自己的 Key）才走这里（点开即聊，#56） */
+  var agentUsable = Agent.config && Agent.config.baseUrl && Agent.config.model &&
+    (Agent.config.preset === "cloudproxy" || Agent.config.apiKey);
+  if(!agentUsable && typeof CloudAI !== "undefined" && CloudAI.ok()){
     if(!CloudAI.model){
       CloudAI.refreshModels().then(function(){
         if(CloudAI.model) streamChat(chat);
@@ -2354,6 +2356,7 @@ function bind(){
     el("agSave").addEventListener("click", function(){
       Agent.load();
       Agent.config.preset = el("agPreset").value;
+      Agent.config.manualLock = true;   /* 用户显式选过，开机自动降级不再覆盖（#56） */
       Agent.config.baseUrl = el("agUrl").value.trim();
       Agent.setKey(Agent.config.preset, el("agKey").value.trim());
       Agent.config.model = el("agModel").value.trim();
@@ -2409,6 +2412,18 @@ function cloudSelfCheck(){
         CloudAI.errText({ error: { code: (r && r.code) || "" } }).slice(0, 60);
   }).catch(function(){ if(st) st.textContent = "☁️ 云端通道异常"; });
 }
+/* 分层自动降级（issue #56）：代理 → CloudAI → 本机已存 key；探测到可用层就自动切换 */
+function agentProbeLayers(){
+  if(typeof Agent === "undefined" || !Agent.probeLayers) return;
+  Agent.probeLayers(4000).then(function(r){
+    if(r && r.layer === 1){
+      var picked = Agent.autoSelect(r);
+      if(picked === "cloudproxy" && typeof fillAgentSettings === "function") fillAgentSettings();
+      var st = el("cloudStatus");
+      if(st) st.textContent = "☁️ 云端代理可用（免配置，" + Agent.PRESETS.cloudproxy.label + "）";
+    }
+  }).catch(function(){ /* 探测失败静默，走 CloudAI/手动层 */ });
+}
 document.addEventListener("DOMContentLoaded", function(){
   loadState();
   if(!localStorage.getItem(LS_KEY)) saveState();   // 首次：写入示例数据
@@ -2422,6 +2437,7 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("refreshAll", refreshAll);
   safe("switchView", function(){ switchView("overview"); });
   safe("cloudSelfCheck", function(){ if(typeof CloudAI !== "undefined") cloudSelfCheck(); });
+  safe("agentProbeLayers", agentProbeLayers);
   /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });

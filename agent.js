@@ -2,12 +2,21 @@
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.1.0" };
+  var Agent = { version: "1.2.0" };  /* 1.2.0: cloud-proxy 预设 + 分层自动降级（issue #56） */
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
    * 豆包走火山方舟兼容模式，model 需填自己的推理接入点或模型 ID。 */
   Agent.PRESETS = {
+    cloudproxy: {
+      label: "云端代理（免配置）",
+      baseUrl: "http://127.0.0.1:8765/v1",
+      model: "deepseek-chat",
+      keyUrl: "",
+      hint: "维护者本机 syncserver.py /v1 代理网关：厂商 key 全在服务端环境变量，本机零配置即可用；令牌可选",
+      cors: "ok",
+      builtin: true
+    },
     deepseek: {
       label: "DeepSeek",
       baseUrl: "https://api.deepseek.com/v1",
@@ -49,7 +58,7 @@
       cors: "custom"
     }
   };
-  Agent.PRESET_ORDER = ["deepseek", "kimi", "qwen", "doubao", "custom"];
+  Agent.PRESET_ORDER = ["cloudproxy", "deepseek", "kimi", "qwen", "doubao", "custom"];
 
   /* ---------- 配置存取 ----------
    * keys = 按预设分存的 API Key（换 Agent 不丢 Key）；兼容旧的单 apiKey 字段。 */
@@ -69,7 +78,7 @@
 
   /* ---------- 配置存取 ---------- */
   var LS_CFG = "wb_hwdesk_agent";
-  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {} };
+  Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "", model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false };
 
   Agent.load = function () {
     try {
@@ -118,6 +127,57 @@
     Agent.load();
     return Agent.PRESET_ORDER.filter(function (id) { return !!Agent.config.keys[id]; });
   };
+  /* ---------- 分层自动降级（issue #56） ----------
+   * 第 1 层 cloudproxy（本机 syncserver /v1，key 在服务端）
+   * 第 2 层 CloudAI（发布站点免密钥通道）
+   * 第 3 层 本机已存 key 的手动预设
+   * 全灭 → { layer: 0 }，维持现状提示配 Key。 */
+  Agent.currentProxyBase = function () {
+    if (Agent.config.preset === "cloudproxy" && Agent.config.baseUrl) {
+      return String(Agent.config.baseUrl).replace(/\/+$/, "");
+    }
+    return Agent.PRESETS.cloudproxy.baseUrl;
+  };
+
+  Agent.probeLayers = async function (timeoutMs) {
+    var ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 4000;
+    var g = typeof global !== "undefined" ? global : globalThis;
+    /* 第 1 层：本机代理网关 */
+    if (typeof g.fetch === "function") {
+      try {
+        var ctl = new g.AbortController();
+        var timer = setTimeout(function () { ctl.abort(); }, ms);
+        var headers = {};
+        var tok = Agent.config.keys && Agent.config.keys.cloudproxy;
+        if (tok) headers["Authorization"] = "Bearer " + tok;
+        var res = await g.fetch(Agent.currentProxyBase() + "/models", { signal: ctl.signal, headers: headers });
+        clearTimeout(timer);
+        var models = null;
+        if (res.ok) { try { models = await res.json(); } catch (e) { models = null; } }
+        if (res.ok) return { layer: 1, presetId: "cloudproxy", models: models, detail: "cloud-proxy reachable" };
+      } catch (e) { /* 代理未开，落到下一层 */ }
+    }
+    /* 第 2 层：发布站点免密钥通道 */
+    if (g.CloudAI && typeof g.CloudAI.healthCheck === "function") {
+      try {
+        var hc = await g.CloudAI.healthCheck(ms);
+        if (hc && hc.ok) return { layer: 2, presetId: null, models: hc.models, detail: "cloudai" };
+      } catch (e) { /* 网关不可达 */ }
+    }
+    /* 第 3 层：本机已配 key 的手动预设（不含 cloudproxy / custom 空壳） */
+    var usable = Agent.usablePresets().filter(function (id) { return id !== "cloudproxy"; });
+    if (usable.length) return { layer: 3, presetId: usable[0], detail: usable.join(",") };
+    return { layer: 0, presetId: null, detail: "none" };
+  };
+
+  /* 按探测结果自动切换；用户显式选过（manualLock）则不抢 */
+  Agent.autoSelect = function (result) {
+    if (!result || !result.presetId || !Agent.PRESETS[result.presetId]) return null;
+    if (Agent.config.manualLock) return null;
+    Agent.applyPreset(result.presetId);
+    return Agent.config.preset;
+  };
+
   Agent.ready = function () {
     Agent.load();
     return !!(Agent.config.baseUrl && Agent.config.model && Agent.config.apiKey);
