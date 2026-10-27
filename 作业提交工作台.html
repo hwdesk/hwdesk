@@ -165,6 +165,12 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 </style>
 </head>
 <body>
+<!-- 云端通道自检横幅（#54）：file:// 打开或地址缺 sharecode 时提示自助修复，可关闭 -->
+<div id="cloudBanner" style="display:none;position:sticky;top:0;z-index:99;margin:0 0 8px;padding:10px 14px;border-radius:10px;background:#fff7e6;border:1px solid #ffd591;color:#614700;font-size:13px;line-height:1.7">
+  <span id="cloudBannerMsg"></span>
+  <button id="cloudBannerCopy" type="button" style="display:none;margin-left:8px;padding:2px 10px;border:1px solid #fa8c16;border-radius:6px;background:#fff;color:#fa8c16;cursor:pointer">复制完整链接</button>
+  <button id="cloudBannerClose" type="button" title="关闭" style="float:right;border:none;background:none;color:#999;cursor:pointer;font-size:14px">✕</button>
+</div>
 <div class="shell">
   <!-- ========== 侧边栏（参照 RoleWeave 区块） ========== -->
   <aside class="side">
@@ -313,6 +319,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="section-title">
       <h2>AI 对话</h2>
       <span class="hint">选任务 → 选 AI（⭐ 推荐 · 📌 默认）→ 对话到满意 → 一键交付</span>
+      <span id="cloudStatus" class="hint" style="margin-left:auto"></span>
     </div>
     <div class="card" style="padding:12px">
       <div class="chat-pickers">
@@ -2421,6 +2428,44 @@ function bind(){
 function safe(name, fn){
   try { fn(); } catch(e){ console.error("[hwdesk] " + name + " failed:", e); }
 }
+/* 云端通道开机自检（issue #54）：打开方式 + 访问参数 + 网关体检。
+ * 报错前先把「怎么打开的」讲清楚：file:// / 缺 sharecode 都是用户可自助修复的。 */
+function cloudSelfCheck(){
+  if(typeof CloudAI === "undefined") return;
+  var hints = CloudAI.contextHints();
+  var msg = "";
+  if(hints.isFile){
+    msg = "当前是本地 file:// 打开，没有云端权限——请从发布网址打开本页（或在设置里填自己的 API Key）";
+  } else if(hints.isPublishedHost && !hints.hasSharecode){
+    msg = "当前地址缺少分享参数，云端请求会报「链接不完整」——请改用完整分享链接打开";
+  }
+  if(msg){
+    var banner = el("cloudBanner");
+    if(banner){
+      el("cloudBannerMsg").textContent = msg;
+      var cp = el("cloudBannerCopy");
+      if(hints.fullLink && navigator.clipboard && navigator.clipboard.writeText){
+        cp.style.display = "";
+        cp.onclick = function(){
+          navigator.clipboard.writeText(hints.fullLink).then(function(){ showToast("完整链接已复制"); });
+        };
+      }
+      banner.style.display = "";
+      var close = el("cloudBannerClose");
+      if(close) close.onclick = function(){ banner.style.display = "none"; };
+    }
+  }
+  /* 网关体检：结果落在 AI 对话区状态行，而不是等用户发消息后才报错 */
+  var st = el("cloudStatus");
+  if(st) st.textContent = "☁️ 云端通道检测中…";
+  CloudAI.healthCheck(8000).then(function(r){
+    if(!st) return;
+    st.textContent = (r && r.ok)
+      ? "☁️ 云端通道正常"
+      : "☁️ 云端通道异常（" + ((r && r.code) || "?") + "）· " +
+        CloudAI.errText({ error: { code: (r && r.code) || "" } }).slice(0, 60);
+  }).catch(function(){ if(st) st.textContent = "☁️ 云端通道异常"; });
+}
 document.addEventListener("DOMContentLoaded", function(){
   loadState();
   if(!localStorage.getItem(LS_KEY)) saveState();   // 首次：写入示例数据
@@ -2433,6 +2478,7 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("initLoginGate", initLoginGate);
   safe("refreshAll", refreshAll);
   safe("switchView", function(){ switchView("overview"); });
+  safe("cloudSelfCheck", function(){ if(typeof CloudAI !== "undefined") cloudSelfCheck(); });
   /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });

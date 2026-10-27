@@ -175,6 +175,15 @@ python make_lnk_com.py   # 需要 pywin32：pip install pywin32
 
 「点开即聊」的免密钥 AI 通道：`cloudai.js` 内置 `CloudAI.config`（endpoint + publishableKey，均为公开值），指向维护者发布在本机 WorkBuddy 账号下的工作台应用；服务端按 **Origin 精确匹配**校验，只有从发布网址打开的页面才能调用（本地 `file://` 打开请在设置里填自己的 API Key）。
 
+**自助排查（issue #54，页面已内置自检）**：打开工作台时会自动做「打开方式 + 访问参数」自检并弹出可操作的横幅，AI 对话区标题栏常驻云端通道状态行（`CloudAI.contextHints()` + `CloudAI.healthCheck(8000)`）。
+
+| 现象 | 原因 | 自助解决 |
+|---|---|---|
+| 打开发布域名看到「链接不完整」 | 地址丢了 `?sharecode=`（聊天工具转发常被截断） | 用完整链接或 `launch-hwdesk-online.vbs`；页内横幅可一键复制完整链接 |
+| 界面正常但聊天报 `gateway_network_error` / `auth_*` | `file://` 本地打开，Origin 为 null 被服务端拒 | 从发布网址打开；或在设置里填自己的 API Key |
+| 同一台机器时好时坏 | 本机代理 / 拦截扩展劫持该域名 | 用启动器（独立 profile + 直连代理），或把 `*.app.workbuddy.host` 加入代理白名单 |
+| 全体用户同时报错 | 发布链接失效（站点重新发布过） | 走下方 runbook 重新发布 + `CloudAI.applyConfig` 热修 |
+
 **过期症状**：发布链接失效后，聊天报 `gateway_network_error`（浏览器直开发布域名会看到「链接已失效」404 页）。该通道所有机器共用同一个发布链接，失效是**全体同时**的，与个人电脑无关（2026-10-23 实际发生过一次，见 #42 / #44）。
 
 **恢复步骤（runbook）**：
