@@ -487,6 +487,15 @@ test("legacy instruction-flow functions are fully removed from the page script",
   }
 });
 
+
+/* ============ #56 分层自动降级接线 ============ */
+test("#56 开机分层探测已接线（safe 容错）且聊天入口识别 cloudproxy 层", () => {
+  has(/function agentProbeLayers\(/, "agentProbeLayers() defined");
+  has(/safe\("agentProbeLayers"/, "boot wires agentProbeLayers via safe()");
+  has(/Agent\.autoSelect\(/, "probe result feeds autoSelect");
+  has(/Agent\.config\.manualLock = true/, "explicit preset pick sets manualLock");
+  has(/agentUsable/, "chat entry checks the Agent layer before falling back to CloudAI");
+});
 /* ---------- 11. issue #62：截止日期展示 + 忽略作业（同步不复活） ---------- */
 test("dueText always shows the concrete due date (YYYY年M月D日)", () => {
   has(/function fmtDueFull\(/, "fmtDueFull builds YYYY年M月D日 from the due string");

@@ -204,4 +204,75 @@ test("extractDeliverable keeps its old string signature", () => {
 });
 
 console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");
-if (!process.exitCode) console.log("ALL PASS");
+
+/* ---------- 分层自动降级（#56，异步） ---------- */
+const realFetch = globalThis.fetch;
+const realCloudAI = globalThis.CloudAI;
+function okFetch(body) {
+  return async (url, opts) => ({ ok: true, url, opts, json: async () => body });
+}
+function downFetch() {
+  return async () => { throw new TypeError("Failed to fetch"); };
+}
+
+async function atest(name, fn) {
+  try { await fn(); passed++; console.log("  ok - " + name); }
+  catch (e) { console.error("  FAIL - " + name + "\n    " + e.message); process.exitCode = 1; }
+}
+
+(async () => {
+  const freshConfig = () => { store.clear();
+    Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "",
+      model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false }; };
+
+  await atest("probeLayers: 代理可达 → layer1 cloudproxy（带令牌时请求带头）", async () => {
+    freshConfig();
+    let seen = null;
+    globalThis.fetch = async (u, o) => { seen = o || {}; return { ok: true, json: async () => ({ object: "list", data: [] }) }; };
+    delete globalThis.CloudAI;
+    Agent.setKey("cloudproxy", "tok-1");
+    const r = await Agent.probeLayers(500);
+    assert.equal(r.layer, 1); assert.equal(r.presetId, "cloudproxy");
+    assert.equal(seen.headers["Authorization"], "Bearer tok-1");
+  });
+
+  await atest("probeLayers: 代理挂 + CloudAI 体检通过 → layer2", async () => {
+    freshConfig();
+    globalThis.fetch = downFetch();
+    globalThis.CloudAI = { healthCheck: async () => ({ ok: true, models: [] }) };
+    const r = await Agent.probeLayers(500);
+    assert.equal(r.layer, 2); assert.equal(r.presetId, null);
+  });
+
+  await atest("probeLayers: 前两层灭 + 有本机 key → layer3 手动预设（不含 cloudproxy）", async () => {
+    freshConfig();
+    globalThis.fetch = downFetch();
+    globalThis.CloudAI = { healthCheck: async () => ({ ok: false, code: "gateway_network_error" }) };
+    Agent.setKey("deepseek", "sk-ds");
+    const r = await Agent.probeLayers(500);
+    assert.equal(r.layer, 3); assert.equal(r.presetId, "deepseek");
+  });
+
+  await atest("probeLayers: 全灭 → layer0", async () => {
+    freshConfig();
+    globalThis.fetch = downFetch();
+    globalThis.CloudAI = { healthCheck: async () => ({ ok: false, code: "gateway_timeout" }) };
+    const r = await Agent.probeLayers(500);
+    assert.equal(r.layer, 0); assert.equal(r.presetId, null);
+  });
+
+  await atest("autoSelect: 自动切到探测层；manualLock 后不再抢", async () => {
+    freshConfig();
+    assert.equal(Agent.autoSelect({ layer: 1, presetId: "cloudproxy" }), "cloudproxy");
+    assert.equal(Agent.config.preset, "cloudproxy");
+    Agent.applyPreset("deepseek");
+    Agent.config.manualLock = true;
+    assert.equal(Agent.autoSelect({ layer: 1, presetId: "cloudproxy" }), null);
+    assert.equal(Agent.config.preset, "deepseek");
+  });
+
+  globalThis.fetch = realFetch;
+  if (realCloudAI === undefined) delete globalThis.CloudAI; else globalThis.CloudAI = realCloudAI;
+  console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");
+  if (!process.exitCode) console.log("ALL PASS");
+})();
