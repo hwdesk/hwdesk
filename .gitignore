@@ -2,6 +2,7 @@
 wb_local.json
 wb_local.log
 wb_platform_cache.json
+wb_proxy_quota.json
 
 __pycache__/
 *.pyc
