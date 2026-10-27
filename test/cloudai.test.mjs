@@ -271,6 +271,41 @@ test("errText: 403 → 链接不完整 / 404 → 链接已失效（不掉进「�
   assert.ok(tn.includes("链接不完整") && tn.includes("链接已失效"), "network_error copy covers both states");
 });
 
+/* ============ contextHints 打开方式自检（#54） ============ */
+/* 裸 vm 上下文没有 URL 全局，isPublishedHost 判定需要带 URL 的沙箱实例 */
+const C54 = makeCloudAI({});
+test("contextHints: file:// 打开 → isFile，需横幅", () => {
+  const h = C54.contextHints({ protocol: "file:", search: "", hostname: "" });
+  assert.equal(h.isFile, true);
+  assert.equal(h.hasSharecode, false);
+});
+test("contextHints: 完整分享链接 → isPublishedHost 且带 sharecode", () => {
+  const h = C54.contextHints({ protocol: "https:", search: "?sharecode=COAVIMSN3Z",
+    hostname: "hwdesk-workbench-95242.app.workbuddy.host" });
+  assert.equal(h.isFile, false);
+  assert.equal(h.isPublishedHost, true);
+  assert.equal(h.hasSharecode, true);
+});
+test("contextHints: 发布域名但缺 sharecode → 横幅条件成立", () => {
+  const h = C54.contextHints({ protocol: "https:", search: "",
+    hostname: "hwdesk-workbench-95242.app.workbuddy.host" });
+  assert.equal(h.isPublishedHost, true);
+  assert.equal(h.hasSharecode, false);
+});
+test("contextHints: fullLink = endpoint + /?sharecode=…，第三方域名不算发布域", () => {
+  const h = C54.contextHints({ protocol: "https:", search: "", hostname: "example.com" });
+  assert.ok(h.fullLink.indexOf(C54.config.endpoint + "/?sharecode=") === 0);
+  assert.equal(h.isPublishedHost, false);
+});
+test("applyConfig: sharecode 可合法覆盖、非法值整单拒绝", () => {
+  const s = mockStorage({});
+  const C = makeCloudAI({ localStorage: s });
+  assert.equal(C.applyConfig({ sharecode: "COAVIMSN3Z" }).ok, true);
+  const bad = C.applyConfig({ sharecode: "has space" });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "invalid_sharecode");
+});
+
 /* ============ runner（异步感知） ============ */
 (async () => {
   for (const t of tests) {

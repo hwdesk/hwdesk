@@ -203,6 +203,13 @@ curl "https://<新域名>/.cloud/llm/models" \
 
 **按机覆盖（换站点不等新版）**：任一机器可在控制台执行 `CloudAI.applyConfig({ endpoint: "https://<新域名>", publishableKey: "wbpk_…" })`——合法覆盖合并进配置、存入本机 `localStorage["hwdesk.cloudai.overrides"]` 并立即重建客户端；非法输入（非 https、key 不以 `wbpk_` 开头、未知键）**整单拒绝、零改动**。`init()` 每次启动都先读本机覆盖，脏数据安全跳过。
 
+**零配置分层（issue #56）**：`agent.js` 1.2.0 起开机自动探测四层，用户零输入即可开聊——
+① 本机代理网关 `cloudproxy`（`http://127.0.0.1:8765/v1`，key 在维护者环境变量，见上方「AI 代理网关」）→
+② 发布站点免密钥通道 `CloudAI` →
+③ 本机已保存 key 的手动预设 →
+④ 全灭则提示配 Key。
+探测到可用层自动切换（`Agent.probeLayers` / `Agent.autoSelect`）；用户在「Agent 配置」里显式选过预设后 `manualLock` 生效，自动降级不再覆盖。聊天入口只在 Agent 层整体不可用时才回落 CloudAI。
+
 **开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>` / `gateway_invalid_response`），不必等用户打字才发现发布链接已失效。
 
 **干净配置启动器（launch-hwdesk-online.vbs）**：双击后以独立 Chrome profile + 直连代理打开发布站点（绕开本机坏代理 / 旧扩展的干扰，链接里已带完整访问参数），顺带拉起本机桥；首次运行会在桌面生成「hwdesk online」快捷方式。
