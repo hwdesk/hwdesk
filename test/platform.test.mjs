@@ -209,4 +209,51 @@ test("filterCourse output still merges through mergeOps (pipeline check)", () =>
   assert.equal(hist[0].course, "电机与拖动");
 });
 
+/* ---------- 历史作业记忆（#58） ---------- */
+test("submitted captures carry the capture date (采集于 - fix)", () => {
+  const r = PlatformKit.mergeOps(PAYLOAD, [], []);
+  const hist = r.capturesToAdd.find((c) => c.kind === "历史作业");
+  assert.equal(hist.time, "2026-10-22");
+});
+
+test("a richer upstream note queues capturesToUpdate; identical note does not", () => {
+  const first = PlatformKit.mergeOps(PAYLOAD, [], []);
+  const caps = first.capturesToAdd.map((c) => ({ ...c, id: 7 }));
+  const rich = JSON.parse(JSON.stringify(PAYLOAD));
+  rich.assignments[1].note = "要求：提交源码与报告；成绩：95；批语：注意单位";
+  const r2 = PlatformKit.mergeOps(rich, caps, []);
+  assert.equal(r2.capturesToAdd.length, 0);
+  assert.equal(r2.capturesToUpdate.length, 1);
+  assert.equal(r2.capturesToUpdate[0].key, "电机与拖动|历史作业|课堂练习3");
+  assert.match(r2.capturesToUpdate[0].patch.note, /成绩：95/);
+  assert.equal(r2.capturesToUpdate[0].patch.time, "2026-10-22");
+  assert.equal(r2.stats.capturesUpdated, 1);
+  /* 更新后再同步：note 一致 → 幂等，不再产生更新 */
+  const caps2 = caps.map((c) =>
+    c.title === "课堂练习3" ? { ...c, note: r2.capturesToUpdate[0].patch.note } : c);
+  const r3 = PlatformKit.mergeOps(rich, caps2, []);
+  assert.equal(r3.capturesToUpdate.length, 0);
+  assert.equal(r3.stats.capturesUpdated, 0);
+});
+
+test("a thinner or equal upstream note never shrinks the stored memory", () => {
+  const caps = [{ id: 7, kind: "历史作业", course: "电机与拖动", title: "课堂练习3",
+                  note: "平台状态：已提交（截止 2026-10-30）；要求：全文见附件", time: "2026-10-01" }];
+  const r = PlatformKit.mergeOps(PAYLOAD, caps, []);
+  assert.equal(r.capturesToUpdate.length, 0);
+  assert.equal(r.stats.capturesUpdated, 0);
+  /* 历史作业不重复入库；唯一新增的是 PAYLOAD 里尚不在库中的那条课件 */
+  assert.equal(r.capturesToAdd.filter((c) => c.kind === "历史作业").length, 0);
+  assert.deepEqual(r.capturesToAdd.map((c) => c.kind), ["课件"]);
+});
+
+test("filterCourse + mergeOps keep capturesToUpdate semantics (pipeline check)", () => {
+  const rich = JSON.parse(JSON.stringify(PAYLOAD));
+  rich.assignments[1].note = "要求：提交源码与报告";
+  const filtered = PlatformKit.filterCourse(rich, "电机与拖动");
+  const r = PlatformKit.mergeOps(filtered, [], []);
+  assert.equal(r.capturesToAdd.filter((c) => c.kind === "历史作业").length, 1);
+  assert.match(r.capturesToAdd[0].note, /要求：提交源码与报告/);
+});
+
 console.log("\n" + passed + " passed");
