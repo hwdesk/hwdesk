@@ -8,7 +8,10 @@
    * 只有本应用的发布域名能调用） */
   CloudAI.config = {
     endpoint: "https://hwdesk-workbench-95242.app.workbuddy.host",
-    publishableKey: "wbpk_0652K6obEFhp5et4I5yT2w_IjSxXY3b9DNEc6z4OmhsrJT9RXA0P9NC"
+    publishableKey: "wbpk_0652K6obEFhp5et4I5yT2w_IjSxXY3b9DNEc6z4OmhsrJT9RXA0P9NC",
+    /* 发布站点的完整分享参数（#54）：与 publishableKey 同为公开值，
+     * 缺了它平台网关会返回 403「链接不完整」页。 */
+    sharecode: "COAVIMSN3Z"
   };
 
   CloudAI.client = null;
@@ -25,6 +28,9 @@
   function validKey(v) {
     return typeof v === "string" && v.indexOf("wbpk_") === 0 && v.length > 5;
   }
+  function validSharecode(v) {
+    return typeof v === "string" && /^[A-Za-z0-9]{4,64}$/.test(v);
+  }
 
   /* 合法覆盖合并进 config + 落盘本机 localStorage + 重建客户端；非法整单拒绝（零改动） */
   CloudAI.applyConfig = function (overrides) {
@@ -38,8 +44,12 @@
       if (!validKey(overrides.publishableKey)) return { ok: false, code: "invalid_publishable_key" };
       patch.publishableKey = overrides.publishableKey;
     }
+    if (overrides.sharecode !== undefined) {
+      if (!validSharecode(overrides.sharecode)) return { ok: false, code: "invalid_sharecode" };
+      patch.sharecode = overrides.sharecode;
+    }
     for (var k in overrides) {
-      if (k !== "endpoint" && k !== "publishableKey") return { ok: false, code: "unknown_key" };
+      if (k !== "endpoint" && k !== "publishableKey" && k !== "sharecode") return { ok: false, code: "unknown_key" };
     }
     var stored = {};
     try { stored = JSON.parse(global.localStorage.getItem(CloudAI.OVERRIDES_KEY)) || {}; }
@@ -118,6 +128,29 @@
       }
     })();
     return function () { controller.abort(); };
+  };
+
+  /* 打开方式自检（#54）：告诉调用方本页是怎么打开的、云端入口是否可用。
+   * 纯函数（location 可注入，便于单测）：
+   *   isFile        — file:// 打开，云端按 Origin 校验必拒（Origin 为 null）
+   *   hasSharecode  — 当前地址是否带 ?sharecode=（缺了平台返回 403「链接不完整」）
+   *   fullLink      — 完整分享链接（endpoint + sharecode），给「复制完整链接」按钮用 */
+  CloudAI.contextHints = function (loc) {
+    loc = loc || (typeof location !== "undefined" ? location : null);
+    var cfg = CloudAI.config || {};
+    var search = loc && typeof loc.search === "string" ? loc.search : "";
+    var isPublishedHost = false;
+    try {
+      isPublishedHost = !!(loc && loc.hostname && cfg.endpoint &&
+        loc.hostname === new URL(cfg.endpoint).hostname);
+    } catch (e) { isPublishedHost = false; }
+    return {
+      isFile: !!loc && loc.protocol === "file:",
+      hasSharecode: /[?&]sharecode=/.test(search),
+      isPublishedHost: isPublishedHost,
+      endpoint: cfg.endpoint || "",
+      fullLink: cfg.endpoint ? cfg.endpoint + "/?sharecode=" + (cfg.sharecode || "") : ""
+    };
   };
 
   /* 体检（#45）：开聊前主动探网关，别等用户打字才发现发布链接已失效。
