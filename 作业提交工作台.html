@@ -2121,6 +2121,21 @@ function onClearDemo(){
 }
 
 /* ---------- 初始化 ---------- */
+/* 展开/收起内联表单（#addForm / #matForm）。
+ * 回归 issue #64：按钮在卡片标题栏，表单却压在同一张 card 的最底部
+ * （addForm 在 hwList 之后、matForm 在 capBox 采集长列表之后）——数据一多，
+ * 表单展开位置落在视口之外几百像素处，页面不滚动、无任何反馈，
+ * 用户感知就是「＋ 添加作业 / ＋ 添加材料点了没反应」。
+ * 展开时把表单滚进视野并聚焦第一个输入控件；收起路径不滚动。 */
+function togglePanel(id){
+  var f = el(id);
+  f.classList.toggle("open");
+  if(f.classList.contains("open")){
+    f.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    var first = f.querySelector("input, select, textarea");
+    if(first && first.focus) first.focus({ preventScroll: true });
+  }
+}
 function bind(){
   /* 侧边栏视图切换 */
   el("nav").addEventListener("click", function(e){
@@ -2128,7 +2143,7 @@ function bind(){
     if(b) switchView(b.getAttribute("data-view"));
   });
 
-  el("btnAdd").addEventListener("click", function(){ el("addForm").classList.toggle("open"); });
+  el("btnAdd").addEventListener("click", function(){ togglePanel("addForm"); });
   el("btnCancel").addEventListener("click", function(){ el("addForm").classList.remove("open"); });
   el("btnSave").addEventListener("click", onSaveNew);
   el("btnExport").addEventListener("click", onExport);
@@ -2172,7 +2187,7 @@ function bind(){
     if(b) onCaptureDelete(+b.getAttribute("data-cap-del"));
   });
 
-  el("btnMat").addEventListener("click", function(){ el("matForm").classList.toggle("open"); });
+  el("btnMat").addEventListener("click", function(){ togglePanel("matForm"); });
   el("mCancel").addEventListener("click", function(){ el("matForm").classList.remove("open"); });
   el("mSave").addEventListener("click", onMatSave);
   el("matBox").addEventListener("click", function(e){
