@@ -17,7 +17,7 @@
   "use strict";
 
   var DB = {};
-  DB.VERSION = "1.1.0";
+  DB.VERSION = "1.2.0";
 
   /* 库注册表：key → localStorage 键名 */
   DB.STORES = {
@@ -25,6 +25,16 @@
     submissions: "wb_hwdesk_submissions",
     reviews: "wb_hwdesk_reviews",
     chats: "wb_hwdesk_chats"
+  };
+
+  /* 每库上限（#59）：captures 是课程记忆库——全部课程的课件 + 历史作业 +
+   * 成绩都往这里放，200 条远远不够，提到 2000 防止最老的课程记忆被静默
+   * 截断；其余库仍是流水性质，200 防膨胀即可 */
+  DB.CAPS = {
+    captures: 2000,
+    submissions: 200,
+    reviews: 200,
+    chats: 200
   };
 
   function read(key) {
@@ -42,7 +52,8 @@
     var arr = DB.list(store);
     record.id = record.id || (Date.now() % 100000000 + Math.floor(Math.random() * 1000));
     arr.unshift(record);
-    if (arr.length > 200) arr.length = 200;          // 每库上限，防膨胀
+    var cap = DB.CAPS[store] || 200;                  // 按库上限（#59）
+    if (arr.length > cap) arr.length = cap;
     write(DB.STORES[store] || store, arr);
     return record;
   };

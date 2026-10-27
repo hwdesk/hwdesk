@@ -91,4 +91,20 @@ test("stores are isolated from each other", () => {
   DB.clear("captures");
 });
 
+/* ---------- 每库上限（#59） ---------- */
+test("captures holds up to 2000 records (course memory is not silently truncated)", () => {
+  DB.clear("captures");
+  for (let i = 0; i < 600; i++) DB.insert("captures", { title: "m" + i, course: "C", kind: "课件", note: "" });
+  assert.equal(DB.list("captures").length, 600);
+  DB.clear("captures");
+});
+test("other stores keep the 200-record cap", () => {
+  DB.clear("submissions");
+  for (let i = 0; i < 210; i++) DB.insert("submissions", { name: "s" + i, status: "pending", time: "t" });
+  assert.equal(DB.list("submissions").length, 200);
+  DB.clear("submissions");
+  assert.equal(DB.CAPS.captures, 2000);
+  assert.equal(DB.CAPS.reviews, 200);
+});
+
 console.log(passed + " passed, " + (process.exitCode ? "FAILED" : "0 failed"));
