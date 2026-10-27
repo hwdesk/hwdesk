@@ -901,6 +901,8 @@ PROXY_ROUTES = [
     ("dashscope", ("qwen",),
      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
      "HWDESK_PROXY_DASHSCOPE_KEY"),
+    ("hunyuan", ("hunyuan",),
+     "https://api.hunyuan.cloud.tencent.com/v1/chat/completions", "HWDESK_PROXY_HUNYUAN_KEY"),
     ("ark", None,
      "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "HWDESK_PROXY_ARK_KEY"),
 ]
@@ -1008,6 +1010,10 @@ def proxy_available_models():
         out += ["moonshot-v1-8k"]
     if proxy_upstream_key("HWDESK_PROXY_DASHSCOPE_KEY"):
         out += ["qwen-plus"]
+    if proxy_upstream_key("HWDESK_PROXY_HUNYUAN_KEY"):
+        out += ["hunyuan-turbos-latest"]
+    if proxy_upstream_key("HWDESK_PROXY_ARK_KEY"):
+        out += ["ark-endpoint-id (passthrough)"]   # 方舟按接入点 ID 透传，目录里给个可用标记
     return out
 
 
@@ -1023,8 +1029,10 @@ def self_test_proxy():
     r1 = proxy_route("deepseek-chat")
     r2 = proxy_route("kimi-x")
     r3 = proxy_route("qwen-plus")
+    r3b = proxy_route("hunyuan-turbos-latest")
     r4 = proxy_route("ep-20260101-abc123")   # 方舟接入点 ID → 兜底
-    good = r1[0] == "deepseek" and r2[0] == "moonshot" and r3[0] == "dashscope" and r4[0] == "ark"
+    good = r1[0] == "deepseek" and r2[0] == "moonshot" and r3[0] == "dashscope" \
+        and r3b[0] == "hunyuan" and r4[0] == "ark"
     print(("ok  - proxy_route maps deepseek/moonshot/qwen prefixes, ark fallback" if good
            else "FAIL - proxy_route: %r %r %r %r" % (r1, r2, r3, r4)))
     ok &= good
@@ -1052,6 +1060,27 @@ def self_test_proxy():
     good = a1 == (True, 1) and a2 == (True, 2) and a3 == (False, 2) and a4 == (True, 1)
     print(("ok  - proxy_quota_allow caps per token per day, resets next day" if good
            else "FAIL - proxy_quota_allow: %r %r %r %r" % (a1, a2, a3, a4)))
+    ok &= good
+
+    # 11) models 目录：不配 key 为空；只配方舟也有 passthrough 标记（探测层据此判定可用）
+    saved = {k: os.environ.get(k) for k in
+             ("HWDESK_PROXY_DEEPSEEK_KEY", "HWDESK_PROXY_MOONSHOT_KEY",
+              "HWDESK_PROXY_DASHSCOPE_KEY", "HWDESK_PROXY_HUNYUAN_KEY", "HWDESK_PROXY_ARK_KEY")}
+    for k in saved:
+        os.environ.pop(k, None)
+    empty_ok = proxy_available_models() == []
+    os.environ["HWDESK_PROXY_ARK_KEY"] = "test-only"
+    ark_ok = proxy_available_models() == ["ark-endpoint-id (passthrough)"]
+    os.environ["HWDESK_PROXY_HUNYUAN_KEY"] = "test-only"
+    hy_ok = "hunyuan-turbos-latest" in proxy_available_models()
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    good = empty_ok and ark_ok and hy_ok
+    print(("ok  - proxy_available_models empty-when-unconfigured, ark passthrough marker, hunyuan" if good
+           else "FAIL - proxy_available_models: %r %r %r" % (empty_ok, ark_ok, hy_ok)))
     ok &= good
 
     return ok

@@ -531,4 +531,25 @@ test("ignore: sync never revives an ignored assignment", () => {
       "due updates are not written into ignored items");
 });
 
+
+/* ============ #70 桌面下载即用：本地启动器 / 混元路由 / 失败文案 ============ */
+test("#70 本地启动器存在：探活 8765 → 拉起 syncserver → 应用模式直连打开", () => {
+  const vbs = readFileSync(path.join(root, "launch-hwdesk-local.vbs"), "utf8");
+  assert.ok(/127\.0\.0\.1:8765\/health/.test(vbs), "launcher probes bridge /health");
+  assert.ok(/syncserver\.py/.test(vbs), "launcher auto-starts syncserver.py");
+  assert.ok(/--proxy-server=direct:\/\//.test(vbs), "app mode opens with direct network");
+  assert.ok(!/Users\/feng/.test(vbs), "no machine-specific path");
+});
+test("#70 open.py 不再硬编码用户路径", () => {
+  const op = readFileSync(path.join(root, "open.py"), "utf8");
+  assert.ok(!op.includes("Users/feng"), "feng hardcode removed");
+});
+test("#70 聊天失败文案指向本地启动器（自助修复闭环）", () => {
+  has(/launch-hwdesk-local\.vbs/, "failure copy mentions the local launcher");
+});
+test("#70 syncserver：混元路由 + ark passthrough 标记", () => {
+  pyHas(/HWDESK_PROXY_HUNYUAN_KEY/, "hunyuan env key");
+  pyHas(/ark-endpoint-id \(passthrough\)/, "ark passthrough marker in models catalog");
+});
+
 console.log("\n" + passed + " passed");

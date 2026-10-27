@@ -1448,7 +1448,8 @@ function streamChat(chat){
     renderChat(chat);
     el("chatRisk").style.display = "block";
     el("chatRisk").textContent = "请求失败：" + err.message
-      + "\n常见原因：Key / 模型名不对，或该服务不允许浏览器直连（CORS）——换预设试试（DeepSeek / Kimi / 通义一般可直连）。";
+      + "\n常见原因：Key / 模型名不对，或该服务不允许浏览器直连（CORS）——换预设试试（DeepSeek / Kimi / 通义一般可直连）。"
+      + "\n零配置用法：双击 hwdesk 目录里的 launch-hwdesk-local.vbs，自动拉起本机 AI 代理后全 AI 免 Key（豆包 / 混元必须走代理，浏览器直连必被拦）。";
     addLog("Agent 对话请求失败：" + err.message.slice(0, 80));
   });
 }

@@ -35,10 +35,15 @@ function test(name, fn) {
 console.log("agent.js " + Agent.version + " | presets: " + Agent.PRESET_ORDER.join(", "));
 
 /* ---------- 预设 ---------- */
-test("presets include deepseek / kimi / qwen / doubao / custom", () => {
-  for (const id of ["deepseek", "kimi", "qwen", "doubao", "custom"]) {
+test("presets include cloudproxy / deepseek / kimi / qwen / hunyuan / doubao / custom", () => {
+  for (const id of ["cloudproxy", "deepseek", "kimi", "qwen", "hunyuan", "doubao", "custom"]) {
     assert.ok(Agent.PRESETS[id], id + " missing");
   }
+});
+test("hunyuan preset is OpenAI-compatible + proxy-flagged (#70)", () => {
+  assert.match(Agent.PRESETS.hunyuan.baseUrl, /^https:\/\/api\.hunyuan\.cloud\.tencent\.com\/v1$/);
+  assert.equal(Agent.PRESETS.hunyuan.cors, "proxy");
+  assert.ok(Agent.PRESETS.hunyuan.model.length > 0);
 });
 test("web presets carry https baseUrl and default model", () => {
   for (const id of ["deepseek", "kimi", "qwen"]) {
@@ -225,15 +230,23 @@ async function atest(name, fn) {
     Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "",
       model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false }; };
 
-  await atest("probeLayers: 代理可达 → layer1 cloudproxy（带令牌时请求带头）", async () => {
+  await atest("probeLayers: 代理可达且 models 非空 → layer1 cloudproxy（带令牌时请求带头）", async () => {
     freshConfig();
     let seen = null;
-    globalThis.fetch = async (u, o) => { seen = o || {}; return { ok: true, json: async () => ({ object: "list", data: [] }) }; };
+    globalThis.fetch = async (u, o) => { seen = o || {}; return { ok: true, json: async () => ({ object: "list", data: [{ id: "deepseek-chat" }] }) }; };
     delete globalThis.CloudAI;
     Agent.setKey("cloudproxy", "tok-1");
     const r = await Agent.probeLayers(500);
     assert.equal(r.layer, 1); assert.equal(r.presetId, "cloudproxy");
     assert.equal(seen.headers["Authorization"], "Bearer tok-1");
+  });
+
+  await atest("probeLayers: 代理可达但 models 为空（一台 key 都没配）→ 跳过 layer1 落 CloudAI（#70）", async () => {
+    freshConfig();
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ object: "list", data: [] }) });
+    globalThis.CloudAI = { healthCheck: async () => ({ ok: true, models: [] }) };
+    const r = await Agent.probeLayers(500);
+    assert.equal(r.layer, 2); assert.equal(r.presetId, null);
   });
 
   await atest("probeLayers: 代理挂 + CloudAI 体检通过 → layer2", async () => {
