@@ -469,8 +469,8 @@ test("ignore: hidden from today list, default filters and stats, visible under �
       "filter chips include 已忽略");
   has(/if\(f === "ignored"\) return !!it\.ignored;/, "ignored filter shows only ignored items");
   has(/if\(it\.ignored\) return false;/, "default filters hide ignored items");
-  has(/if\(it\.ignored\) return; \/\/ 已忽略/, "todayItems skips ignored items");
-  has(/if\(it\.ignored\) return; \/\/ 已忽略：不计入任何统计/, "stats skip ignored items");
+  has(/if\(it\.ignored\) return;\s*\/\/ 已忽略/, "todayItems skips ignored items");
+  has(/if\(it\.ignored\) return;\s*\/\/ 已忽略：不计入任何统计/, "stats skip ignored items");
 });
 test("ignore: sync never revives an ignored assignment", () => {
   has(/var ignoreSet = \{\};[\s\S]{0,200}ignoreSet\[\[it\.course, it\.name\]\.join\("\|"\)\] = 1;/,
