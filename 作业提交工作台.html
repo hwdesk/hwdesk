@@ -615,19 +615,26 @@ function dayDiff(due){
   var d2 = new Date(+p[0], +p[1]-1, +p[2]);
   return Math.round((d2 - t) / 86400000);
 }
+function fmtDueFull(s){
+  var p = (s || "").split("-");
+  if(p.length !== 3) return "";
+  return p[0] + "年" + parseInt(p[1],10) + "月" + parseInt(p[2],10) + "日";
+}
 function dueText(it){
   var n = dayDiff(it.due);
-  if(n === null) return "无期限";
-  if(n < 0)  return "逾期 " + (-n) + " 天";
-  if(n === 0) return "今天截止";
-  if(n === 1) return "明天截止";
-  return "还剩 " + n + " 天";
+  var full = fmtDueFull(it.due);
+  if(n === null) return full ? "截止 " + full : "无期限";
+  if(n < 0)  return "逾期 " + (-n) + " 天 · 截止 " + full;
+  if(n === 0) return "今天截止 · " + full;
+  if(n === 1) return "明天截止 · " + full;
+  return "还剩 " + n + " 天 · 截止 " + full;
 }
 
 /* ---------- 计算层（纯函数，不碰 DOM） ---------- */
 function todayItems(){
   var out = [];
   state.items.forEach(function(it){
+    if(it.ignored) return;                              // 已忽略：不进「今天要处理」
     if(it.status === "todo" || it.status === "review"){
       var n = dayDiff(it.due);
       if(n !== null && n <= 3) out.push(it);           // 逾期、今天、3天内
@@ -648,6 +655,8 @@ function filteredItems(){
     var db = b.status!=="submitted" ? (dayDiff(b.due)===null?9999:dayDiff(b.due)) : 99999;
     return da - db;
   }).filter(function(it){
+    if(f === "ignored") return !!it.ignored;            // 「已忽略」筛选：只看被忽略的
+    if(it.ignored) return false;                        // 其余筛选一律隐藏已忽略项
     if(f === "all") return true;
     if(f === "todo") return it.status !== "submitted";
     if(f === "overdue") return it.status !== "submitted" && dayDiff(it.due) < 0;
@@ -657,6 +666,7 @@ function filteredItems(){
 function stats(){
   var s = { overdue:0, week:0, done:0, review:0 };
   state.items.forEach(function(it){
+    if(it.ignored) return;                              // 已忽略：不计入任何统计
     if(it.status === "submitted"){ s.done++; return; }
     var n = dayDiff(it.due);
     if(n !== null && n < 0) s.overdue++;
@@ -693,7 +703,7 @@ function renderToday(){
   box.innerHTML = html;
 }
 function renderFilters(){
-  var defs = [["all","全部"],["todo","待完成"],["overdue","逾期"],["submitted","已提交"]];
+  var defs = [["all","全部"],["todo","待完成"],["overdue","逾期"],["submitted","已提交"],["ignored","已忽略"]];
   var html = "";
   defs.forEach(function(d){
     html += '<button class="chip' + (state.filter===d[0]?" on":"") + '" data-f="' + d[0] + '">' + d[1] + '</button>';
@@ -707,21 +717,25 @@ function renderList(){
   list.forEach(function(it){
     var ico = it.status==="submitted" ? ICO.sent : ICO.clock;
     var n = dayDiff(it.due);
-    var overdue = it.status!=="submitted" && n!==null && n<0;
+    var overdue = it.status!=="submitted" && !it.ignored && n!==null && n<0;
     var dtext = dueText(it);
     if(overdue) dtext = '<span style="color:var(--red);font-weight:600">' + dtext + '</span>';
     var acts = "";
-    if(it.status !== "submitted"){
+    if(it.ignored){
+      acts += '<button class="btn sm" data-unignore="' + it.id + '">恢复</button>';
+    }else if(it.status !== "submitted"){
       acts += '<button class="btn sm primary" data-ai="' + it.id + '">AI 代提交</button>';
       acts += '<button class="btn sm" data-done="' + it.id + '">手动标已完成</button>';
+      acts += '<button class="btn sm" data-ignore="' + it.id + '">忽略</button>';
     }else{
       acts += '<button class="btn sm" data-undo="' + it.id + '">撤回为待办</button>';
     }
     acts += '<button class="btn sm danger-ghost" data-del="' + it.id + '">删除</button>';
-    html += '<div class="hw-item">'
+    html += '<div class="hw-item"' + (it.ignored ? ' style="opacity:.55"' : '') + '>'
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
       + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
+      + (it.ignored ? '<span style="color:#999;font-weight:600">🚫 已忽略（同步不再加回，可恢复）</span>' : '')
       + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
@@ -1820,11 +1834,20 @@ function applyPlatformPayload(payload, auto, course){
     renderAutoSyncHint();
     return false;
   }
+  /* 已忽略的作业：同步不复活 —— 新增项按 course|name 过滤掉，due 更新也不写入 */
+  var ignoreSet = {};
+  state.items.forEach(function(it){ if(it.ignored) ignoreSet[[it.course, it.name].join("|")] = 1; });
+  var skippedIgnored = 0;
+  ops.itemsToAdd = ops.itemsToAdd.filter(function(it){
+    if(ignoreSet[[it.course, it.name].join("|")]){ skippedIgnored++; return false; }
+    return true;
+  });
+  if(skippedIgnored){ ops.stats.added -= skippedIgnored; ops.stats.items -= skippedIgnored; }
   ops.capturesToAdd.forEach(function(c){ DB.insert("captures", c); });
   ops.itemsToAdd.forEach(function(it){ it.id = uid(); state.items.push(it); });
   ops.itemsToUpdate.forEach(function(u){
     state.items.forEach(function(it){
-      if([it.course, it.name].join("|") === u.key) Object.assign(it, u.patch);
+      if([it.course, it.name].join("|") === u.key){ if(it.ignored) return; Object.assign(it, u.patch); }
     });
   });
   var sum = (typeof AutoSync !== "undefined" && AutoSync.summarize)
@@ -2054,6 +2077,23 @@ function onDelete(id){
   addLog("删除作业：" + it.name);
   saveState(); refreshAll();
 }
+function onIgnore(id){
+  var it = findItem(id);
+  if(!it) return;
+  if(!window.confirm("忽略「" + it.name + "」吗？\n忽略后将从待办/逾期/统计中隐藏，同步也不会再把它加回来；随时可在「已忽略」筛选中恢复。")) return;
+  it.ignored = true;
+  addLog("忽略作业：" + it.name);
+  saveState(); refreshAll();
+  showToast("已忽略，可在「已忽略」筛选中恢复");
+}
+function onUnignore(id){
+  var it = findItem(id);
+  if(!it) return;
+  it.ignored = false;
+  addLog("恢复作业：" + it.name);
+  saveState(); refreshAll();
+  showToast("已恢复");
+}
 function onToggleDone(id, toDone){
   var it = findItem(id);
   if(!it) return;
@@ -2130,6 +2170,21 @@ function onClearDemo(){
 }
 
 /* ---------- 初始化 ---------- */
+/* 展开/收起内联表单（#addForm / #matForm）。
+ * 回归 issue #64：按钮在卡片标题栏，表单却压在同一张 card 的最底部
+ * （addForm 在 hwList 之后、matForm 在 capBox 采集长列表之后）——数据一多，
+ * 表单展开位置落在视口之外几百像素处，页面不滚动、无任何反馈，
+ * 用户感知就是「＋ 添加作业 / ＋ 添加材料点了没反应」。
+ * 展开时把表单滚进视野并聚焦第一个输入控件；收起路径不滚动。 */
+function togglePanel(id){
+  var f = el(id);
+  f.classList.toggle("open");
+  if(f.classList.contains("open")){
+    f.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    var first = f.querySelector("input, select, textarea");
+    if(first && first.focus) first.focus({ preventScroll: true });
+  }
+}
 function bind(){
   /* 侧边栏视图切换 */
   el("nav").addEventListener("click", function(e){
@@ -2137,7 +2192,7 @@ function bind(){
     if(b) switchView(b.getAttribute("data-view"));
   });
 
-  el("btnAdd").addEventListener("click", function(){ el("addForm").classList.toggle("open"); });
+  el("btnAdd").addEventListener("click", function(){ togglePanel("addForm"); });
   el("btnCancel").addEventListener("click", function(){ el("addForm").classList.remove("open"); });
   el("btnSave").addEventListener("click", onSaveNew);
   el("btnExport").addEventListener("click", onExport);
@@ -2181,7 +2236,7 @@ function bind(){
     if(b) onCaptureDelete(+b.getAttribute("data-cap-del"));
   });
 
-  el("btnMat").addEventListener("click", function(){ el("matForm").classList.toggle("open"); });
+  el("btnMat").addEventListener("click", function(){ togglePanel("matForm"); });
   el("mCancel").addEventListener("click", function(){ el("matForm").classList.remove("open"); });
   el("mSave").addEventListener("click", onMatSave);
   el("matBox").addEventListener("click", function(e){
@@ -2295,6 +2350,8 @@ function bind(){
     else if((t = e.target.closest("[data-done]"))) onToggleDone(+t.getAttribute("data-done"), true);
     else if((t = e.target.closest("[data-undo]"))) onToggleDone(+t.getAttribute("data-undo"), false);
     else if((t = e.target.closest("[data-del]"))) onDelete(+t.getAttribute("data-del"));
+    else if((t = e.target.closest("[data-ignore]"))) onIgnore(+t.getAttribute("data-ignore"));
+    else if((t = e.target.closest("[data-unignore]"))) onUnignore(+t.getAttribute("data-unignore"));
   });
   el("chatClose").addEventListener("click", closeChat);
   el("chatClear").addEventListener("click", onChatClear);

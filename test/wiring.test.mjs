@@ -428,6 +428,32 @@ test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/py\.exe/.test(vbs) && /where python/.test(vbs), "python resolved via py launcher or PATH");
 });
 
+/* ---------- 10b. issue #64：内联表单展开后必须滚进视野（「＋ 添加材料/添加作业」点了没反应） ---------- */
+test("addForm / matForm toggles go through togglePanel, not bare classList.toggle", () => {
+  has(/function togglePanel\(id\)\{[\s\S]{0,400}classList\.toggle\("open"\)/,
+      "togglePanel(id) helper exists");
+  has(/el\("btnAdd"\)\.addEventListener\(\s*"click",\s*function\(\)\{ togglePanel\("addForm"\); \}\)/,
+      "btnAdd -> togglePanel(addForm)");
+  has(/el\("btnMat"\)\.addEventListener\(\s*"click",\s*function\(\)\{ togglePanel\("matForm"\); \}\)/,
+      "btnMat -> togglePanel(matForm)");
+  assert.ok(!app.includes('el("addForm").classList.toggle("open")'),
+      "btnAdd fell back to the bare toggle (form opens out of viewport again)");
+  assert.ok(!app.includes('el("matForm").classList.toggle("open")'),
+      "btnMat fell back to the bare toggle (form opens out of viewport again)");
+});
+test("togglePanel scrolls the opened form into view and focuses its first field", () => {
+  has(/togglePanel\(id\)\{[\s\S]{0,200}scrollIntoView\(\{\s*behavior:\s*"smooth",\s*block:\s*"nearest"\s*\}\)/,
+      "expanded form is scrolled into view");
+  has(/togglePanel\(id\)\{[\s\S]{0,400}querySelector\("input, select, textarea"\)/,
+      "first input control is looked up");
+  has(/first\.focus\(\{\s*preventScroll:\s*true\s*\}\)/, "focus uses preventScroll to keep the smooth scroll");
+  /* 收起路径（btnCancel / mCancel）不做滚动，仍走 classList.remove("open") */
+  has(/el\("btnCancel"\)\.addEventListener\(\s*"click",\s*function\(\)\{ el\("addForm"\)\.classList\.remove\("open"\); \}\)/,
+      "btnCancel keeps the plain close");
+  has(/el\("mCancel"\)\.addEventListener\(\s*"click",\s*function\(\)\{ el\("matForm"\)\.classList\.remove\("open"\); \}\)/,
+      "mCancel keeps the plain close");
+});
+
 /* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
 test("data view keeps only the refresh button + course selector + status", () => {
   const dataStart = html.indexOf('id="view-data"');
@@ -470,4 +496,39 @@ test("#56 开机分层探测已接线（safe 容错）且聊天入口识别 clou
   has(/Agent\.config\.manualLock = true/, "explicit preset pick sets manualLock");
   has(/agentUsable/, "chat entry checks the Agent layer before falling back to CloudAI");
 });
+/* ---------- 11. issue #62：截止日期展示 + 忽略作业（同步不复活） ---------- */
+test("dueText always shows the concrete due date (YYYY年M月D日)", () => {
+  has(/function fmtDueFull\(/, "fmtDueFull builds YYYY年M月D日 from the due string");
+  has(/逾期 " \+ \(-n\) \+ " 天 · 截止 " \+ full/, "overdue text includes the concrete due date");
+  has(/今天截止 · " \+ full/, "today text includes the concrete due date");
+  has(/明天截止 · " \+ full/, "tomorrow text includes the concrete due date");
+  has(/还剩 " \+ n \+ " 天 · 截止 " \+ full/, "remaining-days text includes the concrete due date");
+});
+test("ignore: card button, handlers and delegation are wired", () => {
+  has(/data-ignore="' \+ it\.id \+ '">忽略</, "renderList emits a 忽略 button on every todo card");
+  has(/function onIgnore\(/, "onIgnore handler exists");
+  has(/it\.ignored = true;/, "onIgnore marks the item ignored");
+  has(/function onUnignore\(/, "onUnignore handler exists");
+  has(/it\.ignored = false;/, "onUnignore clears the ignored flag");
+  has(/closest\("\[data-ignore\]"\)\)\) onIgnore\(/, "hwList delegation wires data-ignore -> onIgnore");
+  has(/closest\("\[data-unignore\]"\)\)\) onUnignore\(/, "hwList delegation wires data-unignore -> onUnignore");
+  has(/data-unignore="' \+ it\.id \+ '">恢复</, "renderList emits a 恢复 button on ignored cards");
+});
+test("ignore: hidden from today list, default filters and stats, visible under 已忽略 chip", () => {
+  has(/\[\["all","全部"\],\["todo","待完成"\],\["overdue","逾期"\],\["submitted","已提交"\],\["ignored","已忽略"\]\]/,
+      "filter chips include 已忽略");
+  has(/if\(f === "ignored"\) return !!it\.ignored;/, "ignored filter shows only ignored items");
+  has(/if\(it\.ignored\) return false;/, "default filters hide ignored items");
+  has(/if\(it\.ignored\) return;\s*\/\/ 已忽略/, "todayItems skips ignored items");
+  has(/if\(it\.ignored\) return;\s*\/\/ 已忽略：不计入任何统计/, "stats skip ignored items");
+});
+test("ignore: sync never revives an ignored assignment", () => {
+  has(/var ignoreSet = \{\};[\s\S]{0,200}ignoreSet\[\[it\.course, it\.name\]\.join\("\|"\)\] = 1;/,
+      "applyPlatformPayload builds the ignored-key set");
+  has(/ops\.itemsToAdd = ops\.itemsToAdd\.filter\(function\(it\)\{\s*\n\s*if\(ignoreSet\[\[it\.course, it\.name\]\.join\("\|"\)\]\)\{ skippedIgnored\+\+; return false; \}/,
+      "itemsToAdd drops ignored keys before insertion");
+  has(/if\(\[it\.course, it\.name\]\.join\("\|"\) === u\.key\)\{ if\(it\.ignored\) return; Object\.assign\(it, u\.patch\); \}/,
+      "due updates are not written into ignored items");
+});
+
 console.log("\n" + passed + " passed");
