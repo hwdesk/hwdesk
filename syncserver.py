@@ -602,7 +602,9 @@ def hzcu_collect(s):
         by_key[key] = a   # homework-activities（带提交状态）覆盖同键的 todos 条目
 
     try:
-        todos = api_json(s, "/api/todos?no-intercept=true").get("todo_list") or []
+        # 待办是作业的主入口：必须翻页全采（平台按 page/page_size 分页，第一页通常只有十来条，
+        # 不翻页 = 登录后作业列不全）。平台若忽略翻页参数返回重复页，put() 按（课程,标题）去重兜底。
+        todos = paged(s, "/api/todos?no-intercept=true", "todo_list")
         for t in todos:
             if isinstance(t, dict):
                 put(todo_to_assignment(t))
@@ -1189,6 +1191,34 @@ def self_test():
         globals()["api_json"] = real_api2
     print(("ok  - hw_detail_enrich injects note & dedupes per-course errors" if good
            else "FAIL - hw_detail_enrich: %r" % errs))
+    ok &= good
+
+    # 6d) 待办翻页全采：todo_list 跨 2 页，课程/作业/课件桩不动，断言第 2 页待办也在结果里
+    real_api3 = api_json
+    titles = []
+    def _fake_api(s, path):
+        if path.startswith("/api/my-courses"):
+            return {"courses": [{"id": "1", "name": "课程P"}], "pages": 1, "page": 1}
+        if path.startswith("/api/todos"):
+            m = re.search(r"page=(\d+)", path)
+            pg = int(m.group(1)) if m else 1
+            if pg <= 1:
+                return {"todo_list": [{"course_name": "课程P", "title": "待办P1", "type": "homework", "end_time": ""}],
+                        "pages": 2, "page": 1}
+            return {"todo_list": [{"course_name": "课程P", "title": "待办P2", "type": "exam", "end_time": ""}],
+                    "pages": 2, "page": 2}
+        if "/homework-activities" in path:
+            return {"homework_activities": [], "pages": 1, "page": 1}
+        return {"materials": [], "folders": []}   # 课件桩
+    try:
+        globals()["api_json"] = _fake_api
+        payload = hzcu_collect(object())
+        titles = [a["title"] for a in payload["assignments"]]
+        good = "待办P1" in titles and "待办P2" in titles and not payload["errors"]
+    finally:
+        globals()["api_json"] = real_api3
+    print(("ok  - hzcu_collect walks all todo pages (P1+P2)" if good
+           else "FAIL - hzcu_collect todo pages: %r errors=%r" % (titles, payload.get("errors"))))
     ok &= good
 
     # 7) 课程映射
