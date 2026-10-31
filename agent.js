@@ -41,6 +41,14 @@
       hint: "代码 / 仿真类任务表现好",
       cors: "ok"
     },
+    hunyuan: {
+      label: "腾讯混元",
+      baseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
+      model: "hunyuan-turbos-latest",
+      keyUrl: "https://console.cloud.tencent.com/hunyuan/api-key",
+      hint: "腾讯混元（OpenAI 兼容端点）；浏览器直连一般被拦，建议走本机代理",
+      cors: "proxy"
+    },
     doubao: {
       label: "豆包（火山方舟）",
       baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
@@ -58,7 +66,7 @@
       cors: "custom"
     }
   };
-  Agent.PRESET_ORDER = ["cloudproxy", "deepseek", "kimi", "qwen", "doubao", "custom"];
+  Agent.PRESET_ORDER = ["cloudproxy", "deepseek", "kimi", "qwen", "hunyuan", "doubao", "custom"];
 
   /* ---------- 配置存取 ----------
    * keys = 按预设分存的 API Key（换 Agent 不丢 Key）；兼容旧的单 apiKey 字段。 */
@@ -154,7 +162,9 @@
         clearTimeout(timer);
         var models = null;
         if (res.ok) { try { models = await res.json(); } catch (e) { models = null; } }
-        if (res.ok) return { layer: 1, presetId: "cloudproxy", models: models, detail: "cloud-proxy reachable" };
+        /* 代理可达但一台 key 都没配（models 目录为空）→ 有库无药，继续向下层降级（issue #70） */
+        var hasModels = !!(models && models.data && models.data.length);
+        if (res.ok && hasModels) return { layer: 1, presetId: "cloudproxy", models: models, detail: "cloud-proxy reachable" };
       } catch (e) { /* 代理未开，落到下一层 */ }
     }
     /* 第 2 层：发布站点免密钥通道 */

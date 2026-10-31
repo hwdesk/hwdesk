@@ -157,6 +157,12 @@ node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 
 - 端点：`GET /health`、`GET/POST /data`、`POST /ingest`（外部采集结果也可直接投递，AI 代理可用 `curl` 回报）
 - 首次使用：`python syncserver.py` 保持窗口开着 → 回到工作台「数据」页点「🔄 同步」（或登录后等待自动同步）；课程选择器选某一门课时只合并该课程数据
 
+**下载即用（issue #70）**：解压到一个目录 → 双击 `launch-hwdesk-local.vbs`。启动器会自动：
+① 探活并最小化拉起 `syncserver.py`（本机 AI 代理 + 课程桥）→ ② 以应用模式 + 直连网络打开工
+作台（同目录最大 html，无机器硬编码）→ ③ 首次运行在桌面建「hwdesk」快捷方式。页面开机自动
+探测可用 AI 层（本机代理 → 云端通道 → 本机 key），**全程零手动配置**。维护者机器配好
+`HWDESK_PROXY_*` 环境变量（见「AI 代理网关」），全员即可免 Key 直聊豆包 / 混元 / DeepSeek / Kimi / 通义。
+
 ## 桌面安装（Windows）
 
 1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js`、`agent.js`、`agents.js`、`sso.js`、`sync.js` 放到同一稳定目录（如 `C://Users//<你>//hwdesk//`）
