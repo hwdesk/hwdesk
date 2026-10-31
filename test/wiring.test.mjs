@@ -563,7 +563,7 @@ test("#56 开机分层探测已接线（safe 容错）且聊天入口识别 clou
 /* ---------- 11. issue #62：截止日期展示 + 忽略作业（同步不复活） ---------- */
 test("dueText always shows the concrete due date (YYYY年M月D日)", () => {
   has(/function fmtDueFull\(/, "fmtDueFull builds YYYY年M月D日 from the due string");
-  has(/逾期 " \+ \(-n\) \+ " 天 · 截止 " \+ full/, "overdue text includes the concrete due date");
+  has(/逾期 " \+ \(-n\) \+ " 天（" \+ fmtOverdueSince\(it\.due\) \+ "起逾期） · 截止 " \+ full/, "overdue text carries the overdue-since date and the concrete due date");
   has(/今天截止 · " \+ full/, "today text includes the concrete due date");
   has(/明天截止 · " \+ full/, "tomorrow text includes the concrete due date");
   has(/还剩 " \+ n \+ " 天 · 截止 " \+ full/, "remaining-days text includes the concrete due date");
@@ -593,6 +593,48 @@ test("ignore: sync never revives an ignored assignment", () => {
       "itemsToAdd drops ignored keys before insertion");
   has(/if\(\[it\.course, it\.name\]\.join\("\|"\) === u\.key\)\{ if\(it\.ignored\) return; Object\.assign\(it, u\.patch\); \}/,
       "due updates are not written into ignored items");
+});
+
+/* ---------- 12. 总览「今天要处理」：忽略入口 + 逾期起始日期（issue #62 遗留） ---------- */
+test("today panel: every item gets a 忽略 button wired through todayBox delegation", () => {
+  has(/data-ai="' \+ it\.id \+ '">AI 代提交<\/button>'\s*\n\s*\+ '<button class="btn sm" data-ignore="' \+ it\.id \+ '">忽略</,
+      "renderToday emits a 忽略 button after AI 代提交 on every today item");
+  has(/el\("todayBox"\)\.addEventListener\("click", function\(e\)\{[\s\S]{0,400}closest\("\[data-ignore\]"\)[\s\S]{0,120}onIgnore\(/,
+      "todayBox delegation wires data-ignore -> onIgnore");
+  has(/function fmtOverdueSince\(/, "fmtOverdueSince builds the overdue-since date (due + 1 day)");
+});
+test("ignored homework has a dedicated overview panel with restore/delete", () => {
+  ["ignoredTitle", "ignoredCard", "ignoredBox", "ignoredToggle", "btnPurgeIgnored"].forEach((id) => {
+    assert.ok(ids.has(id), "missing id: " + id);
+  });
+  has(/function renderIgnored\(/, "renderIgnored renderer exists");
+  has(/state\.items\.filter\(function\(it\)\{ return !!it\.ignored; \}\)/, "renderIgnored lists every ignored item");
+  has(/localStorage\.getItem\("hwdesk_ignoredOpen"\) === "1"/, "panel is collapsed by default (open only via persisted toggle)");
+  has(/el\("ignoredToggle"\)\.innerHTML = \(open \? "▾" : "▸"\) \+ " 已忽略作业（" \+ list\.length \+ "）"/,
+      "collapsed header shows a ▸/▾ arrow and the ignored count");
+  has(/data-unignore="' \+ it\.id \+ '">恢复<\/button>'\s*\n\s*\+ '<button class="btn sm danger-ghost" data-del="' \+ it\.id \+ '">彻底删除</,
+      "panel emits 恢复 + 彻底删除 buttons per ignored item");
+  has(/el\("ignoredBox"\)\.addEventListener\("click", function\(e\)\{[\s\S]{0,300}onUnignore\(\+t\.getAttribute\("data-unignore"\)\)[\s\S]{0,120}onDelete\(\+t\.getAttribute\("data-del"\)\)/,
+      "ignoredBox delegation wires restore -> onUnignore, delete -> onDelete");
+  has(/el\("ignoredToggle"\)\.addEventListener\("click", onToggleIgnoredOpen\)/, "header click toggles expand/collapse");
+  has(/function onPurgeIgnored\(/, "onPurgeIgnored handler exists");
+  has(/state\.items = state\.items\.filter\(function\(it\)\{ return !it\.ignored; \}\)/,
+      "purge removes every ignored item from state");
+  has(/el\("btnPurgeIgnored"\)\.addEventListener\("click", onPurgeIgnored\)/, "一键彻底删除 button is wired");
+  has(/function refreshAll\(\)\{\s*\n\s*renderToday\(\);\s*\n\s*renderIgnored\(\);/, "refreshAll renders the ignored panel");
+  has(/已忽略作业」板块恢复/, "ignore toast points users at the dedicated panel");
+});
+test("appConfirm: in-app confirm dialog replaces native window.confirm on the ignore chain", () => {
+  ["cfmMask", "cfmMsg", "cfmOk", "cfmCancel"].forEach((id) => {
+    assert.ok(ids.has(id), "missing id: " + id);
+  });
+  has(/function appConfirm\(/, "appConfirm defined");
+  has(/if\(!m\) return cb\(window\.confirm\(msg\)\);/, "appConfirm falls back to native confirm when the mask is missing");
+  has(/function onIgnore\(id\)\{[\s\S]{0,220}appConfirm\(/, "onIgnore uses the in-app confirm (sandbox-safe)");
+  has(/function onDelete\(id\)\{[\s\S]{0,160}appConfirm\(/, "onDelete uses the in-app confirm");
+  has(/function onPurgeIgnored\(\)\{[\s\S]{0,240}appConfirm\(/, "onPurgeIgnored uses the in-app confirm");
+  has(/el\("cfmOk"\)\.onclick = function\(\)\{ m\.style\.display = "none"; cb\(true\); \}/, "cfmOk resolves true and hides the mask");
+  has(/el\("cfmCancel"\)\.onclick = function\(\)\{ m\.style\.display = "none"; cb\(false\); \}/, "cfmCancel resolves false and hides the mask");
 });
 
 
