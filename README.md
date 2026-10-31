@@ -232,7 +232,6 @@ curl "https://<新域名>/.cloud/llm/models" \
 ③ 本机已保存 key 的手动预设 →
 ④ 全灭则提示配 Key。
 探测到可用层自动切换（`Agent.probeLayers` / `Agent.autoSelect`）；用户在「Agent 配置」里显式选过预设后 `manualLock` 生效，自动降级不再覆盖。聊天入口只在 Agent 层整体不可用时才回落 CloudAI。
-**登录即检测 + 自动对应模型**：登录成功那一刻会重跑一次分层探测（不用等下次打开页面），第 ① 层可用时 `Agent.autoSelect` 直接选用本机代理 `/v1/models` 回报的第一个可用模型——宿主只配了混元 / 方舟 key 时也不会拿预设默认模型去撞 502，全程无需任何 API Key 输入。
 
 **开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>` / `gateway_invalid_response`），不必等用户打字才发现发布链接已失效。
 

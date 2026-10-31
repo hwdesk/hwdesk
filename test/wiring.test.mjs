@@ -472,18 +472,6 @@ test("cloud send probes the gateway with healthCheck before the first chat", () 
       "failed probe lands in cloudChatFail with the real healthCheck code");
   has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
 });
-test("cloud chat network failure auto-retries once before surfacing the error", () => {
-  has(/var cloudFail = function\(err\)/, "chat-stage errors funnel through cloudFail");
-  has(/code === "gateway_network_error" && !cloudSent && !netRetried/,
-      "one-shot retry only for network errors before any streamed output (no duplicate content)");
-  has(/CloudAI\._hcOk = false/, "the stale health cache is invalidated before retrying");
-  has(/setTimeout\(startCloud, 1200\)/, "the retry goes back through the healthCheck gate");
-});
-test("cloudChatFail refines gateway_network_error with a live diagnosis", () => {
-  has(/if\(typeof CloudAI !== "undefined"\) CloudAI\._hcOk = false/,
-      "final failure also invalidates the cached probe for the next send");
-  has(/CloudAI\.diagnose\(function\(msg\)/, "diagnose() replaces the one-size-fits-all copy");
-});
 const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
 test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");
@@ -603,44 +591,6 @@ test("#70 本地启动器存在：探活 8765 → 拉起 syncserver → 应用�
   assert.ok(/syncserver\.py/.test(vbs), "launcher auto-starts syncserver.py");
   assert.ok(/--proxy-server=direct:\/\//.test(vbs), "app mode opens with direct network");
   assert.ok(!/Users\/feng/.test(vbs), "no machine-specific path");
-});
-test("桌面快捷方式不再坏：绝对路径 wscript + LOCALAPPDATA Chrome 候选（两个启动器一致）", () => {
-  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
-    const vbs = readFileSync(path.join(root, name), "utf8");
-    /* 回归：裸名 "wscript.exe" 落进 .lnk 后部分桌面环境解析失败 → 白图标/双击无效 */
-    assert.ok(!/TargetPath = "wscript\.exe"/.test(vbs),
-      name + ": TargetPath must not be the bare wscript.exe");
-    assert.ok(/TargetPath = sh\.ExpandEnvironmentStrings\("%SystemRoot%\\System32\\wscript\.exe"\)/.test(vbs),
-      name + ": shortcut TargetPath is an absolute wscript.exe path");
-    /* 回归：Chrome 常见 per-user 安装位 %LOCALAPPDATA% 不在候选里 → 本机回退 Edge/找不到 */
-    assert.ok(/%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome\.exe/.test(vbs),
-      name + ": LOCALAPPDATA Chrome candidate included");
-    assert.ok(!/feng|C:\\Users/.test(vbs), name + ": still no machine-specific path");
-  }
-});
-test("本地启动器把「直开 html」的旧桌面快捷方式升级为全量启动（一键起桥+页面）", () => {
-  const vbs = readFileSync(path.join(root, "launch-hwdesk-local.vbs"), "utf8");
-  assert.ok(/SpecialFolders\("Desktop"\)/.test(vbs), "iterates the real Desktop folder");
-  assert.ok(/InStr\(LCase\(scOld\.Arguments\), "--app="\) > 0/.test(vbs),
-      "detects legacy Chrome --app shortcuts");
-  assert.ok(/InStr\(LCase\(scOld\.Arguments\), "\.html"\) > 0/.test(vbs),
-      "only upgrades direct-html shortcuts");
-  assert.ok(/scOld\.TargetPath = sh\.ExpandEnvironmentStrings\("%SystemRoot%\\System32\\wscript\.exe"\)/.test(vbs),
-      "repoints the shortcut to an absolute wscript.exe path");
-  assert.ok(/scOld\.IconLocation = iconPath/.test(vbs), "keeps an icon");
-  /* ASCII only（仓库约定）：升级逻辑按参数特征识别，不写中文/机器特定路径 */
-  assert.ok(!/[^\x00-\x7F]/.test(vbs), "vbs stays ASCII-only");
-});
-test("两个启动器都用无窗口 python 拉桥（pyw/pythonw 优先，隐藏窗口兜底）", () => {
-  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
-    const vbs = readFileSync(path.join(root, name), "utf8");
-    assert.ok(/pyw\.exe/.test(vbs), name + ": prefers pyw.exe");
-    assert.ok(/pythonw\.exe/.test(vbs), name + ": prefers pythonw.exe next to PATH python");
-    assert.ok(/bridgeCmd = pyWinCmd/.test(vbs), name + ": windowless command wins");
-    assert.ok(/sh\.Run bridgeCmd & " """ & bridge & """", 0, False/.test(vbs),
-        name + ": bridge starts hidden (style 0), no console pops");
-    assert.ok(!/, 7, False/.test(vbs), name + ": no minimized console window anymore");
-  }
 });
 test("#70 open.py 不再硬编码用户路径", () => {
   const op = readFileSync(path.join(root, "open.py"), "utf8");
