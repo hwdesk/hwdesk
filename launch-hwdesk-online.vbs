@@ -5,6 +5,35 @@
 ' 1) starts local bridge syncserver.py (for login gate / local data fetch)
 ' 2) opens the published workbench in Chrome app mode
 Option Explicit
+
+' BestPy: within <folderPath>'s subfolders, pick the one with the highest version
+' number that contains <exeName>; returns the full path or "" (missing folder safe).
+Function BestPy(folderPath, exeName)
+  Dim f, subf, best, bestKey, k
+  best = "" : bestKey = -1
+  Set subf = Nothing
+  On Error Resume Next
+  Set subf = fso.GetFolder(folderPath)
+  On Error GoTo 0
+  If subf Is Nothing Then Exit Function
+  For Each f In subf.SubFolders
+    If fso.FileExists(f.Path & "\" & exeName) Then
+      k = VerKey(f.Name)
+      If k > bestKey Then bestKey = k : best = f.Path & "\" & exeName
+    End If
+  Next
+  BestPy = best
+End Function
+' VerKey: digits of a name as a number ("3.13.12" -> 31312, "Python313" -> 313)
+Function VerKey(nm)
+  Dim r, s
+  s = ""
+  For r = 1 To Len(nm)
+    If Mid(nm, r, 1) >= "0" And Mid(nm, r, 1) <= "9" Then s = s & Mid(nm, r, 1)
+  Next
+  If s = "" Then VerKey = 0 Else VerKey = CLng(Left(s, 9))
+End Function
+
 Dim fso, sh, repo, pyCmd, bridge, url, chrome, profile, lnk, desk, sc
 
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -44,6 +73,25 @@ If pyLines <> "" Then
 End If
 If pyWinCmd = "" And pyCmd = "" And fso.FileExists(sh.SystemFolder & "\py.exe") Then
   pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
+End If
+' ---- location probes: app-managed / per-user pythons that are NOT on PATH ----
+' wscript only sees the user PATH; pythons installed per-user or managed by apps
+' (WorkBuddy-managed runtime, per-user Python, Anaconda) are invisible to
+' `where python`. The bridge MUST start, so probe known locations explicitly,
+' preferring windowless pythonw.exe. Highest version number wins per location.
+If pyWinCmd = "" Then
+  pywPath = BestPy(sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\Python"), "pythonw.exe")
+  If pywPath = "" Then pywPath = BestPy(sh.ExpandEnvironmentStrings("%USERPROFILE%\.workbuddy\binaries\python\versions"), "pythonw.exe")
+  If pywPath = "" And fso.FileExists(sh.ExpandEnvironmentStrings("%USERPROFILE%\anaconda3\pythonw.exe")) Then pywPath = sh.ExpandEnvironmentStrings("%USERPROFILE%\anaconda3\pythonw.exe")
+  If pywPath = "" And fso.FileExists(sh.ExpandEnvironmentStrings("%USERPROFILE%\miniconda3\pythonw.exe")) Then pywPath = sh.ExpandEnvironmentStrings("%USERPROFILE%\miniconda3\pythonw.exe")
+  If pywPath = "" And fso.FileExists(sh.ExpandEnvironmentStrings("%ProgramData%\Anaconda3\pythonw.exe")) Then pywPath = sh.ExpandEnvironmentStrings("%ProgramData%\Anaconda3\pythonw.exe")
+  If pywPath <> "" Then pyWinCmd = """" & pywPath & """"
+End If
+If pyCmd = "" Then
+  firstLine = BestPy(sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\Python"), "python.exe")
+  If firstLine = "" Then firstLine = BestPy(sh.ExpandEnvironmentStrings("%USERPROFILE%\.workbuddy\binaries\python\versions"), "python.exe")
+  If firstLine = "" And fso.FileExists(sh.ExpandEnvironmentStrings("%USERPROFILE%\anaconda3\python.exe")) Then firstLine = sh.ExpandEnvironmentStrings("%USERPROFILE%\anaconda3\python.exe")
+  If firstLine <> "" Then pyCmd = """" & firstLine & """"
 End If
 bridgeCmd = pyWinCmd
 If bridgeCmd = "" Then bridgeCmd = pyCmd
