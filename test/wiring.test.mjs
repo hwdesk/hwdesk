@@ -256,8 +256,14 @@ test("preset dropdown is annotated with the browser-direct (CORS) status", () =>
 /* ---------- 8. 登录门禁真实验证（凭据先过本机桥 → course.hzcu.edu.cn） ---------- */
 test("login card has an error line and the bridge hint", () => {
   assert.ok(ids.has("loginErr"), "#loginErr error line missing");
-  has(/验证服务全部连不上|连不上本机验证服务/, "failure path explains the verification service is unreachable");
-  has(/python syncserver\.py/, "guidance names the exact command to run");
+  /* 全部端点不可达的文案在 verifynet.js 的 allDownHint() 里（#72 分层端点后迁移），
+   * 页面侧只需接线调用 */
+  has(/err\.textContent = VerifyNet\.allDownHint\(eps\)/,
+      "all-down path renders the combined hint from verifynet.js");
+  const vn = readFileSync(path.join(root, "verifynet.js"), "utf8");
+  assert.ok(/验证服务全部连不上/.test(vn), "allDownHint explains every verification path is unreachable");
+  assert.ok(/python syncserver\.py/.test(vn), "hint names the exact command to run");
+  has(/python syncserver\.py/, "inline guidance names the exact command to run");
 });
 test("login gate loads verifynet.js and walks layered endpoints (local bridge -> cloud)", () => {
   assert.ok(/<script src="verifynet\.js"><\/script>/.test(html), 'missing <script src="verifynet.js">');
@@ -277,17 +283,23 @@ test("onLogin verifies credentials via the layered /verify before SSO.set", () =
       "rejection blocks entry and shows the reason");
   has(/if\(out\.kind === "ok"\)\{[\s\S]{0,300}SSO\.set\(acc, pw, mode\)/,
       "SSO.set only runs after a verify pass says ok");
-  has(/登录工作台（本机验证通过）/, "audit log marks the local-bridge verified login");
-  has(/登录工作台（云端验证通过）/, "audit log marks the cloud verified login");
+  has(/登录工作台（" \+ \(ep\.kind === "local" \? "本机" : "云端"\) \+ "验证通过）/,
+      "audit log marks which path (local/cloud) verified the login");
 });
 test("cloud verify fallback exists: verifyserver.py is a stateless verify-only service", () => {
   assert.ok(/<script src="verifynet\.js">/.test(html), "verifynet.js must be referenced");
-  pyHas(/from syncserver import SyncError, hzcu_login/, "verifyserver reuses the syncserver CAS login");
-  pyHas(/def do_POST[\s\S]*?self\.path\.startswith\("\/verify"\)/, "verifyserver handles POST /verify");
-  pyHas(/_rate_limited\(\)/, "verifyserver rate-limits verify attempts");
-  pyHas(/def log_message\(self, fmt, \*args\):\s*pass/, "verifyserver silences access logs");
+  /* 断言对象是 verifyserver.py 本身（pyHas 只查 syncserver.py，会漏） */
   const vs = readFileSync(path.join(root, "verifyserver.py"), "utf8");
-  assert.ok(!/\/data|\/ingest/.test(vs), "verifyserver must not expose data-plane endpoints");
+  assert.ok(/from syncserver import SyncError, hzcu_login/.test(vs),
+            "verifyserver reuses the syncserver CAS login");
+  assert.ok(/def do_POST[\s\S]*?self\.path\.startswith\("\/verify"\)/.test(vs),
+            "verifyserver handles POST /verify");
+  assert.ok(/_rate_limited\(\)/.test(vs), "verifyserver rate-limits verify attempts");
+  assert.ok(/def log_message\(self, fmt, \*args\):\s*(?:#[^\n]*)?\n\s*pass/.test(vs),
+            "verifyserver silences access logs");
+  /* 数据面端点：断言没有路由注册（文件注释里提到 /data、/ingest 属正常说明） */
+  assert.ok(!/startswith\("\/data"\)|startswith\("\/ingest"\)/.test(vs),
+            "verifyserver must not route data-plane endpoints");
   assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
 });
 test("syncserver /verify only logs in (no collection) and returns ok/error JSON", () => {
