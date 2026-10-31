@@ -604,6 +604,30 @@ test("#70 本地启动器存在：探活 8765 → 拉起 syncserver → 应用�
   assert.ok(/--proxy-server=direct:\/\//.test(vbs), "app mode opens with direct network");
   assert.ok(!/Users\/feng/.test(vbs), "no machine-specific path");
 });
+test("本地启动器把「直开 html」的旧桌面快捷方式升级为全量启动（一键起桥+页面）", () => {
+  const vbs = readFileSync(path.join(root, "launch-hwdesk-local.vbs"), "utf8");
+  assert.ok(/SpecialFolders\("Desktop"\)/.test(vbs), "iterates the real Desktop folder");
+  assert.ok(/InStr\(LCase\(scOld\.Arguments\), "--app="\) > 0/.test(vbs),
+      "detects legacy Chrome --app shortcuts");
+  assert.ok(/InStr\(LCase\(scOld\.Arguments\), "\.html"\) > 0/.test(vbs),
+      "only upgrades direct-html shortcuts");
+  assert.ok(/scOld\.TargetPath = "wscript\.exe"/.test(vbs),
+      "repoints the shortcut to this launcher via wscript");
+  assert.ok(/scOld\.IconLocation = iconPath/.test(vbs), "keeps an icon");
+  /* ASCII only（仓库约定）：升级逻辑按参数特征识别，不写中文/机器特定路径 */
+  assert.ok(!/[^\x00-\x7F]/.test(vbs), "vbs stays ASCII-only");
+});
+test("两个启动器都用无窗口 python 拉桥（pyw/pythonw 优先，隐藏窗口兜底）", () => {
+  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
+    const vbs = readFileSync(path.join(root, name), "utf8");
+    assert.ok(/pyw\.exe/.test(vbs), name + ": prefers pyw.exe");
+    assert.ok(/pythonw\.exe/.test(vbs), name + ": prefers pythonw.exe next to PATH python");
+    assert.ok(/bridgeCmd = pyWinCmd/.test(vbs), name + ": windowless command wins");
+    assert.ok(/sh\.Run bridgeCmd & " """ & bridge & """", 0, False/.test(vbs),
+        name + ": bridge starts hidden (style 0), no console pops");
+    assert.ok(!/, 7, False/.test(vbs), name + ": no minimized console window anymore");
+  }
+});
 test("#70 open.py 不再硬编码用户路径", () => {
   const op = readFileSync(path.join(root, "open.py"), "utf8");
   assert.ok(!op.includes("Users/feng"), "feng hardcode removed");

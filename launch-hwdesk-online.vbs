@@ -18,14 +18,34 @@ url      = "https://hwdesk-workbench-95242.app.workbuddy.host/?sharecode=COAVIMS
 chrome   = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 profile  = repo & "\.chrome-hwdesk-profile"
 
-' python: prefer the py launcher, then any python on PATH; skip the bridge if neither exists
-If fso.FileExists(sh.SystemFolder & "\py.exe") Then
-  pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
-ElseIf sh.Run("cmd /c where python >nul 2>nul", 0, True) = 0 Then
-  pyCmd = "python"
-Else
-  pyCmd = ""
+' python for the bridge: windowless first (pyw/pythonw -> zero extra windows),
+' console python as hidden fallback; skip the bridge if neither exists
+Dim pyWinCmd, ex, pyLines, firstLine, pywPath, bridgeCmd
+pyCmd = ""
+pyWinCmd = ""
+If fso.FileExists(sh.SystemFolder & "\pyw.exe") Then
+  pyWinCmd = """" & sh.SystemFolder & "\pyw.exe" & """ -3"
 End If
+pyLines = ""
+On Error Resume Next
+Set ex = sh.Exec("cmd /c where python")
+pyLines = ex.StdOut.ReadAll()
+On Error GoTo 0
+If pyLines <> "" Then
+  firstLine = Trim(Split(Replace(pyLines, vbCr, ""), vbLf)(0))
+  If firstLine <> "" Then
+    If pyCmd = "" And fso.FileExists(firstLine) Then pyCmd = """" & firstLine & """"
+    pywPath = Replace(firstLine, "python.exe", "pythonw.exe", 1, -1, vbTextCompare)
+    If pyWinCmd = "" And pywPath <> firstLine And fso.FileExists(pywPath) Then
+      pyWinCmd = """" & pywPath & """"
+    End If
+  End If
+End If
+If pyWinCmd = "" And pyCmd = "" And fso.FileExists(sh.SystemFolder & "\py.exe") Then
+  pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
+End If
+bridgeCmd = pyWinCmd
+If bridgeCmd = "" Then bridgeCmd = pyCmd
 
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -33,9 +53,9 @@ If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Microsoft\Edge\App
 
 sh.CurrentDirectory = repo
 
-' start the local bridge (minimized) so login gate / local fetch keeps working
-If pyCmd <> "" And fso.FileExists(bridge) Then
-  sh.Run pyCmd & " """ & bridge & """", 7, False
+' start the local bridge (hidden: pythonw has no window; console python is hidden too)
+If bridgeCmd <> "" And fso.FileExists(bridge) Then
+  sh.Run bridgeCmd & " """ & bridge & """", 0, False
   WScript.Sleep 1800
 End If
 
