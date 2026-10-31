@@ -256,20 +256,41 @@ test("preset dropdown is annotated with the browser-direct (CORS) status", () =>
 /* ---------- 8. 登录门禁真实验证（凭据先过本机桥 → course.hzcu.edu.cn） ---------- */
 test("login card has an error line and the bridge hint", () => {
   assert.ok(ids.has("loginErr"), "#loginErr error line missing");
-  has(/连不上本机验证服务/, "catch path explains the bridge is required");
+  has(/验证服务全部连不上|连不上本机验证服务/, "failure path explains the verification service is unreachable");
   has(/python syncserver\.py/, "guidance names the exact command to run");
 });
-test("onLogin verifies credentials via the bridge /verify before SSO.set", () => {
-  has(/fetch\(DIRECT_URL \+ "\/verify"/, "onLogin POSTs to the local bridge /verify");
-  has(/JSON\.stringify\(\{\s*account:\s*acc,\s*password:\s*pw,\s*remember:\s*el\("lgMode"\)\.value === "local"\s*\}\)/,
-      "request body carries account+password+remember");
-  has(/err = el\("loginErr"\)/, "error line element bound");
-  has(/if\(!res\.ok\)\{[\s\S]{0,300}err\.style\.display = "block";[\s\S]{0,160}return;/, "non-ok response blocks entry and shows the reason");
-  has(/if\(!res\.ok\)\{[\s\S]{0,300}return;[\s\S]{0,400}SSO\.set\(acc,\s*pw,/, "SSO.set only runs after the platform says ok");
-  has(/登录工作台（平台验证通过）/, "audit log marks the platform-verified login");
+test("login gate loads verifynet.js and walks layered endpoints (local bridge -> cloud)", () => {
+  assert.ok(/<script src="verifynet\.js"><\/script>/.test(html), 'missing <script src="verifynet.js">');
+  has(/var eps = VerifyNet\.endpoints\(VerifyNet\.loadOverrides\(\)\)/,
+      "onLogin builds the endpoint order from verifynet.js (overrides aware)");
+  has(/fetch\(VerifyNet\.verifyPath\(ep\)/,
+      "each endpoint is tried via verifynet.js verifyPath (sharecode-aware)");
+  has(/out\.kind === "rejected"/, "explicit rejection stops the walk and shows the reason");
+  has(/\/\* stale \/ unreachable \/ timeout → 降级下一路 \*\//,
+      "unreachable/stale endpoints fall through to the next one");
 });
-test("bridge /verify only logs in (no collection) and returns ok/error JSON", () => {
-  pyHas(/def do_POST[\s\S]*?self\.path\.startswith\("\/verify"\)/, "syncserver handles POST /verify");
+test("onLogin verifies credentials via the layered /verify before SSO.set", () => {
+  has(/JSON\.stringify\(\{ account: acc, password: pw,\s*remember: !!remember && ep\.kind === "local" \}\)/,
+      "request body carries account+password+remember (remember only meaningful for the local bridge)");
+  has(/err = el\("loginErr"\)/, "error line element bound");
+  has(/if\(out\.kind === "rejected"\)\{[\s\S]{0,300}err\.style\.display = "block";[\s\S]{0,160}return;/,
+      "rejection blocks entry and shows the reason");
+  has(/if\(out\.kind === "ok"\)\{[\s\S]{0,300}SSO\.set\(acc, pw, mode\)/,
+      "SSO.set only runs after a verify pass says ok");
+  has(/登录工作台（本机验证通过）/, "audit log marks the local-bridge verified login");
+  has(/登录工作台（云端验证通过）/, "audit log marks the cloud verified login");
+});
+test("cloud verify fallback exists: verifyserver.py is a stateless verify-only service", () => {
+  assert.ok(/<script src="verifynet\.js">/.test(html), "verifynet.js must be referenced");
+  pyHas(/from syncserver import SyncError, hzcu_login/, "verifyserver reuses the syncserver CAS login");
+  pyHas(/def do_POST[\s\S]*?self\.path\.startswith\("\/verify"\)/, "verifyserver handles POST /verify");
+  pyHas(/_rate_limited\(\)/, "verifyserver rate-limits verify attempts");
+  pyHas(/def log_message\(self, fmt, \*args\):\s*pass/, "verifyserver silences access logs");
+  const vs = readFileSync(path.join(root, "verifyserver.py"), "utf8");
+  assert.ok(!/\/data|\/ingest/.test(vs), "verifyserver must not expose data-plane endpoints");
+  assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
+});
+test("syncserver /verify only logs in (no collection) and returns ok/error JSON", () => {
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
         "/verify calls hzcu_login with the request creds");
   pyHas(/"ok": False, "error": str\(e\)/, "SyncError surfaces as a readable error field");
@@ -333,7 +354,7 @@ test("autosync.js is loaded by the page", () => {
 });
 test("login success kicks the auto-sync", () => {
   /* onLogin 含 #29 的真实验证流程（远超 700 字符），锚定「凭据写入成功」到钩子的近邻更稳 */
-  has(/SSO\.set\(acc, pw, el\("lgMode"\)\.value\);[\s\S]{0,400}autoSyncAfterLogin\(\{ verbose: true \}\)/,
+  has(/SSO\.set\(acc, pw, mode\);[\s\S]{0,400}autoSyncAfterLogin\(\{ verbose: true \}\)/,
       "onLogin() -> SSO.set ... autoSyncAfterLogin({verbose:true})");
 });
 test("boot with saved creds auto-syncs too (throttled by autosync.js)", () => {
