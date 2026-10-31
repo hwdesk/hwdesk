@@ -363,10 +363,11 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="section-title"><h2>Agent 配置</h2><span class="hint">配好一次，作业卡点「💬 对话 / AI 代提交」直接开聊</span></div>
     <div class="card" style="padding:14px">
       <div style="display:grid;gap:10px;max-width:520px">
+        <div id="agChannel" class="hint" style="display:none;padding:8px 10px;border-radius:8px;background:#f2f8f2;color:#256a2b"></div>
         <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
           <span class="hint" id="agHint"></span></div>
-        <div><label class="f">API Key（按预设分开保存，只写本机，不上传）</label><input type="password" id="agKey" placeholder="sk-...">
-          <span class="hint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
+        <div><label class="f" id="agKeyLabel">API Key（按预设分开保存，只写本机，不上传）</label><input type="password" id="agKey" placeholder="sk-...">
+          <span class="hint" id="agKeyHint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
         <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
         <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
       </div>
@@ -1212,8 +1213,11 @@ function onAiChat(id, auto){
   if(!it) return;
   if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
   Agent.load();
-  if(!Agent.ready()){
-    showToast("先到「AI · Agent 配置」配好 Key，之后一键直达");
+  /* 零配置优先（issue #81）：云端免密钥通道或本机代理任一可用就直接开聊，
+   * 不再把用户赶去配 Key；两路全灭才提示（startAgentChat 自带内联配置兜底） */
+  var cloudReady0 = (typeof CloudAI !== "undefined") && CloudAI.ok();
+  if(!Agent.ready() && !cloudReady0){
+    showToast("暂无可用通道：可运行 python syncserver.py 拉起本机代理，或到「Agent 配置」填自己的 Key");
     switchView("chat"); fillAgentSettings(); return;
   }
   if(auto && Agent.usablePresets().length > 1){ openAgPick(id); return; }
@@ -1243,7 +1247,8 @@ function confirmAgPick(presetId){
   var itemId = _agPickId;
   if(!Agent.PRESETS[presetId]) return;
   Agent.load();
-  if(!Agent.config.keys[presetId]){
+  /* keyOptional 预设（cloudproxy）无需 Key，选完直接进对话（issue #81） */
+  if(Agent.needsKey(presetId) && !Agent.config.keys[presetId]){
     Agent.use(presetId);
     closeAgPick();
     showToast("先给 " + Agent.PRESETS[presetId].label + " 配一个 Key");
@@ -1425,7 +1430,10 @@ function onChatSetupSave(){
   Agent.config.model = el("csModel").value.trim() || p.model || "";
   Agent.config.apiKey = el("csKey").value.trim();
   Agent.save();
-  if(!Agent.ready()){ showToast("还差 Key / 模型名，配齐才能开聊"); return; }
+  /* keyOptional 预设（cloudproxy）免 Key 即可开聊（issue #81） */
+  if(!Agent.config.model || (Agent.needsKey(pid) && !Agent.config.apiKey)){
+    showToast("还差 Key / 模型名，配齐才能开聊"); return;
+  }
   el("chatSetup").style.display = "none";
   var it = findItem(_chatId);
   if(it) el("chatSub").textContent = it.course + " · " + dueText(it);
@@ -1480,9 +1488,11 @@ function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
   var _lastSave = Date.now();
-  /* 云端免密钥通道：Agent 层不可用（cloudproxy 未选中且没填自己的 Key）才走这里（点开即聊，#56） */
+  /* 云端免密钥通道：Agent 层不可用（非免 Key 预设且没填自己的 Key）才走这里（点开即聊，#56） */
   var agentUsable = Agent.config && Agent.config.baseUrl && Agent.config.model &&
-    (Agent.config.preset === "cloudproxy" || Agent.config.apiKey);
+    (typeof Agent.needsKey === "function"
+      ? (!Agent.needsKey(Agent.config.preset) || Agent.config.apiKey)
+      : (Agent.config.preset === "cloudproxy" || Agent.config.apiKey));
   if(!agentUsable && typeof CloudAI !== "undefined" && CloudAI.ok()){
     if(!CloudAI.model){
       CloudAI.refreshModels().then(function(){
@@ -1542,7 +1552,11 @@ function streamChat(chat){
     model: cfg.model, messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
     stream: true, temperature: cfg.temperature || 0.7
   });
-  fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey }, body: body })
+  /* 空 Key 不发 Authorization 头：免 Key 预设（cloudproxy 信任模式）不必要地
+   * 触发预检 + 在服务端日志/语义上造成歧义（issue #81） */
+  var _headers = { "Content-Type": "application/json" };
+  if(cfg.apiKey) _headers["Authorization"] = "Bearer " + cfg.apiKey;
+  fetch(url, { method: "POST", headers: _headers, body: body })
   .then(function(res){
     if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP " + res.status + " " + String(t).slice(0, 160)); }); }
     return res.body;
@@ -1817,6 +1831,34 @@ function updateAgentHint(){
   el("agHint").textContent = txt;
   el("agKeyLink").href = p.keyUrl || "#";
   el("agKeyLink").style.display = p.keyUrl ? "" : "none";
+  /* keyOptional 预设：Key 输入框改成「令牌可选」，别让用户以为必填（issue #81） */
+  var keyless = (typeof Agent.needsKey === "function") && !Agent.needsKey(Agent.config.preset);
+  el("agKeyLabel").textContent = keyless
+    ? "令牌（可选：仅服务端启用令牌校验时才需要，只写本机）"
+    : "API Key（按预设分开保存，只写本机，不上传）";
+  el("agKey").placeholder = keyless ? "留空即可开聊" : "sk-...";
+  el("agKeyHint").style.display = p.keyUrl ? "" : "none";
+  refreshAgentChannel();
+}
+/* Agent 配置面板内的通道状态（issue #81）：让用户开聊前就知道「无需任何配置」，
+ * 复用 Agent.probeLayers 的分层探测（本机代理 → 云端免密钥 → 本机已存 Key） */
+function refreshAgentChannel(){
+  var box = el("agChannel");
+  if(!box || typeof Agent === "undefined" || !Agent.probeLayers) return;
+  box.style.display = "";
+  box.textContent = "⏳ 正在检测可用通道（本机代理 → 云端免密钥）…";
+  Agent.probeLayers(4000).then(function(r){
+    if(!box) return;
+    if(r && r.layer === 1){
+      box.textContent = "✅ 已检测到本机 AI 代理（免 Key，当前模型 " + Agent.config.model + "）：无需任何配置，直接开聊";
+    }else if(r && r.layer === 2){
+      box.textContent = "✅ 已连接云端免密钥通道：无需 API Key，直接开聊";
+    }else if(r && r.layer === 3){
+      box.textContent = "✅ 使用已保存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
+    }else{
+      box.textContent = "⚠️ 暂无可用通道：可在本机运行 python syncserver.py 拉起代理，或在下方填自己的 API Key";
+    }
+  }).catch(function(){ if(box) box.textContent = "⚠️ 通道检测失败，可稍后重试"; });
 }
 /* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
 function onLayaPlan(){
@@ -2652,8 +2694,9 @@ function bind(){
       Agent.setKey(Agent.config.preset, el("agKey").value.trim());
       Agent.config.model = el("agModel").value.trim();
       Agent.save();
+      updateAgentHint();   /* 保存后立即刷新通道状态与 Key 标签（issue #81） */
       addLog("Agent 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "，已配 Key：" + Agent.usablePresets().length + " 个预设）");
-      showToast(Agent.ready() ? "已保存，作业卡「💬 对话 / AI 代提交」直接可用" : "已保存（还差 Key / Model，配齐才能开聊）");
+      showToast(Agent.ready() ? "已保存，作业卡「💬 对话 / AI 代提交」直接可用" : "已保存（暂无免 Key 通道可用，配 Key / 启动本机代理后才能开聊）");
     });
   }
   el("filterRow").addEventListener("click", function(e){
