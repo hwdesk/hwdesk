@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>作业提交工作台 · 学在城院</title>
 <!-- 本工作台由 WorkBuddy「小台」搭建：本地单页 + localStorage；多区块布局参照 RoleWeave 工作台 -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%232f6bff'/%3E%3Crect x='10' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='26' y='12' width='12' height='24' fill='%23fff'/%3E%3Crect x='8' y='38' width='32' height='3' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%232b55e0'/%3E%3Crect x='11' y='8' width='26' height='32' rx='5' fill='%23fff'/%3E%3Crect x='11' y='8' width='7' height='32' rx='3.5' fill='%23dbe6ff'/%3E%3Cg stroke='%232b55e0' stroke-width='2.4' stroke-linecap='round'%3E%3Cline x1='22' y1='16' x2='33' y2='16'/%3E%3Cline x1='22' y1='22' x2='33' y2='22'/%3E%3Cline x1='22' y1='28' x2='30' y2='28'/%3E%3Cline x1='22' y1='34' x2='28' y2='34'/%3E%3C/g%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#f5f6f8; --card:#ffffff; --line:#e8eaef; --txt:#1c2130; --sub:#7a8194;
@@ -72,8 +72,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid2 .full{grid-column:1/-1}
 label.f{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
-input[type=text],input[type=date],input[type=file],select,textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px;background:#fff;color:var(--txt);font-family:inherit;transition:border-color .15s,box-shadow .15s}
-input[type=text]:focus,input[type=date]:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,110,246,.12)}
+input[type=text],input[type=date],input[type=file],input[type=password],select,textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px;background:#fff;color:var(--txt);font-family:inherit;transition:border-color .15s,box-shadow .15s}
+input[type=text]:focus,input[type=date]:focus,input[type=password]:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,110,246,.12)}
 textarea{resize:vertical;min-height:64px}
 /* 作业列表 */
 .hw-item{display:flex;gap:12px;padding:14px;border-bottom:1px solid var(--line);align-items:flex-start}
@@ -165,8 +165,140 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .today-item .btn,.hw-actions .btn{flex:1}
 }
 </style>
+<style>
+/* ============================================================
+   全局 UI 美化层（与登录页同风格）：动态背景 / 卡片 / 按钮 /
+   导航图标动效 / 弹窗 / 滚动条 —— 只覆盖视觉，不动任何逻辑
+   ============================================================ */
+body{background:linear-gradient(180deg,#f3f6fd 0%,#f6f7fb 100%)}
+/* ---- 极淡动态背景色块（登录页同款语言，低存在感） ---- */
+.bg-deco{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.bg-deco i{position:absolute;border-radius:50%;filter:blur(110px);opacity:.42;animation:decoDrift 22s ease-in-out infinite alternate}
+.bg-deco i:nth-child(1){width:520px;height:520px;background:#cfe0ff;top:-200px;left:-160px}
+.bg-deco i:nth-child(2){width:460px;height:460px;background:#e4d9ff;bottom:-180px;right:-140px;animation-delay:-11s}
+@keyframes decoDrift{0%{transform:translate(0,0) scale(1)}100%{transform:translate(50px,36px) scale(1.1)}}
+/* ---- 视图切换动画升级 ---- */
+.view.on{animation:viewIn .3s cubic-bezier(.22,1,.36,1)}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+/* ---- 卡片 ---- */
+.card{transition:transform .2s ease,box-shadow .2s ease}
+.card:hover{box-shadow:0 6px 22px rgba(59,110,246,.10),0 2px 6px rgba(24,32,56,.05)}
+.stat{border-radius:16px}
+.stat:hover{transform:translateY(-3px);box-shadow:0 10px 26px rgba(59,110,246,.14)}
+.stat .num{letter-spacing:.5px}
+.view.on .stat{animation:statIn .45s cubic-bezier(.22,1,.36,1) both}
+.view.on .stat:nth-child(1){animation-delay:.02s}
+.view.on .stat:nth-child(2){animation-delay:.08s}
+.view.on .stat:nth-child(3){animation-delay:.14s}
+.view.on .stat:nth-child(4){animation-delay:.2s}
+@keyframes statIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+/* ---- 列表行 hover 反馈 ---- */
+.today-item,.hw-item,.mat-item,.sub-row,.laya-item,.log-item{transition:background .15s}
+.today-item:hover,.hw-item:hover,.mat-item:hover,.sub-row:hover,.laya-item:hover,.log-item:hover{background:#fafbff}
+/* ---- 按钮 ---- */
+.btn{transition:background .15s,border-color .15s,box-shadow .2s,transform .15s}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:linear-gradient(120deg,#4d7bff,#2b55e0);border-color:transparent;box-shadow:0 4px 14px rgba(59,110,246,.28)}
+.btn.primary:hover{background:linear-gradient(120deg,#3d6bff,#2450d6);box-shadow:0 8px 20px rgba(59,110,246,.36);transform:translateY(-2px)}
+.btn.primary:disabled{box-shadow:none;transform:none}
+/* ---- 侧边导航：图标动效 + 激活指示条 ---- */
+.nav button{position:relative;border-radius:12px;transition:background .18s,color .18s,transform .15s}
+.nav button:hover{transform:translateX(2px)}
+.nav button .ico{display:inline-block;transition:transform .28s cubic-bezier(.34,1.56,.64,1)}
+.nav button:hover .ico{transform:scale(1.28) rotate(-8deg)}
+.nav button.on::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;border-radius:99px;background:var(--blue)}
+.side .brand .logo{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+.side .brand .logo:hover{transform:rotate(-8deg) scale(1.08)}
+/* 同步状态点：呼吸脉冲 */
+.side .sync .dot{animation:dotPulse 2.2s ease-out infinite}
+@keyframes dotPulse{0%{box-shadow:0 0 0 0 rgba(24,32,56,.18)}70%{box-shadow:0 0 0 6px rgba(24,32,56,0)}100%{box-shadow:0 0 0 0 rgba(24,32,56,0)}}
+/* ---- 筛选 chip / Agent 卡片 ---- */
+.chip{transition:border-color .18s,color .18s,box-shadow .18s,transform .15s}
+.chip:hover{border-color:var(--blue);color:var(--blue);transform:translateY(-1px)}
+.chip.on{box-shadow:0 3px 10px rgba(59,110,246,.28)}
+.chip.on:hover{color:#fff;transform:none}
+.agent-chip{transition:border-color .18s,box-shadow .18s,transform .18s}
+.agent-chip:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(59,110,246,.10)}
+/* ---- 输入控件 ---- */
+input[type=text],input[type=date],input[type=file],select,textarea{transition:border-color .18s,box-shadow .18s}
+/* ---- 弹窗 / 抽屉：毛玻璃遮罩 + 入场动画 ---- */
+.ai-picker-mask,.chat-mask{background:rgba(24,32,56,.40);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.ai-picker{border-radius:18px;box-shadow:0 24px 70px rgba(24,32,56,.25);animation:modalIn .32s cubic-bezier(.22,1,.36,1)}
+@keyframes modalIn{from{opacity:0;transform:translateY(24px) scale(.96)}to{opacity:1;transform:none}}
+.chat-drawer{animation:drawerIn .35s cubic-bezier(.22,1,.36,1)}
+@keyframes drawerIn{from{opacity:.4;transform:translateX(60px)}to{opacity:1;transform:none}}
+.ai-pick-item,.ag-pick-item{border-radius:12px;transition:border-color .18s,background .18s,transform .15s}
+.ai-pick-item:hover,.ag-pick-item:hover{transform:translateX(2px)}
+/* ---- Toast ---- */
+.toast{transform:translateX(-50%) translateY(10px);border-radius:14px;box-shadow:0 10px 30px rgba(24,32,56,.20)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+/* ---- 进度条动画 ---- */
+.laya-pbar i{transition:width .5s cubic-bezier(.22,1,.36,1)}
+/* ---- 细滚动条 ---- */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#ccd4e6;border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:#b4c0da}
+::-webkit-scrollbar-track{background:transparent}
+/* ---- 第二版精修：SVG 图标对齐 / 标题层级 / 间距节奏 ---- */
+.nav .ico{display:flex;align-items:center;justify-content:center}
+.nav .ico svg,.btn .bic svg{display:block}
+.btn .bic{display:inline-flex;align-items:center;margin-right:7px;vertical-align:-2px}
+.section-title{margin:26px 2px 12px}
+.section-title h2{font-size:16px;font-weight:700;letter-spacing:.2px}
+.stat .num{font-variant-numeric:tabular-nums}
+.empty{color:#9aa3b8}
+/* ---- 设置页（仿 RoleWeave 分区行式：左标题+描述，右控件） ---- */
+.settings-head{margin:6px 2px 0}
+.settings-head h2{font-size:21px;font-weight:700}
+.settings-head .hint{display:block;margin-top:3px}
+.set-card{overflow:hidden}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:none}
+.set-info{min-width:0}
+.set-info b{font-size:14px;font-weight:600;display:block}
+.set-desc{display:block;font-size:12px;color:var(--sub);margin-top:2px}
+.set-desc b{display:inline;font-size:12px}
+.set-row select{width:170px;flex:none}
+.set-switch{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--sub);cursor:pointer;flex:none}
+input[type=checkbox]{accent-color:var(--blue);width:16px;height:16px;cursor:pointer;vertical-align:-2px}
+details.set-details summary{cursor:pointer;list-style:none;padding:13px 16px;transition:background .15s}
+details.set-details summary:hover{background:#fafbff}
+details.set-details summary::-webkit-details-marker{display:none}
+details.set-details summary b{font-size:14px;font-weight:600;display:block}
+details.set-details summary .set-desc{margin-top:2px}
+details.set-details[open] summary{border-bottom:1px solid var(--line)}
+details.set-details .set-body{padding:14px 16px;display:grid;gap:12px}
+/* ---- 深色主题（仿 RoleWeave theme-mode：data-theme 驱动） ---- */
+html[data-theme="dark"]{--bg:#0f1218;--card:#171c26;--line:#272e3d;--txt:#e8ecf5;--sub:#8b93a7;--blue-weak:#1c2742;--red-weak:#3a2327;--green-weak:#17302a;--orange-weak:#382c17;--shadow:0 1px 2px rgba(0,0,0,.4),0 2px 10px rgba(0,0,0,.35)}
+html[data-theme="dark"] body{background:linear-gradient(180deg,#0d1015,#111420)}
+html[data-theme="dark"] .bg-deco i{opacity:.13}
+html[data-theme="dark"] .card{background:var(--card);border-color:var(--line)}
+html[data-theme="dark"] .btn{background:var(--card);border-color:var(--line);color:var(--txt)}
+html[data-theme="dark"] .btn:hover{background:#1d2330;border-color:#39445c}
+html[data-theme="dark"] .btn.danger-ghost:hover{background:var(--red-weak)}
+html[data-theme="dark"] input[type=text],html[data-theme="dark"] input[type=date],html[data-theme="dark"] input[type=file],html[data-theme="dark"] input[type=password],html[data-theme="dark"] select,html[data-theme="dark"] textarea{background:var(--card);border-color:var(--line);color:var(--txt)}
+html[data-theme="dark"] .chip,html[data-theme="dark"] .agent-chip,html[data-theme="dark"] .ai-pick-item,html[data-theme="dark"] .ag-pick-item{background:var(--card);border-color:var(--line);color:var(--txt)}
+html[data-theme="dark"] .chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+html[data-theme="dark"] .toast{background:#2a3142}
+html[data-theme="dark"] .chat-drawer,html[data-theme="dark"] .chat-head,html[data-theme="dark"] .chat-foot,html[data-theme="dark"] .chat-final{background:var(--card)}
+html[data-theme="dark"] .chat-msgs{background:#0d1015}
+html[data-theme="dark"] .chat-b.assistant{background:var(--card);border-color:var(--line);color:var(--txt)}
+html[data-theme="dark"] .chat-final{background:#161c2a}
+html[data-theme="dark"] .chat-risk{background:#2b2413;border-color:#4a3d1c;color:#d8c07a}
+html[data-theme="dark"] #chatSetup{background:#231d0e!important}
+html[data-theme="dark"] #chatSetup>div{color:#d3b45c!important}
+html[data-theme="dark"] .today-item:hover,html[data-theme="dark"] .hw-item:hover,html[data-theme="dark"] .mat-item:hover,html[data-theme="dark"] .sub-row:hover,html[data-theme="dark"] .laya-item:hover,html[data-theme="dark"] .log-item:hover{background:#1a2030}
+html[data-theme="dark"] details.set-details summary:hover{background:#1a2030}
+html[data-theme="dark"] .ai-picker{background:var(--card);color:var(--txt)}
+html[data-theme="dark"] .risk-out{color:var(--txt)}
+html[data-theme="dark"] .ai-note b{color:var(--txt)}
+html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
+</style>
 </head>
 <body>
+<!-- 全局动态背景（与登录页同风格，低存在感） -->
+<div class="bg-deco" aria-hidden="true"><i></i><i></i></div>
 <!-- 云端通道自检横幅（#54）：file:// 打开或地址缺 sharecode 时提示自助修复，可关闭 -->
 <div id="cloudBanner" style="display:none;position:sticky;top:0;z-index:99;margin:0 0 8px;padding:10px 14px;border-radius:10px;background:#fff7e6;border:1px solid #ffd591;color:#614700;font-size:13px;line-height:1.7">
   <span id="cloudBannerMsg"></span>
@@ -178,7 +310,22 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   <aside class="side">
     <div class="brand">
       <div class="logo">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v14.5a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 0 4 22V5.5Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8h8M8 12h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <!-- 与登录页同款笔记本图标 -->
+        <svg width="24" height="24" viewBox="0 0 44 44" fill="none">
+          <rect x="9" y="7" width="26" height="30" rx="4" fill="#ffffff"/>
+          <rect x="9" y="7" width="6" height="30" rx="3" fill="#dbe6ff"/>
+          <circle cx="12" cy="13" r="1.5" fill="#3b6ef6"/>
+          <circle cx="12" cy="20" r="1.5" fill="#3b6ef6"/>
+          <circle cx="12" cy="27" r="1.5" fill="#3b6ef6"/>
+          <circle cx="12" cy="33" r="1.5" fill="#3b6ef6"/>
+          <g stroke="#3b6ef6" stroke-width="2.4" stroke-linecap="round">
+            <line x1="19" y1="14" x2="30" y2="14"/>
+            <line x1="19" y1="19" x2="30" y2="19"/>
+            <line x1="19" y1="24" x2="27" y2="24"/>
+            <line x1="19" y1="29" x2="30" y2="29"/>
+            <line x1="19" y1="34" x2="25" y2="34"/>
+          </g>
+        </svg>
       </div>
       <div>
         <h1>作业工作台</h1>
@@ -186,15 +333,15 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
     <nav class="nav" id="nav">
-      <button data-view="overview" class="on"><span class="ico">🏠</span>总览</button>
-      <button data-view="data"><span class="ico">🗂️</span>数据</button>
-      <button data-view="workflow"><span class="ico">⚡</span>工作流</button>
-      <button data-view="chat"><span class="ico">💬</span>AI</button>
-      <button data-view="settings"><span class="ico">⚙️</span>设置</button>
+      <button data-view="overview" class="on"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/><path d="M10 21v-5h4v5"/></svg></span>总览</button>
+      <button data-view="data"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5V18.5c0 1.66 3.58 3 8 3s8-1.34 8-3V5.5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>数据</button>
+      <button data-view="workflow"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></span>工作流</button>
+      <button data-view="chat"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>AI</button>
+      <button data-view="settings"><span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="15.5" cy="6" r="2.3"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="8" cy="12" r="2.3"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="13" cy="18" r="2.3"/></svg></span>设置</button>
     </nav>
     <div class="sync" style="margin-top:16px"><span class="dot"></span><span id="syncText">本地模式</span></div>
     <div class="hint" id="acctChip" style="text-align:center;margin-top:6px"></div>
-    <button class="btn sm danger-ghost" id="btnLogout" style="width:100%;margin-top:6px">🚪 退出登录</button>
+    <button class="btn sm danger-ghost" id="btnLogout"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>退出登录</button>
   </aside>
 
   <main class="main">
@@ -209,7 +356,6 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 
     <div class="section-title">
       <h2>今天要处理</h2>
-      <span class="hint">逾期标红 · 按 Laya 优先级排序</span>
     </div>
     <div class="card"><div id="todayBox"></div></div>
 
@@ -245,11 +391,10 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     </div>
   </section>
 
-  <!-- ========== 2) 数据（学在城院同步 + 资料库） ========== -->
+  <!-- ========== 2) 数据（学在城院同步） ========== -->
   <section class="view" id="view-data">
     <div class="section-title">
       <h2>学在城院同步</h2>
-      <span class="hint">登录后自动同步 · 支持按课程精拉</span>
     </div>
     <div class="card" style="padding:14px">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -258,17 +403,131 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
           <option>电气控制与PLC及实验</option><option>电力电子技术</option><option>嵌入式系统设计</option>
           <option>电机与拖动</option><option>大学物理(Ⅰ)</option><option>工厂供电</option><option>其他</option>
         </select>
-        <button class="btn primary" id="btnDirectSync">🔄 同步</button>
+        <button class="btn primary" id="btnDirectSync"><span class="bic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></span>同步</button>
       </div>
       <div class="hint" id="syncHint" style="margin-top:8px">上次同步：从未</div>
       <div class="ai-note" id="directOut" style="display:none;white-space:pre-wrap"></div>
     </div>
+  </section>
 
+  <!-- ========== 3) 工作流（Laya 决策 + 审批 + 交付） ========== -->
+  <section class="view" id="view-workflow">
     <div class="section-title">
-      <h2>资料库</h2>
-      <button class="btn sm" id="btnMat">＋ 添加材料</button>
+      <h2>工作流 · Laya 决策中心</h2>
     </div>
     <div class="card">
+      <div id="layaBox"></div>
+      <div class="laya-ops">
+        <button class="btn sm primary" id="btnLayaPlan"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></span>生成执行计划</button>
+      </div>
+    </div>
+
+    <div class="section-title"><h2>审批</h2></div>
+    <div class="card"><div id="approvalBox"></div></div>
+
+    <div class="section-title"><h2>交付记录</h2></div>
+    <div class="card"><div id="subBox"></div></div>
+
+    <div class="section-title"><h2>审批记录</h2></div>
+    <div class="card"><div id="reviewBox"></div></div>
+  </section>
+
+  <!-- ========== 4) AI（多 Agent 对话 + 成稿检测 + Agent 配置） ========== -->
+  <section class="view" id="view-chat">
+    <div class="section-title">
+      <h2>AI 对话</h2>
+      <span id="cloudStatus" class="hint" style="margin-left:auto"></span>
+    </div>
+    <div class="card" style="padding:12px">
+      <div class="chat-pickers">
+        <div style="flex:1;min-width:180px"><label class="f">任务</label>
+          <select id="chatTask"></select></div>
+        <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
+      </div>
+      <div class="f" style="margin:10px 0 6px">选择 AI Agent</div>
+      <div id="agentGrid" class="agent-grid"></div>
+      <div id="agentConfirm" class="agent-confirm" style="display:none">
+        <span id="agentConfirmText" style="min-width:0"></span>
+        <span style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn sm primary" id="btnAgentConfirm">确认切换</button>
+          <button class="btn sm" id="btnAgentCancel">取消</button>
+        </span>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div id="chatLog" class="chat-log"></div>
+    </div>
+    <div class="card" style="padding:12px">
+      <textarea id="hubInput" placeholder="给所选 AI 的要求（可空）"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm primary" id="btnChatSend"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>发送给所选 AI</button>
+        <button class="btn sm" id="btnChatReply"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></span>记录 AI 回复</button>
+      </div>
+      <div class="hint" style="margin-top:8px">复制流程：指令粘到 AI 窗口，回复粘回记录即可。</div>
+    </div>
+
+    <div class="section-title"><h2>成稿检测</h2></div>
+    <div class="card" style="padding:14px">
+      <textarea id="rText" style="min-height:110px" placeholder="把 AI 生成的报告 / 答案粘贴到这里，检查套话密度与句式节奏…"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm primary" id="btnRisk"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span>评估检测风险</button>
+      </div>
+      <div id="riskOut" class="risk-out" style="display:none"></div>
+    </div>
+  </section>
+
+  <!-- ========== 5) 设置（外观 / Agent / 数据同步 / 资料库 / 日志） ========== -->
+  <section class="view" id="view-settings">
+    <div class="settings-head">
+      <h2>设置</h2>
+      <p class="hint">管理外观、Agent 与模型、数据同步与资料库。</p>
+    </div>
+
+    <div class="section-title"><h2>外观</h2></div>
+    <div class="card set-card">
+      <div class="set-row">
+        <div class="set-info"><b>主题</b><span class="set-desc">跟随系统时自动切换深浅色</span></div>
+        <select id="themeSel"><option value="">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select>
+      </div>
+    </div>
+
+    <div class="section-title"><h2>Agent 与模型</h2></div>
+    <div class="card set-card">
+      <div class="set-row">
+        <div class="set-info"><b>默认执行 AI</b><span class="set-desc">供「按方案执行」派发；选「每次询问」时执行会弹选择器</span></div>
+        <select id="selDefaultAi" style="width:180px"></select>
+      </div>
+      <details class="set-details">
+        <summary><b>Agent 接口配置</b><span class="set-desc">接口预设 · API Key · Base URL · 模型（Key 只存本机，不上传）</span></summary>
+        <div class="set-body">
+          <div id="agChannel" class="hint" style="display:none;padding:8px 10px;border-radius:8px;background:#f2f8f2;color:#256a2b"></div>
+          <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
+            <span class="hint" id="agHint" style="display:block;margin-top:5px"></span></div>
+          <div><label class="f" id="agKeyLabel">API Key</label><input type="password" id="agKey" placeholder="sk-...">
+            <span class="hint" id="agKeyHint" style="display:block;margin-top:5px">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
+          <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
+          <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
+          <div style="display:flex;justify-content:flex-end"><button class="btn sm primary" id="agSave">保存配置</button></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="section-title"><h2>数据同步</h2></div>
+    <div class="card set-card">
+      <div class="set-row">
+        <div class="set-info"><b>登录后自动同步学在城院数据</b><span class="set-desc" id="asLast">上次自动同步：从未</span></div>
+        <label class="set-switch"><input type="checkbox" id="asEnabled">开启</label>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><b>本机同步服务</b><span class="set-desc">在项目目录运行 <b>python syncserver.py</b> 后，一键同步与自动拉取可用</span></div>
+      </div>
+    </div>
+
+    <div class="section-title"><h2>资料库</h2></div>
+    <div class="card">
+      <div style="display:flex;justify-content:flex-end;padding:10px 14px 0">
+        <button class="btn sm" id="btnMat">＋ 添加材料</button>
+      </div>
       <div id="capBox"></div>
       <div id="matBox"></div>
       <div id="matForm">
@@ -290,107 +549,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         </div>
       </div>
     </div>
-  </section>
 
-  <!-- ========== 3) 工作流（Laya 决策 + 审批 + 交付） ========== -->
-  <section class="view" id="view-workflow">
-    <div class="section-title">
-      <h2>工作流 · Laya 决策中心</h2>
-      <span class="hint">优先级排序 · AI 路由 · 自动交付</span>
-    </div>
-    <div class="card">
-      <div id="layaBox"></div>
-      <div class="laya-ops">
-        <button class="btn sm primary" id="btnLayaPlan">⚡ 生成执行计划</button>
-        <span class="hint" id="layaPlanHint" style="align-self:center">分派给不同 AI 执行，需自查的任务会先等你确认</span>
-      </div>
-    </div>
-
-    <div class="section-title"><h2>审批</h2><span class="hint">AI 草稿 → 我确认后交付</span></div>
-    <div class="card"><div id="approvalBox"></div></div>
-
-    <div class="section-title"><h2>交付记录</h2><span class="hint">每次交付的完整留痕</span></div>
-    <div class="card"><div id="subBox"></div></div>
-
-    <div class="section-title"><h2>审批记录</h2></div>
-    <div class="card"><div id="reviewBox"></div></div>
-  </section>
-
-  <!-- ========== 4) AI（多 Agent 对话 + 成稿检测 + Agent 配置） ========== -->
-  <section class="view" id="view-chat">
-    <div class="section-title">
-      <h2>AI 对话</h2>
-      <span class="hint">选任务 → 选 AI（⭐ 推荐 · 📌 默认）→ 对话到满意 → 一键交付</span>
-      <span id="cloudStatus" class="hint" style="margin-left:auto"></span>
-    </div>
-    <div class="card" style="padding:12px">
-      <div class="chat-pickers">
-        <div style="flex:1;min-width:180px"><label class="f">任务</label>
-          <select id="chatTask"></select></div>
-        <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
-      </div>
-      <div class="f" style="margin:10px 0 6px">选择 AI Agent（⭐ Laya 推荐 · 点「☆ 设默认」记住常用 AI）</div>
-      <div id="agentGrid" class="agent-grid"></div>
-      <div id="agentConfirm" class="agent-confirm" style="display:none">
-        <span id="agentConfirmText" style="min-width:0"></span>
-        <span style="display:flex;gap:8px;flex-shrink:0">
-          <button class="btn sm primary" id="btnAgentConfirm">✅ 确认切换</button>
-          <button class="btn sm" id="btnAgentCancel">取消</button>
-        </span>
-      </div>
-    </div>
-    <div class="card" style="padding:0">
-      <div id="chatLog" class="chat-log"></div>
-    </div>
-    <div class="card" style="padding:12px">
-      <textarea id="hubInput" placeholder="给所选 AI 的要求（可空，自动附任务卡与上下文）；粘贴 AI 回复后点「记录 AI 回复」"></textarea>
-      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn sm primary" id="btnChatSend">📤 发送给所选 AI</button>
-        <button class="btn sm" id="btnChatReply">📥 记录 AI 回复</button>
-      </div>
-      <div class="hint" style="margin-top:8px">元宝 / WorkBuddy 走复制流程：指令粘到 AI 窗口，回复粘回记录。</div>
-    </div>
-
-    <div class="section-title"><h2>成稿检测</h2><span class="hint">交付前评估 AI 痕迹</span></div>
-    <div class="card" style="padding:14px">
-      <textarea id="rText" style="min-height:110px" placeholder="把 AI 生成的报告 / 答案粘贴到这里，检查套话密度与句式节奏…"></textarea>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn sm primary" id="btnRisk">🔍 评估检测风险</button>
-      </div>
-      <div id="riskOut" class="risk-out" style="display:none"></div>
-    </div>
-
-    <div class="section-title"><h2>Agent 配置</h2><span class="hint">配好一次，作业卡点「💬 对话 / AI 代提交」直接开聊</span></div>
-    <div class="card" style="padding:14px">
-      <div style="display:grid;gap:10px;max-width:520px">
-        <div id="agChannel" class="hint" style="display:none;padding:8px 10px;border-radius:8px;background:#f2f8f2;color:#256a2b"></div>
-        <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
-          <span class="hint" id="agHint"></span></div>
-        <div><label class="f" id="agKeyLabel">API Key（按预设分开保存，只写本机，不上传）</label><input type="password" id="agKey" placeholder="sk-...">
-          <span class="hint" id="agKeyHint">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
-        <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
-        <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
-      </div>
-      <footer class="ops" style="margin:12px 0 0">
-        <button class="btn sm primary" id="agSave">保存配置</button>
-      </footer>
-    </div>
-    <div class="card" style="padding:14px;margin-top:10px">
-      <label class="f" style="max-width:280px">默认执行 AI（供「按方案执行」派发使用）
-        <select id="selDefaultAi" style="width:100%"></select>
-      </label>
-      <p class="hint" style="margin:8px 0 0">选「每次询问」时每次执行会弹出选择器。</p>
-    </div>
-  </section>
-
-  <!-- ========== 5) 设置 ========== -->
-  <section class="view" id="view-settings">
-    <div class="section-title"><h2>数据同步</h2><span class="hint">登录 / 打开工作台后自动从学在城院拉取数据</span></div>
-    <div class="card" style="padding:14px">
-      <label style="font-size:12.5px"><input type="checkbox" id="asEnabled"> 登录后自动同步学在城院数据（30 分钟内不重复拉取）</label>
-      <p class="hint" id="asLast" style="margin:8px 0 0">上次自动同步：从未</p>
-      <p class="hint" style="margin:4px 0 0">默认优先本机同步服务（<b>python syncserver.py</b>，127.0.0.1:8765，凭据不出本机）；本机没有时自动改走云端同步服务（无状态，凭据用完即弃），无需安装 Python。</p>
-    </div>
     <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
       <footer class="ops" style="margin:0">
@@ -400,13 +559,15 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
         <button class="btn sm danger-ghost" id="btnClearDemo">清空全部数据</button>
       </footer>
     </div>
+
     <div class="section-title"><h2>操作日志</h2></div>
     <div class="card"><div id="logBox"></div></div>
+
     <div class="section-title"><h2>关于</h2></div>
     <div class="card ai-note" style="margin:0">
-      <b>Laya 决策</b>：优先级 = 45% 紧急度 + 25% 时间压力 + 18% 复杂度 + 12% 交付物风险，逾期 +8；行动阈值 0.625，低于阈值强制学生自查。<br>
-      <b>Agent Hub</b>：千问 / WorkBuddy / 即梦 / DeepSeek / Kimi / 豆包 / Qoder / Claude 任意选择，对话到满意后一键交付。<br>
-      页面不含任何账号密码；凭据只存你本机，不写入页面、不上传。
+      <b>Laya 决策</b>：紧急度 45% + 时间压力 25% + 复杂度 18% + 交付风险 12%，逾期 +8。<br>
+      <b>Agent Hub</b>：千问 / WorkBuddy / DeepSeek / Kimi / 豆包 等任选，一键交付。<br>
+      凭据只存本机，不上传。
     </div>
   </section>
   </main>
@@ -452,7 +613,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
     <div id="chatSetup" style="display:none;padding:12px 16px;border-bottom:1px solid #eef0f4;background:#fffdf5">
-      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认云端免配置直聊；要用自己的模型才填 Key（只存本机）。</div>
+      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认免配置直聊；用自己的模型才填 Key（只存本机）。</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
         <label class="f" style="flex:1;min-width:130px">接口<select id="csPreset"></select></label>
         <label class="f" style="flex:2;min-width:190px">API Key<input type="password" id="csKey" autocomplete="off" placeholder="sk-…"></label>
@@ -467,7 +628,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       <textarea id="chatFinalText" placeholder="成稿内容（可编辑）"></textarea>
       <div class="hint" id="chatFinalRisk" style="margin-top:6px"></div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn sm primary" id="chatFinalSend">✅ 确认提交</button>
+        <button class="btn sm primary" id="chatFinalSend">确认提交</button>
         <button class="btn sm" id="chatFinalReview">送审批队列</button>
         <button class="btn sm" id="chatFinalCancel">返回对话</button>
       </div>
@@ -481,8 +642,8 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
           <option value="md">Markdown（.md）</option>
           <option value="txt">纯文本（.txt）</option>
         </select>
-        <button class="btn sm primary" id="chatQuick" title="选用版成稿 → 按格式落文件 → 进审批队列">⚡ 一键提交</button>
-        <button class="btn sm primary" id="chatSubmit">📤 用最终结果提交</button>
+        <button class="btn sm primary" id="chatQuick" title="选用版成稿 → 按格式落文件 → 进审批队列">一键提交</button>
+        <button class="btn sm primary" id="chatSubmit">用最终结果提交</button>
         <button class="btn sm" id="chatSend">发送</button>
       </div>
     </div>
@@ -851,8 +1012,8 @@ function renderList(){
       + '<div class="status-ico ' + (it.status==="submitted"?"st-submitted":(overdue?"st-todo":"st-done")) + '">' + ico + '</div>'
       + '<div class="hw-main"><div class="hw-name' + (it.status==="submitted"?" done":"") + '">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
       + '<div class="hw-meta"><span>' + esc(it.course) + '</span><span>' + dtext + '</span><span>' + esc(it.type) + '</span><span>' + esc(it.format || "文字") + '</span>'
-      + (it.ignored ? '<span style="color:#999;font-weight:600">🚫 已忽略（同步不再加回，可恢复）</span>' : '')
-      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">🕓 待自查（审批队列中）</span>' : '') + '</div>'
+      + (it.ignored ? '<span style="color:#999;font-weight:600">已忽略（同步不再加回，可恢复）</span>' : '')
+      + (it.reviewPending ? '<span style="color:var(--amber,#c98a00);font-weight:600">待自查（审批队列中）</span>' : '') + '</div>'
       + (it.note ? '<div class="hw-meta"><span>' + esc(it.note) + '</span></div>' : "")
       + '<div class="hw-actions">' + acts + '</div></div></div>';
   });
@@ -898,7 +1059,7 @@ function renderLaya(){
       + '<span class="tag cx">' + esc(d.complexity.label) + '</span>'
       + '<span class="tag ai">🤖 ' + esc(d.route.label) + ' · 置信度 ' + Math.round(d.route.confidence * 100) + '%</span>'
       + hBadge
-      + (d.review.needed ? '<span class="tag rv">⛔ 需我自查</span>' : '<span class="tag ok">✅ 可自动交付</span>')
+      + (d.review.needed ? '<span class="tag rv">需我自查</span>' : '<span class="tag ok">可自动交付</span>')
       + '</div>'
       + '<div class="laya-why">' + esc(d.reasons.join("；")) + '</div>'
       + '</div>';
@@ -930,7 +1091,7 @@ function renderCaptures(){
   var box = el("capBox");
   var caps = (typeof DB !== "undefined") ? DB.list("captures") : [];
   if(!caps.length){
-    box.innerHTML = '<div class="empty">课程记忆库还是空的：登录学在城院后会自动同步，各课程课件、已提交作业、成绩将自动入库（也可点上方「🔄 同步」立即拉取）。这里的记忆会注入 AI 提示词，让成稿贴合对应课程</div>';
+    box.innerHTML = '<div class="empty">课程记忆库还是空的：登录学在城院后会自动同步，各课程课件、已提交作业、成绩将自动入库。这里的记忆会注入 AI 提示词，让成稿贴合对应课程</div>';
     return;
   }
   var byCourse = {}, order = [], latest = "";
@@ -1000,7 +1161,7 @@ function renderAgentGrid(){
       + '<span class="ag-emoji">' + r.agent.emoji + '</span>'
       + '<div style="min-width:0"><div class="ag-name">' + esc(r.agent.label) + '</div>'
       + '<div class="ag-desc">' + esc(r.agent.desc) + '</div></div>'
-      + (r.recommended ? '<span class="ag-star" title="Laya 推荐">⭐</span>' : "")
+      + (r.recommended ? '<span class="ag-star" title="Laya 推荐">★</span>' : "")
       + '<button class="btn sm ag-def' + (r.id === def ? " on" : "") + '" data-agdef="' + r.id + '" title="设为默认：打开 AI 对话时自动选中">'
       + (r.id === def ? "📌 默认" : "☆ 设默认") + '</button>'
       + '</div>';
@@ -1031,7 +1192,7 @@ function renderChatLog(){
       ? '<span class="b-meta">🙋 我 → ' + esc(t.agentLabel || t.agent || "AI") + ' · ' + esc(t.time || "") + '</span>'
       : '<span class="b-meta">🤖 ' + esc(t.agentLabel || t.agent || "AI") + ' 回复 · ' + esc(t.time || "") + '</span>';
     var ops = t.role === "ai"
-      ? '<div class="b-ops"><button class="btn sm primary" data-deliver="' + i + '">✅ 一键交付（满意后用）</button></div>'
+      ? '<div class="b-ops"><button class="btn sm primary" data-deliver="' + i + '">一键交付（满意后用）</button></div>'
       : "";
     html += '<div class="bubble ' + (t.role === "user" ? "user" : "ai") + '">'
       + who + esc(t.text) + ops + '</div>';
@@ -1443,7 +1604,7 @@ function onChatSetupSave(){
 function renderChat(chat){
   var box = el("chatMsgs"), html = "";
   if(!chat.messages.length){
-    html = '<div class="empty">与 Agent 聊出成稿后，点「⚡ 一键提交」或「用最终结果提交」直接交付</div>';
+    html = '<div class="empty">与 Agent 聊出成稿后，点「一键提交」或「用最终结果提交」直接交付</div>';
   }
   chat.messages.forEach(function(m, i){
     var last = (i === chat.messages.length - 1 && m.role === "assistant");
@@ -1662,7 +1823,7 @@ function showChatRisk(chat){
       + "提交时会二次确认 —— 建议先让 Agent 输出 【最终交付】。";
   }
   if(!text) text = (info.picked ? "已选用此版（" + d.length + " 字），提交时用它。" : "成稿已就绪（" + d.length + " 字），")
-    + "点「⚡ 一键提交」或「用最终结果提交」交付。";
+    + "点「一键提交」或「用最终结果提交」交付。";
   out.textContent = text;
   out.style.display = "block";
 }
@@ -1743,7 +1904,7 @@ function submitDeliverable(text, fmt, direct){
   }else{
     it.reviewPending = false;
   }
-  addLog((direct ? "Agent 成稿已直接提交" : "⚡ 成稿已交付待审") + "：" + it.name + (f ? "（" + f.name + "）" : ""));
+  addLog((direct ? "Agent 成稿已直接提交" : "成稿已交付待审") + "：" + it.name + (f ? "（" + f.name + "）" : ""));
   saveState(); refreshAll();
   closeChatFinal();
   closeChat();
@@ -2092,7 +2253,7 @@ function applyPlatformPayload(payload, auto, course){
     outEmpty.textContent = "⚠ 自动同步没有取到任何作业/采集数据"
       + ((payload.errors || []).length ? "：" + payload.errors.join("；")
         : "（账号下暂无可见作业，或平台返回为空）")
-      + "\n可点「⚡ 从学在城院一键获取」手动重试。";
+      + "\n可点「同步」手动重试。";
     switchView("data");
     addLog("自动同步空结果：作业/采集均为 0 项，已切到数据视图");
     showToast("自动同步未取到数据，已切到数据视图");
@@ -2668,7 +2829,7 @@ function bind(){
     if(row){ e.preventDefault(); confirmAgPick(row.getAttribute("data-ag")); }
   });
   el("agPickCfg").addEventListener("click", function(){
-    closeAgPick(); switchView("chat"); fillAgentSettings();
+    closeAgPick(); switchView("settings"); fillAgentSettings();
   });
   el("agPick").addEventListener("click", function(e){
     if(e.target === el("agPick")) closeAgPick();
@@ -2737,14 +2898,14 @@ function cloudSelfCheck(){
   }
   /* 网关体检：结果落在 AI 对话区状态行，而不是等用户发消息后才报错 */
   var st = el("cloudStatus");
-  if(st) st.textContent = "☁️ 云端通道检测中…";
+  if(st) st.textContent = "云端通道检测中…";
   CloudAI.healthCheck(8000).then(function(r){
     if(!st) return;
     st.textContent = (r && r.ok)
-      ? "☁️ 云端通道正常"
-      : "☁️ 云端通道异常（" + ((r && r.code) || "?") + "）· " +
+      ? "云端通道正常"
+      : "云端通道异常（" + ((r && r.code) || "?") + "）· " +
         CloudAI.errText({ error: { code: (r && r.code) || "" } }).slice(0, 60);
-  }).catch(function(){ if(st) st.textContent = "☁️ 云端通道异常"; });
+  }).catch(function(){ if(st) st.textContent = "云端通道异常"; });
 }
 /* 分层自动降级（issue #56）：代理 → CloudAI → 本机已存 key；探测到可用层就自动切换。
  * 登录成功后也会重跑一次（onLogin），保证「登录时检测本地部署」而不是只看开机那一刻。 */
@@ -2755,11 +2916,11 @@ function agentProbeLayers(){
     if(r && r.layer === 1){
       var picked = Agent.autoSelect(r);
       if(picked === "cloudproxy" && typeof fillAgentSettings === "function") fillAgentSettings();
-      if(st) st.textContent = "☁️ 本机 AI 代理可用（免 Key，自动对应模型 " + Agent.config.model + "）";
+      if(st) st.textContent = "本机 AI 代理可用（免 Key，自动对应模型 " + Agent.config.model + "）";
     }else if(r && r.layer === 2){
-      if(st && !Agent.config.manualLock) st.textContent = "☁️ 云端通道可用（免 Key，发送时自动走云端）";
+      if(st && !Agent.config.manualLock) st.textContent = "云端通道可用（免 Key，发送时自动走云端）";
     }else if(r && r.layer === 3){
-      if(st) st.textContent = "☁️ 使用已存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
+      if(st) st.textContent = "使用已存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
     }
   }).catch(function(){ /* 探测失败静默，走 CloudAI/手动层 */ });
 }
@@ -2780,6 +2941,36 @@ document.addEventListener("DOMContentLoaded", function(){
   /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });
+</script>
+<script>
+/* ---------- 主题（仿 RoleWeave theme-mode.ts）：显式选择存 localStorage，未选跟随系统 ---------- */
+(function(){
+  var KEY = "hwdesk.theme-mode";
+  var mq = null;
+  try { mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null; } catch(e){ mq = null; }
+  function stored(){
+    try { var v = window.localStorage.getItem(KEY); return (v === "light" || v === "dark") ? v : ""; }
+    catch(e){ return ""; }   /* 存储被禁用等场景降级为"未固定"，不阻塞启动 */
+  }
+  function apply(){
+    var v = stored();
+    var dark = v === "dark" || (!v && mq && mq.matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }
+  try { if (mq && mq.addEventListener) mq.addEventListener("change", function(){ if (!stored()) apply(); }); } catch(e){}
+  var sel = document.getElementById("themeSel");
+  if (sel) {
+    sel.value = stored();
+    sel.addEventListener("change", function(){
+      try {
+        if (sel.value) window.localStorage.setItem(KEY, sel.value);
+        else window.localStorage.removeItem(KEY);
+      } catch(e){}
+      apply();
+    });
+  }
+  apply();
+})();
 </script>
 </body>
 </html>
