@@ -604,6 +604,20 @@ test("#70 本地启动器存在：探活 8765 → 拉起 syncserver → 应用�
   assert.ok(/--proxy-server=direct:\/\//.test(vbs), "app mode opens with direct network");
   assert.ok(!/Users\/feng/.test(vbs), "no machine-specific path");
 });
+test("桌面快捷方式不再坏：绝对路径 wscript + LOCALAPPDATA Chrome 候选（两个启动器一致）", () => {
+  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
+    const vbs = readFileSync(path.join(root, name), "utf8");
+    /* 回归：裸名 "wscript.exe" 落进 .lnk 后部分桌面环境解析失败 → 白图标/双击无效 */
+    assert.ok(!/TargetPath = "wscript\.exe"/.test(vbs),
+      name + ": TargetPath must not be the bare wscript.exe");
+    assert.ok(/TargetPath = sh\.ExpandEnvironmentStrings\("%SystemRoot%\\System32\\wscript\.exe"\)/.test(vbs),
+      name + ": shortcut TargetPath is an absolute wscript.exe path");
+    /* 回归：Chrome 常见 per-user 安装位 %LOCALAPPDATA% 不在候选里 → 本机回退 Edge/找不到 */
+    assert.ok(/%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome\.exe/.test(vbs),
+      name + ": LOCALAPPDATA Chrome candidate included");
+    assert.ok(!/feng|C:\\Users/.test(vbs), name + ": still no machine-specific path");
+  }
+});
 test("#70 open.py 不再硬编码用户路径", () => {
   const op = readFileSync(path.join(root, "open.py"), "utf8");
   assert.ok(!op.includes("Users/feng"), "feng hardcode removed");
