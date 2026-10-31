@@ -2222,12 +2222,20 @@ function dataEndpoints(){
     ? VerifyNet.endpoints(VerifyNet.loadOverrides())
     : [{ url: "http://127.0.0.1:8765", sharecode: "", kind: "local", label: "本机同步服务" }];
 }
-function directHelp(eps){
+function directHelp(eps, reasons){
   var hasCloud = (eps || []).some(function(e){ return e.kind === "cloud"; });
+  var why = (reasons && reasons.length) ? ("\n各路失败原因：" + reasons.join("；")) : "";
   return "✗ 同步服务全部连不上（本机 + 云端" + (hasCloud ? "" : "未配置") + "）。"
-    + "可在本项目目录运行 python syncserver.py 后重试，或检查网络（详见 README「本机直连获取」）。";
+    + "可在本项目目录运行 python syncserver.py 后重试，或检查网络（详见 README「本机直连获取」）。" + why;
 }
-/* 单路同步：POST <ep>/data，120s 超时（云端采集课程多时较慢）。
+function humanReason(kind, res){
+  /* 每一路失败的具体原因（全挂提示用，方便定位是超时/旧版/网络） */
+  if(kind === "timeout") return "超时";
+  if(kind === "stale") return "服务是旧版（无该接口）";
+  if(kind === "rejected") return "平台拒绝：" + ((res && res.error) || "").slice(0, 50);
+  return "连不上" + ((res && res.error) ? ("（" + String(res.error).slice(0, 50) + "）") : "");
+}
+/* 单路同步：POST <ep>/data，120s 超时（本机桥在局域网，一次请求够用）。
  * 返回 {kind:"ok"|"rejected"|"stale"|"unreachable"|"timeout", res, via}；
  * 只有「服务连不上/是旧版」才降级下一路，明确报错（密码错误等）立即终止。 */
 function syncOnce(ep, body){

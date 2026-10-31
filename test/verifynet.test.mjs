@@ -77,6 +77,20 @@ test("dataPath mirrors verifyPath sharecode rules for the sync endpoint", () => 
   assert.equal(VerifyNet.dataPath(null), "/data");
   assert.equal(VerifyNet.verifyPath(undefined), "/verify");
 });
+test("dataStartPath/dataPollPath build async sync URLs; the job token goes in the body", () => {
+  assert.equal(VerifyNet.dataStartPath({ url: "http://127.0.0.1:8765", sharecode: "" }),
+               "http://127.0.0.1:8765/data/start");
+  assert.equal(
+    VerifyNet.dataStartPath({ url: "https://v.example.com/", sharecode: "ABCD1234" }),
+    "https://v.example.com/data/start?sharecode=ABCD1234");
+  /* 任务号不能出现在 URL 上（会进网关 access log）→ 只带 sharecode */
+  assert.equal(
+    VerifyNet.dataPollPath({ url: "https://v.example.com", sharecode: "ABCD1234" }),
+    "https://v.example.com/data/poll?sharecode=ABCD1234");
+  assert.equal(VerifyNet.dataPollPath({ url: "http://127.0.0.1:8765" }),
+               "http://127.0.0.1:8765/data/poll");
+  assert.deepEqual(VerifyNet.dataPollBody("abc123"), { job: "abc123" });
+});
 test("cloudUrls accept both plain strings and {url, sharecode} objects", () => {
   const n = VerifyNet.normalizeOverrides(
     { cloudUrls: ["https://a.example.com", { url: "https://b.example.com/", sharecode: "S1X2Y3Z4" }] });

@@ -303,28 +303,44 @@ test("cloud fallback exists: verifyserver.py is a stateless verify+sync service"
   assert.ok(/def log_message\(self, fmt, \*args\):\s*(?:#[^\n]*)?\n\s*pass/.test(vs),
             "verifyserver silences access logs");
   /* 数据面：/data 无状态同步兜底必须有（登录+实时采集，结果随响应返回）；
+   * 异步模式 /data/start + /data/poll 必须有（完整采集可能超网关单请求超时，
+   * 一次长 POST 被掐断后页面只见「全部连不上」——1.2.0 起云端默认走异步）；
    * /ingest（外部投递、落盘语义）仍然不许有 */
   assert.ok(/self\.path\.startswith\("\/data"\)/.test(vs),
             "verifyserver routes POST /data (stateless cloud sync fallback)");
   assert.ok(/hzcu_collect\(s\)/.test(vs),
             "cloud /data collects via the shared hzcu_collect implementation");
+  assert.ok(/self\.path\.startswith\("\/data\/start"\)/.test(vs) &&
+            /\/data\/poll/.test(vs) && /secrets\.token_hex/.test(vs),
+            "verifyserver offers async jobs: /data/start + /data/poll (gateway-timeout proof)");
+  assert.ok(/JOB_TTL|jobs_cleanup|_jobs_cleanup/.test(vs),
+            "async jobs have TTL/cap cleanup (memory-only, never on disk)");
   assert.ok(!/startswith\("\/ingest"\)/.test(vs),
             "verifyserver must not route /ingest (ingest has disk-write semantics)");
   assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
-  assert.ok(/VERSION = "1\.1\.0"/.test(vs), "verifyserver bumped to 1.1.0 (cloud sync)");
+  assert.ok(/VERSION = "1\.2\.0"/.test(vs), "verifyserver bumped to 1.2.0 (async sync)");
 });
 test("cloud sync fallback wired: one-click sync walks the same layered endpoints", () => {
   has(/function dataEndpoints\(\)\{[\s\S]{0,200}VerifyNet\.endpoints\(VerifyNet\.loadOverrides\(\)\)/,
       "runDirectSync builds the endpoint order from verifynet.js (overrides aware)");
   has(/fetch\(VerifyNet\.dataPath\(ep\)/,
-      "each endpoint is tried via verifynet.js dataPath (sharecode-aware)");
+      "local endpoint is tried via verifynet.js dataPath (sharecode-aware)");
+  has(/syncViaCloud\(ep, body/,
+      "cloud endpoint goes through async start+poll (no single long request)");
+  has(/fetch\(VerifyNet\.dataStartPath\(ep\)/ &&
+      /VerifyNet\.dataPollPath\(ep, job\)/,
+      "async flow fetches dataStartPath then polls dataPollPath");
+  has(/reasons\.push\(ep\.label/,
+      "each failed endpoint's reason is collected for the all-down hint");
   has(/w\.kind === "rejected"/, "explicit rejection stops the sync walk and shows the reason");
-  has(/\/\* stale \/ unreachable \/ timeout → 降级下一路 \*\//,
+  has(/\/\* stale \/ unreachable \/ timeout → 记录原因，降级下一路 \*\//,
       "unreachable/stale sync endpoints fall through to the next one");
   assert.ok(!/DIRECT_URL/.test(app), "hardwired 127.0.0.1:8765 endpoint must be gone");
   const vn = readFileSync(path.join(root, "verifynet.js"), "utf8");
   assert.ok(/VerifyNet\.dataPath = function \(ep\)/.test(vn), "verifynet exposes dataPath(ep)");
-  assert.ok(/VerifyNet\.apiPath = function \(ep, name\)/.test(vn), "dataPath/verifyPath share apiPath");
+  assert.ok(/VerifyNet\.dataStartPath = function \(ep\)/.test(vn) &&
+            /VerifyNet\.dataPollPath = function \(ep, job\)/.test(vn),
+            "verifynet exposes dataStartPath/dataPollPath");
 });
 test("syncserver /verify only logs in (no collection) and returns ok/error JSON", () => {
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
@@ -524,18 +540,13 @@ test("togglePanel scrolls the opened form into view and focuses its first field"
 });
 
 /* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
-test("data view keeps only the refresh button + course selector + status; 资料库 lives in settings", () => {
+test("data view keeps only the refresh button + course selector + status", () => {
   const dataStart = html.indexOf('id="view-data"');
   const wfStart = html.indexOf('id="view-workflow"');
   assert.ok(dataStart !== -1 && wfStart !== -1 && dataStart < wfStart, "view-data missing");
   const dataView = html.slice(dataStart, wfStart);
-  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut"]) {
+  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut", "capBox", "matBox", "btnMat"]) {
     assert.ok(dataView.includes('id="' + id + '"'), "#" + id + " missing from the data view");
-  }
-  /* 资料库（采集库 + 材料）收进设置页，不在数据页外显 */
-  const settingsView = html.slice(html.indexOf('id="view-settings"'));
-  for (const id of ["capBox", "matBox", "btnMat", "matForm"]) {
-    assert.ok(settingsView.includes('id="' + id + '"'), "#" + id + " missing from the settings view");
   }
   for (const gone of ["btnDirectHealth", "btnSync", "btnCapGen", "ssoIncPw", "syncImportBox",
                       "syncPayload", "btnSyncImport", "btnSyncCancel", "btnCap", "capForm",
