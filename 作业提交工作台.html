@@ -1724,12 +1724,18 @@ function streamChat(chat){
       CloudAI.refreshModels().then(function(){
         if(CloudAI.model) streamChat(chat);
         else cloudChatFail(chat, { error: { code: "model_unavailable" } });
-      }).catch(function(err){ cloudChatFail(chat, err); });
+      }).catch(function(err){ cloudChatFail(chat, err); });   /* 本分支在 cloudFail 声明之前 return，catch 里 cloudFail 还是 undefined → 直接兜底 */
       return;
     }
     var lastSave = 0;
     var cloudSent = false;    /* 本次流是否已吐出增量：吐过字就不自动重试，避免内容重复 */
-    var netRetried = false;   /* 网络层失败自动重试一次（每次发送独立计数） */
+    var rescueMarked = false; /* 重试救回来只记一次本机记忆 */
+    var netRetries = 0;       /* 本次发送已自动重试次数 */
+    /* 重试计划来自 cloudai.js 的本机记忆：这台机器抖过（localStorage 有 flap 记录）
+     * → 打开工作台就直接上抖动档 6 连试；没有记忆 → 常规档 3 连试。
+     * 旧版 cloudai.js 没有 retryPlan() 时兜底为单次重试。 */
+    var plan = (typeof CloudAI.retryPlan === "function") ? CloudAI.retryPlan()
+             : { max: 1, delaysMs: [1200] };
     var doCloudChat = function(){
       cloudSent = false;
       CloudAI.chat({
@@ -1737,6 +1743,10 @@ function streamChat(chat){
         conversationId: "hwdesk-chat-" + _chatId,
         onDelta: function(d){
           cloudSent = true;
+          if(netRetries > 0 && !rescueMarked){
+            rescueMarked = true;
+            if(typeof CloudAI.recordRescue === "function") CloudAI.recordRescue();
+          }
           chat.messages[chat.messages.length - 1].content += d;
           renderChatTail();
           var now = Date.now();
@@ -1746,16 +1756,21 @@ function streamChat(chat){
         onErr: function(err){ cloudFail(err); }
       });
     };
-    /* 网络层失败（gateway_network_error）且还没吐过字：自动重试一次，别让一次
-     * 瞬时抖动直接打断交作业流程。重试前清掉 _hcOk 体检缓存、重新走预检——
-     * 探测还能过就再发一次聊天；探测不过则把真实错误码交给 cloudChatFail。
-     * 流中途失败或重试仍失败：维持原兜底，不重试。 */
+    /* 网络抖动自动重试（阶梯 + 本机记忆，用户全程无感）：
+     * - 瞬时失败（连不上/超时/网关 5xx，见 CloudAI.isTransient）且还没吐过字
+     *   → 自动重试，探测与聊天哪一环抖了都算一次；重试前清掉 _hcOk 重新预检
+     * - 重试次数与间隔按 plan（本机记忆决定档位），不再是一次性的手点「发送」
+     * - 403/404 是链接/配置问题，重试无意义 → 直接兜底
+     * - 流中途失败（已吐字）不重试，避免内容重复 */
     var cloudFail = function(err){
       var code = (err && err.error && err.error.code) || "";
-      if(code === "gateway_network_error" && !cloudSent && !netRetried){
-        netRetried = true;
+      var transient = (typeof CloudAI.isTransient === "function") ? CloudAI.isTransient(code)
+                    : (code === "gateway_network_error");
+      if(transient && typeof CloudAI.recordFlap === "function") CloudAI.recordFlap();
+      if(transient && !cloudSent && netRetries < plan.max){
         CloudAI._hcOk = false;
-        setTimeout(startCloud, 1200);
+        setTimeout(startCloud, plan.delaysMs[Math.min(netRetries, plan.delaysMs.length - 1)]);
+        netRetries += 1;
         return;
       }
       cloudChatFail(chat, err);
@@ -1764,9 +1779,9 @@ function streamChat(chat){
     /* 开聊前先体检网关（#45/#48）：链接不完整/已失效在发送前拦下，别等打完字才报错 */
     if(CloudAI._hcOk){ doCloudChat(); return; }
     CloudAI.healthCheck(8000).then(function(hc){
-      if(hc && hc.ok){ CloudAI._hcOk = true; doCloudChat(); }
-      else cloudChatFail(chat, { error: { code: (hc && hc.code) || "gateway_network_error" } });
-    }).catch(function(){ cloudChatFail(chat, { error: { code: "gateway_network_error" } }); });
+      if(hc && hc.ok){ CloudAI._hcOk = true; doCloudChat(); return; }
+      cloudFail({ error: { code: (hc && hc.code) || "gateway_network_error" } });
+    }).catch(function(){ cloudFail({ error: { code: "gateway_network_error" } }); });
     return;
     };
     startCloud();

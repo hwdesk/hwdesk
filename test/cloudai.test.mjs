@@ -387,6 +387,70 @@ test("diagnose: 无 fetch 环境（旧内核）同步回退提示且不抛异常
   assert.ok(msg && msg.includes("API Key"), "无 fetch 应回退到填 Key 的提示: " + msg);
 });
 
+/* ============ 抖动记忆 + 阶梯重试计划（Clash/系统代理连发抖动） ============ */
+
+test("isTransient: 连不上/超时/网关 5xx 算瞬时；403/404/invalid_response 不算", () => {
+  assert.equal(CloudAI.isTransient("gateway_network_error"), true);
+  assert.equal(CloudAI.isTransient("gateway_timeout"), true);
+  assert.equal(CloudAI.isTransient("gateway_http_502"), true);
+  assert.equal(CloudAI.isTransient("gateway_http_403"), false, "403 是链接问题，重试无意义");
+  assert.equal(CloudAI.isTransient("gateway_http_404"), false, "404 是下线问题，重试无意义");
+  assert.equal(CloudAI.isTransient("gateway_invalid_response"), false);
+  assert.equal(CloudAI.isTransient(""), false);
+  assert.equal(CloudAI.isTransient(undefined), false);
+});
+
+test("无记忆时 retryPlan 走常规档 3 连试", () => {
+  const C = makeCloudAI({ localStorage: mockStorage() });
+  const p = C.retryPlan();
+  assert.equal(p.max, 3);
+  assert.equal(p.delaysMs.length, 3);
+  assert.equal(C.flapMemory(), null, "尚无记忆");
+});
+
+test("recordFlap 记一笔后 retryPlan 自动升到抖动档 6 连试（跨打开生效的记忆）", () => {
+  const store = mockStorage();
+  const C = makeCloudAI({ localStorage: store });
+  C.recordFlap();
+  C.recordFlap();
+  const m = C.flapMemory();
+  assert.equal(m.count, 2, "抖动计数累加");
+  assert.ok(m.lastAt, "记录最近抖动时间");
+  const p = C.retryPlan();
+  assert.equal(p.max, 6, "这台机器抖过 → 直接上抖动档");
+  assert.equal(p.delaysMs.length, 6);
+  /* 新开一个实例（模拟重新打开工作台）：记忆仍在 localStorage 里，计划不变 */
+  const C2 = makeCloudAI({ localStorage: store });
+  assert.equal(C2.retryPlan().max, 6, "下次打开直接按可行方案执行");
+});
+
+test("recordRescue 独立累计救回次数，不影响抖动计数", () => {
+  const C = makeCloudAI({ localStorage: mockStorage() });
+  C.recordFlap();
+  C.recordRescue();
+  C.recordRescue();
+  const m = C.flapMemory();
+  assert.equal(m.count, 1);
+  assert.equal(m.rescued, 2);
+});
+
+test("脏 flap 记忆（坏 JSON / 非 object / count 非数字）安全返回 null，retryPlan 落回常规档", () => {
+  const C = makeCloudAI({ localStorage: mockStorage({ "hwdesk.cloudai.flap": "{not json" }) });
+  assert.equal(C.flapMemory(), null);
+  assert.equal(C.retryPlan().max, 3);
+  const C2 = makeCloudAI({ localStorage: mockStorage({ "hwdesk.cloudai.flap": JSON.stringify({ count: "many" }) }) });
+  assert.equal(C2.flapMemory(), null);
+  const C3 = makeCloudAI({ localStorage: mockStorage({ "hwdesk.cloudai.flap": JSON.stringify({ count: 0 }) }) });
+  assert.equal(C3.retryPlan().max, 3, "count=0 不算抖过");
+});
+
+test("无 localStorage 环境：record/read 不抛异常，retryPlan 仍给常规档", () => {
+  const C = makeCloudAI({});
+  assert.doesNotThrow(() => C.recordFlap());
+  assert.equal(C.flapMemory(), null);
+  assert.equal(C.retryPlan().max, 3);
+});
+
 /* ============ runner（异步感知） ============ */
 (async () => {
   for (const t of tests) {
