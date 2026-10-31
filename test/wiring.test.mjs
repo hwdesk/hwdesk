@@ -523,6 +523,18 @@ test("cloudChatFail refines gateway_network_error with a live diagnosis", () => 
   has(/CloudAI\.diagnose\(function\(msg\)/, "diagnose() replaces the one-size-fits-all copy");
 });
 const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
+test("启动器守卫默认网关直连：本机回环系统代理（Clash 特征）自动切回直连", () => {
+  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
+    const vbs = readFileSync(path.join(root, name), "utf8");
+    assert.ok(/RegRead\("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ProxyEnable"\)/.test(vbs),
+        name + ": reads ProxyEnable");
+    assert.ok(/InStr\(LCase\(proxyAddr & ""\), "127\.0\.0\.1"\) > 0/.test(vbs),
+        name + ": only targets loopback (Clash-style) proxies");
+    assert.ok(/ProxyEnable", 0, "REG_DWORD"/.test(vbs),
+        name + ": switches the system back to direct via the default gateway");
+    assert.ok(!/netsh/.test(vbs) && !/taskkill/.test(vbs), name + ": no process/service killing");
+  }
+});
 test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");
   assert.ok(!/F:\\hwdesk/.test(vbs), "no hardcoded F:\\hwdesk repo path");

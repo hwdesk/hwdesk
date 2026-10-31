@@ -54,6 +54,20 @@ If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Microsoft\Edge\App
 
 sh.CurrentDirectory = repo
 
+' ---- keep this machine on the default gateway: neutralize local system proxy ----
+' Same policy as the local launcher: if the system proxy is ON and points at a
+' loopback port (Clash/mihomo style), switch the system back to direct (default
+' gateway). Non-local / corporate proxies and PAC are left untouched.
+Dim proxyOn, proxyAddr
+On Error Resume Next
+proxyOn = sh.RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable")
+proxyAddr = sh.RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer")
+On Error GoTo 0
+If proxyOn = 1 And VarType(proxyAddr) = vbString _
+   And InStr(LCase(proxyAddr & ""), "127.0.0.1") > 0 Then
+  sh.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 0, "REG_DWORD"
+End If
+
 ' start the local bridge (hidden: pythonw has no window; console python is hidden too)
 If bridgeCmd <> "" And fso.FileExists(bridge) Then
   sh.Run bridgeCmd & " """ & bridge & """", 0, False
