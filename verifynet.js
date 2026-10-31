@@ -1,13 +1,14 @@
-/*! verifynet.js 1.0.0 | hwdesk 账号验证通道选择（纯计算，DOM 无关）
+/*! verifynet.js 1.1.0 | hwdesk 验证/同步通道选择（纯计算，DOM 无关）
  *
- * 登录门禁的验证走「分层端点」：本机桥（syncserver.py 127.0.0.1:8765，凭据不出本机）
- * 优先；本机桥没启动时降级到云端验证服务（verifyserver.py 部署实例，凭据仅随本次
- * 请求验证后即弃）。任何一台用户电脑开箱即能登录，无需先装 Python / 起本机服务。
+ * 登录验证与数据同步都走「分层端点」：本机桥（syncserver.py 127.0.0.1:8765，
+ * 凭据不出本机）优先；本机桥没启动时降级到云端服务（verifyserver.py 部署实例，
+ * 凭据仅随本次请求用完即弃、结果不落盘）。任何一台用户电脑开箱即能登录 + 同步，
+ * 无需先装 Python / 起本机服务。
  */
 (function (global) {
   "use strict";
 
-  var VerifyNet = { version: "1.0.0" };
+  var VerifyNet = { version: "1.1.0" };
 
   /* 默认端点表。云端地址可用 #45 的机覆盖模式随时顶上（发布域名变更时不必发新版）。
    * 云端端点带 sharecode（公开值）：WorkBuddy 发布站点的网关要求完整分享参数，
@@ -114,11 +115,19 @@
     return (localAlive === false ? cloud.concat([local]) : [local].concat(cloud));
   };
 
-  /* 端点的 verify 请求地址：云端发布站点需带 sharecode（公开值），否则网关拦截 */
-  VerifyNet.verifyPath = function (ep) {
+  /* 端点上某 API 的请求地址：云端发布站点需带 sharecode（公开值），否则网关拦截。
+   * verify（登录验证）与 data（一键同步）共用同一套端点表与拼参规则。 */
+  VerifyNet.apiPath = function (ep, name) {
     ep = ep || {};
-    return trimSlash(ep.url) + "/verify" +
+    return (ep.url ? trimSlash(ep.url) : "") + "/" + String(name || "").replace(/^\/+/, "") +
       (ep.sharecode ? "?sharecode=" + encodeURIComponent(ep.sharecode) : "");
+  };
+  VerifyNet.verifyPath = function (ep) {
+    return VerifyNet.apiPath(ep, "verify");
+  };
+  /* 一键同步（POST /data）的请求地址，sharecode 规则与 verifyPath 一致 */
+  VerifyNet.dataPath = function (ep) {
+    return VerifyNet.apiPath(ep, "data");
   };
 
   /* 单次验证结果分类：

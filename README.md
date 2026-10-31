@@ -122,7 +122,7 @@ node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 
 **不登录学在城院账号进不了工作台，且账号密码必须真实有效**：首次打开（或凭据被清除后）整页被登录门禁拦住，输入本人学在城院账号密码（保存方式：仅本次 / 记住到本机）后才进入。验证走**分层端点**（`verifynet.js`）：
 
 1. **本机桥优先**：`POST http://127.0.0.1:8765/verify`（syncserver.py），凭据不出本机，验证通过还会按「记住到本机」自动配置 `wb_local.json`（一键直连零输入）；
-2. **云端兜底**：本机桥没启动时自动改走云端验证服务（`verifyserver.py` 部署实例，凭据仅随本次请求做一次 CAS 登录后即弃，服务无状态、不落盘不写日志）——**任何用户在自己电脑上打开工作台即可直接登录**，无需先装 Python 或起本机服务；
+2. **云端兜底**：本机桥没启动时自动改走云端服务（`verifyserver.py` 部署实例，凭据仅随本次请求用完即弃，服务无状态、不落盘不写日志）——**任何用户在自己电脑上打开工作台即可直接登录**，无需先装 Python 或起本机服务；
 3. 只有「连不上」才逐路降级；平台明确拒绝（密码错误、需验证码）会立即把原因显示在登录卡上，不会拿别的端点重试。
 
 侧边栏常显当前账号（打码）与「退出登录」（退出即清除本机凭据）。凭据经 `sso.js` 只写入**本人浏览器的 localStorage / sessionStorage**——仓库、页面源码、部署产物里永远没有任何账号密码。云端地址可用机覆盖模式随时替换：`localStorage["hwdesk.verify.overrides"] = JSON.stringify({localUrl, cloudUrls})`。
@@ -163,12 +163,13 @@ node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 
 - 端点：`GET /health`、`GET/POST /data`、`POST /ingest`（外部采集结果也可直接投递，AI 代理可用 `curl` 回报）
 - 首次使用：`python syncserver.py` 保持窗口开着 → 回到工作台「数据」页点「🔄 同步」（或登录后等待自动同步）；课程选择器选某一门课时只合并该课程数据
 
-## 云端账号验证服务（verifyserver.py）
+## 云端验证 + 同步服务（verifyserver.py）
 
-登录门禁的验证走**分层端点**（见「学在城院登录门禁」一节）：本机桥优先，云端兜底。`verifyserver.py` 就是那个云端兜底——一个**无状态**的账号验证服务：
+登录门禁的验证与一键同步都走**分层端点**：本机桥优先，云端兜底。`verifyserver.py` 就是那个云端兜底——一个**无状态**的验证 + 同步服务：
 
-- 只有两个端点：`GET /health`、`POST /verify`（复用 syncserver 的 `hzcu_login` 城院 CAS 登录）；**不提供** `/data`、`/ingest` 等数据面端点——数据同步永远只走用户本机
-- 隐私护栏：凭据只在处理本次请求的内存里存活、验证完立即丢弃；永不写日志（`log_message` 静默）、永不落盘（无任何文件操作）；全局滑动窗口限速（120 次/分钟），防被当 CAS 爆破跳板
+- 端点：`GET /health`、`POST /verify`（复用 syncserver 的 `hzcu_login` 城院 CAS 登录）、`POST /data`（登录后**实时**采集课程/待办/作业/课件——复用 `hzcu_collect`，结果随响应返回，不缓存）
+- **不提供** `/ingest` 等有落盘语义的端点；云端 `/data` 与本机桥 `/data` 响应同构（`{ok, cached, payload}`），页面侧无感切换
+- 隐私护栏：凭据只在处理本次请求的内存里存活、响应完立即丢弃；永不写日志（`log_message` 静默）、永不落盘（无任何文件操作）；全局滑动窗口限速（120 次/分钟，`/data` 一次触发几十次上游调用按 5 次计费），防被当 CAS 爆破跳板
 - 部署：纯标准库单端口 HTTP 服务，`PORT=<端口> python verifyserver.py` 即可（平台部署会注入 `PORT` 并要求监听 `0.0.0.0`；本地试跑默认 127.0.0.1:8787）。同目录需要 `syncserver.py`
 - 当前部署实例：`https://hwdesk-verify.app.workbuddy.host`（sharecode 见 `verifynet.js` 的 `CLOUD_URLS`，为公开值）。团队换域名/重部署后无需发新版：任一机器执行 `localStorage.setItem("hwdesk.verify.overrides", JSON.stringify({cloudUrls:[{url:"https://<新域名>", sharecode:"<sharecode>"}]}))` 即可顶上
 - 自检：`python verifyserver.py --self-test`（复用 syncserver 全部自检 + 限速器自检，不出网）

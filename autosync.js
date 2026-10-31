@@ -71,9 +71,9 @@
     return s;
   };
 
-  /* 自动同步发现本机服务未启动时给用户的指引 */
+  /* 自动同步发现本机与云端同步服务都不可达时给用户的指引 */
   AutoSync.offlineHint = function () {
-    return "本机同步服务未启动：在项目目录运行 python syncserver.py 后，到「数据获取」点「⚡ 从学在城院一键获取」即可";
+    return "同步服务（本机 + 云端）均不可达：可在项目目录运行 python syncserver.py 后，到「数据获取」点「⚡ 从学在城院一键获取」重试，或检查网络";
   };
 
   global.AutoSync = AutoSync;

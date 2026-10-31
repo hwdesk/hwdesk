@@ -388,7 +388,7 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     <div class="card" style="padding:14px">
       <label style="font-size:12.5px"><input type="checkbox" id="asEnabled"> 登录后自动同步学在城院数据（30 分钟内不重复拉取）</label>
       <p class="hint" id="asLast" style="margin:8px 0 0">上次自动同步：从未</p>
-      <p class="hint" style="margin:4px 0 0">需要本机同步服务：<b>python syncserver.py</b>（只监听 127.0.0.1:8765）。</p>
+      <p class="hint" style="margin:4px 0 0">默认优先本机同步服务（<b>python syncserver.py</b>，127.0.0.1:8765，凭据不出本机）；本机没有时自动改走云端同步服务（无状态，凭据用完即弃），无需安装 Python。</p>
     </div>
     <div class="section-title"><h2>数据管理</h2></div>
     <div class="card" style="padding:14px">
@@ -1829,51 +1829,93 @@ function renderSyncHint(){
   el("syncHint").textContent = "上次同步：" + (t ? t.replace("T", " ").slice(0, 16) : "从未");
 }
 
-/* ---------- 本机直连获取（syncserver.py，127.0.0.1:8765） ---------- */
-var DIRECT_URL = "http://127.0.0.1:8765";
+/* ---------- 学在城院直连获取（分层端点：本机桥 syncserver.py 优先，云端 verifyserver.py 兜底） ---------- */
 function directOut(){
   var out = el("directOut");
   out.style.display = "";
   return out;
 }
-function directHelp(){
-  return "✗ 连不上本机同步服务（127.0.0.1:8765）。请在本项目目录运行 python syncserver.py 后重试（详见 README「本机直连获取」）。";
+function dataEndpoints(){
+  /* 与登录门禁共用 verifynet.js 的端点表（本机优先，云端兜底，#45 覆盖同样生效） */
+  return (typeof VerifyNet !== "undefined")
+    ? VerifyNet.endpoints(VerifyNet.loadOverrides())
+    : [{ url: "http://127.0.0.1:8765", sharecode: "", kind: "local", label: "本机同步服务" }];
+}
+function directHelp(eps){
+  var hasCloud = (eps || []).some(function(e){ return e.kind === "cloud"; });
+  return "✗ 同步服务全部连不上（本机 + 云端" + (hasCloud ? "" : "未配置") + "）。"
+    + "可在本项目目录运行 python syncserver.py 后重试，或检查网络（详见 README「本机直连获取」）。";
+}
+/* 单路同步：POST <ep>/data，120s 超时（云端采集课程多时较慢）。
+ * 返回 {kind:"ok"|"rejected"|"stale"|"unreachable"|"timeout", res, via}；
+ * 只有「服务连不上/是旧版」才降级下一路，明确报错（密码错误等）立即终止。 */
+function syncOnce(ep, body){
+  return new Promise(function(resolve){
+    var ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = ac ? setTimeout(function(){ ac.abort(); }, 120000) : null;
+    fetch(VerifyNet.dataPath(ep), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },   /* 免 CORS 预检 */
+      body: JSON.stringify(body),
+      signal: ac ? ac.signal : undefined
+    }).then(function(r){
+      return r.json().then(function(res){ return { status: r.status, res: res }; });
+    }).then(function(w){
+      if(timer) clearTimeout(timer);
+      resolve({ kind: VerifyNet.classify(w.status, w.res), res: w.res, via: ep });
+    }).catch(function(e){
+      if(timer) clearTimeout(timer);
+      resolve({ kind: VerifyNet.classifyError(e), res: null, via: ep });
+    });
+  });
 }
 function runDirectSync(opts){
   opts = opts || {};
   var auto = !!opts.auto;
   if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
+  if(typeof VerifyNet === "undefined"){ showToast("verifynet.js 未加载"); return; }
   var out = directOut();
   out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
   var body = {};
   if(typeof SSO !== "undefined" && SSO.has()){
     var st = SSO.get();
-    body.account = st.creds.account;      /* 只发往本机 127.0.0.1，不落盘、不写日志 */
+    body.account = st.creds.account;      /* 只发往本机桥或云端同步服务，本页不落第三处 */
     body.password = st.creds.password;
   }
-  fetch(DIRECT_URL + "/data", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) })
-    .then(function(r){ return r.json(); })
-    .then(function(res){
-      if(!res.ok){
-        out.textContent = "✗ " + (res.error || "获取失败") + (res.hint ? "\n" + res.hint : "");
-        showToast("获取失败：" + (res.error || "").slice(0, 40));
+  var eps = dataEndpoints(), i = 0;
+  function next(){
+    if(i >= eps.length){
+      out.innerHTML = directHelp(eps).replace(/python syncserver\.py/, "<b>python syncserver.py</b>");
+      showToast(auto ? "自动同步跳过：同步服务不可用" : "同步服务不可用");
+      if(auto){
+        addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "同步服务（本机与云端）均不可达"));
+        switchView("data");
+        renderAutoSyncHint();
+      }
+      return;
+    }
+    var ep = eps[i++];
+    out.textContent = "正在" + ep.label + "拉取学在城院数据…";
+    syncOnce(ep, body).then(function(w){
+      var res = w.res;
+      if(w.kind === "ok" && res && res.ok && res.payload){
+        applyPlatformPayload(res.payload, auto, opts.course);
+        return;
+      }
+      if(w.kind === "rejected"){
+        out.textContent = "✗ " + ((res && res.error) || "获取失败") + ((res && res.hint) ? "\n" + res.hint : "");
+        showToast("获取失败：" + ((res && res.error) || "").slice(0, 40));
         if(auto){
-          addLog("自动同步失败：" + (res.error || "").slice(0, 60));
+          addLog("自动同步失败：" + ((res && res.error) || "").slice(0, 60));
           switchView("data");   /* 失败要看得见：切到数据视图展示原因，别让登录后"静默无数据" */
         }
         return;
       }
-      applyPlatformPayload(res.payload, auto, opts.course);
-    })
-    .catch(function(){
-      out.innerHTML = directHelp().replace(/python syncserver.py/, "<b>python syncserver.py</b>");
-      showToast(auto ? "自动同步跳过：本机同步服务未启动" : "本机同步服务未启动");
-      if(auto){
-        addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "python syncserver.py 未启动"));
-        switchView("data");
-        renderAutoSyncHint();
-      }
+      /* stale / unreachable / timeout → 降级下一路 */
+      next();
     });
+  }
+  next();
 }
 function onDirectSync(){
   var course = el("capCourse") ? el("capCourse").value : "全部课程";

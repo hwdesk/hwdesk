@@ -67,6 +67,16 @@ test("verifyPath appends ?sharecode only for endpoints that have one", () => {
     VerifyNet.verifyPath({ url: "https://v.example.com", sharecode: "ABCD1234" }),
     "https://v.example.com/verify?sharecode=ABCD1234");
 });
+test("dataPath mirrors verifyPath sharecode rules for the sync endpoint", () => {
+  assert.equal(VerifyNet.dataPath({ url: "http://127.0.0.1:8765", sharecode: "" }),
+               "http://127.0.0.1:8765/data");
+  assert.equal(
+    VerifyNet.dataPath({ url: "https://v.example.com/", sharecode: "ABCD1234" }),
+    "https://v.example.com/data?sharecode=ABCD1234");
+  /* dataPath 与 verifyPath 共用 apiPath：null/undefined 端点也不炸 */
+  assert.equal(VerifyNet.dataPath(null), "/data");
+  assert.equal(VerifyNet.verifyPath(undefined), "/verify");
+});
 test("cloudUrls accept both plain strings and {url, sharecode} objects", () => {
   const n = VerifyNet.normalizeOverrides(
     { cloudUrls: ["https://a.example.com", { url: "https://b.example.com/", sharecode: "S1X2Y3Z4" }] });
