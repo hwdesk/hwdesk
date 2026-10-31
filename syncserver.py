@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.3.0"  # 2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "2.4.0"  # 2.4.0: PNA 预检头（云端 https 页 fetch 本机桥被 Chrome 掐断的修复）；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -707,15 +707,29 @@ def collect_payload(creds=None, force=True):
 
 
 # ---------------------------------------------------------------- HTTP 服务
+PAGE_FILE = "作业提交工作台.html"
+STATIC_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".woff2": "font/woff2",
+}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "hwdesk-syncserver/" + VERSION
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        # Authorization 必须在白名单里：页面带 Bearer 令牌的请求会触发预检，
-        # 缺了它浏览器直接拒掉整个请求（issue #81）
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # Chrome Private Network Access（PNA）：云端 https 工作台页 fetch 本机桥
+        # 属「公网→本机」请求，Chrome 会发预检并要求响应带这个头，
+        # 缺了直接 Failed to fetch（实测 2026-10-31，同步全断的根因之一）。
+        self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def _json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -729,12 +743,42 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 静默访问日志，避免凭据出现在终端
         pass
 
+    def _serve_static(self, path):
+        """同源托管工作台页面（PNA/LNA 免疫）：云端 https 页 fetch http://127.0.0.1
+        会被 Chrome 的本地网络访问机制拦死（响应头也救不回，需用户授权），
+        唯一稳的做法是让页面本身就由本机桥提供 —— 打开 http://127.0.0.1:8765/
+        即与 API 同源，零跨域。只允许脚本目录下白名单扩展名的单个文件名，
+        绝不提供 wb_*.json（凭据/缓存）、_backup* / _tmp 目录内容。"""
+        name = path.split("?", 1)[0].split("#", 1)[0].strip("/")
+        if name in ("", "app", "app/", "index.html"):
+            name = PAGE_FILE
+        name = name.replace("\\", "/").split("/")[-1]  # 只取文件名，防目录穿越
+        ext = os.path.splitext(name)[1].lower()
+        if (not name or name.startswith("wb_") or ext not in STATIC_MIME
+                or name.startswith("_")):
+            self._json(404, {"ok": False, "error": "not found"})
+            return
+        fp = os.path.join(HERE, name)
+        if not os.path.isfile(fp):
+            self._json(404, {"ok": False, "error": "not found"})
+            return
+        try:
+            with open(fp, "rb") as f:
+                body = f.read()
+        except OSError:
+            self._json(404, {"ok": False, "error": "not found"})
+            return
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", STATIC_MIME[ext])
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")  # 页面常更新，禁缓存避免旧版残留
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
-        # Private Network Access 预检（issue #81）：云端 https 页面 fetch 本机
-        # 127.0.0.1 属公网→私网请求，Chrome 要求预检响应回带此 allow 头，缺了就拦
-        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
     def do_GET(self):
@@ -761,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
             self._json(200, {"ok": True, "cached": cached, "payload": payload})
         else:
-            self._json(404, {"ok": False, "error": "not found"})
+            self._serve_static(self.path)
 
     def _proxy_chat(self, raw):
         """OpenAI 兼容反代（issue #55）：鉴权 → 配额 → 路由 → 直连上游；stream 逐块透传"""
@@ -1089,37 +1133,6 @@ def self_test_proxy():
     print(("ok  - proxy_available_models empty-when-unconfigured, ark passthrough marker, hunyuan" if good
            else "FAIL - proxy_available_models: %r %r %r" % (empty_ok, ark_ok, hy_ok)))
     ok &= good
-
-    # 12) CORS/PNA 预检（issue #81）：浏览器带 Authorization 的请求会先发 OPTIONS 预检，
-    #     响应必须放行 authorization 头并回带 Access-Control-Allow-Private-Network，
-    #     否则云端 https 页面 fetch 本机代理整条链路被浏览器拦死（curl 测不出来）
-    srv = None
-    try:
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        port = srv.server_address[1]
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d/v1/models" % port, method="OPTIONS",
-            headers={"Access-Control-Request-Method": "POST",
-                     "Access-Control-Request-Headers": "content-type, authorization",
-                     "Access-Control-Request-Private-Network": "true",
-                     "Origin": "https://" + urllib.parse.urlparse(CLOUDAI_ENDPOINT).hostname})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            allow_headers = resp.headers.get("Access-Control-Allow-Headers", "")
-            pna = resp.headers.get("Access-Control-Allow-Private-Network", "")
-            acao = resp.headers.get("Access-Control-Allow-Origin", "")
-        good = ("authorization" in allow_headers.lower()) and pna.lower() == "true" and acao == "*"
-        print(("ok  - OPTIONS preflight allows Authorization + Private-Network (cloud page → local proxy)" if good
-               else "FAIL - OPTIONS preflight headers: allow-headers=%r pna=%r acao=%r"
-                    % (allow_headers, pna, acao)))
-        ok &= good
-    except Exception as e:
-        print("FAIL - OPTIONS preflight request: %r" % e)
-        ok = False
-    finally:
-        if srv is not None:
-            srv.shutdown()
-            srv.server_close()
 
     return ok
 
