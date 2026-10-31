@@ -359,6 +359,15 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
     </div>
     <div class="card"><div id="todayBox"></div></div>
 
+    <div class="section-title" id="ignoredTitle" style="display:none">
+      <h2 style="cursor:pointer;user-select:none" id="ignoredToggle">▸ 已忽略作业</h2>
+      <span style="display:flex;gap:8px;align-items:center">
+        <span class="hint">点击标题展开/收起 · 存放逾期过久/无需补交的作业</span>
+        <button class="btn sm danger-ghost" id="btnPurgeIgnored">🗑 一键彻底删除</button>
+      </span>
+    </div>
+    <div class="card" id="ignoredCard" style="display:none"><div id="ignoredBox"></div></div>
+
     <div class="section-title">
       <h2>作业看板</h2>
       <button class="btn sm primary" id="btnAdd">＋ 添加作业</button>
@@ -897,11 +906,19 @@ function fmtDueFull(s){
   if(p.length !== 3) return "";
   return p[0] + "年" + parseInt(p[1],10) + "月" + parseInt(p[2],10) + "日";
 }
+function fmtOverdueSince(s){
+  /* 逾期起始日 = 截止日次日（截止日当天 23:59 前仍可提交） */
+  var p = (s || "").split("-");
+  if(p.length !== 3) return "";
+  var d2 = new Date(+p[0], +p[1]-1, +p[2]);
+  d2.setDate(d2.getDate() + 1);
+  return d2.getFullYear() + "年" + (d2.getMonth()+1) + "月" + d2.getDate() + "日";
+}
 function dueText(it){
   var n = dayDiff(it.due);
   var full = fmtDueFull(it.due);
   if(n === null) return full ? "截止 " + full : "无期限";
-  if(n < 0)  return "逾期 " + (-n) + " 天 · 截止 " + full;
+  if(n < 0)  return "逾期 " + (-n) + " 天（" + fmtOverdueSince(it.due) + "起逾期） · 截止 " + full;
   if(n === 0) return "今天截止 · " + full;
   if(n === 1) return "明天截止 · " + full;
   return "还剩 " + n + " 天 · 截止 " + full;
@@ -975,9 +992,46 @@ function renderToday(){
       + '<div class="t-meta">' + esc(it.course) + ' · ' + dueText(it) + '</div></div>'
       + '<button class="btn sm" data-chat="' + it.id + '">💬 对话</button>'
       + '<button class="btn sm primary" data-ai="' + it.id + '">AI 代提交</button>'
+      + '<button class="btn sm" data-ignore="' + it.id + '">忽略</button>'
       + '</div>';
   });
   box.innerHTML = html;
+}
+/* 总览「已忽略作业」板块：默认折叠不占位，点击标题展开；支持恢复 / 彻底删除 / 一键清空 */
+function renderIgnored(){
+  var box = el("ignoredBox"), list = state.items.filter(function(it){ return !!it.ignored; });
+  var open = localStorage.getItem("hwdesk_ignoredOpen") === "1";
+  el("ignoredTitle").style.display = list.length ? "" : "none";
+  el("ignoredToggle").innerHTML = (open ? "▾" : "▸") + " 已忽略作业（" + list.length + "）";
+  el("ignoredCard").style.display = (list.length && open) ? "" : "none";
+  if(!list.length || !open){ box.innerHTML = ""; return; }
+  var html = "";
+  list.forEach(function(it){
+    html += '<div class="today-item" style="opacity:.6">'
+      + '<span class="badge soon" style="background:#eee;color:#888;border-color:#ddd">已忽略</span>'
+      + '<div class="t-info"><div class="t-name">' + esc(it.name) + '</div>'
+      + '<div class="t-meta">' + esc(it.course) + ' · ' + dueText(it) + '</div></div>'
+      + '<button class="btn sm primary" data-unignore="' + it.id + '">恢复</button>'
+      + '<button class="btn sm danger-ghost" data-del="' + it.id + '">彻底删除</button>'
+      + '</div>';
+  });
+  box.innerHTML = html;
+}
+function onToggleIgnoredOpen(){
+  localStorage.setItem("hwdesk_ignoredOpen", localStorage.getItem("hwdesk_ignoredOpen") === "1" ? "0" : "1");
+  renderIgnored();
+}
+function onPurgeIgnored(){
+  var list = state.items.filter(function(it){ return !!it.ignored; });
+  if(!list.length) return;
+  appConfirm("彻底删除全部 " + list.length + " 条已忽略作业吗？\n此操作不可恢复；删除后若重新同步，平台可能把它们当作新作业加回。", function(ok){
+    if(!ok) return;
+    var names = list.map(function(it){ return it.name; });
+    state.items = state.items.filter(function(it){ return !it.ignored; });
+    addLog("一键彻底删除已忽略作业 " + list.length + " 条：" + names.join("、"));
+    saveState(); refreshAll();
+    showToast("已彻底删除 " + list.length + " 条已忽略作业");
+  });
 }
 function renderFilters(){
   var defs = [["all","全部"],["todo","待完成"],["overdue","逾期"],["submitted","已提交"],["ignored","已忽略"]];
@@ -1274,6 +1328,7 @@ function esc(s){
 /* 统一刷新入口：按固定顺序调用各渲染函数，渲染函数之间零互调 */
 function refreshAll(){
   renderToday();
+  renderIgnored();
   renderLaya();
   renderChatTasks();
   renderAgentGrid();
@@ -1305,6 +1360,16 @@ function showToast(msg){
   t.classList.add("show");
   clearTimeout(showToast._h);
   showToast._h = setTimeout(function(){ t.classList.remove("show"); }, 2200);
+}
+/* 应用内确认弹窗：部分内嵌/沙箱环境（iframe 预览、无 allow-modals）会拦截原生 window.confirm
+   并静默返回 false，导致「点了确认框没反应」。这里统一走自制弹窗；元素缺失时回退原生。 */
+function appConfirm(msg, cb){
+  var m = el("cfmMask");
+  if(!m) return cb(window.confirm(msg));
+  el("cfmMsg").textContent = msg;
+  m.style.display = "flex";
+  el("cfmOk").onclick = function(){ m.style.display = "none"; cb(true); };
+  el("cfmCancel").onclick = function(){ m.style.display = "none"; cb(false); };
 }
 function nowStr(){
   var n = new Date(), pad = function(x){ return (x<10?"0":"") + x; };
@@ -2509,19 +2574,23 @@ function fallbackCopy(s){
 function onDelete(id){
   var it = findItem(id);
   if(!it) return;
-  if(!window.confirm("确定删除「" + it.name + "」吗？")) return;
-  state.items = state.items.filter(function(x){ return x.id !== id; });
-  addLog("删除作业：" + it.name);
-  saveState(); refreshAll();
+  appConfirm("确定删除「" + it.name + "」吗？", function(ok){
+    if(!ok) return;
+    state.items = state.items.filter(function(x){ return x.id !== id; });
+    addLog("删除作业：" + it.name);
+    saveState(); refreshAll();
+  });
 }
 function onIgnore(id){
   var it = findItem(id);
   if(!it) return;
-  if(!window.confirm("忽略「" + it.name + "」吗？\n忽略后将从待办/逾期/统计中隐藏，同步也不会再把它加回来；随时可在「已忽略」筛选中恢复。")) return;
-  it.ignored = true;
-  addLog("忽略作业：" + it.name);
-  saveState(); refreshAll();
-  showToast("已忽略，可在「已忽略」筛选中恢复");
+  appConfirm("忽略「" + it.name + "」吗？\n忽略后将隐藏到总览的「已忽略作业」板块，不再出现在待办/逾期/统计中，同步也不会把它加回来；可随时在该板块恢复。", function(ok){
+    if(!ok) return;
+    it.ignored = true;
+    addLog("忽略作业：" + it.name);
+    saveState(); refreshAll();
+    showToast("已忽略，可在总览「已忽略作业」板块恢复");
+  });
 }
 function onUnignore(id){
   var it = findItem(id);
@@ -2779,7 +2848,16 @@ function bind(){
     if(b) onAiChat(+b.getAttribute("data-ai"), true);
     var c = e.target.closest("[data-chat]");
     if(c) onChatOpen(+c.getAttribute("data-chat"));
+    var g = e.target.closest("[data-ignore]");
+    if(g) onIgnore(+g.getAttribute("data-ignore"));
   });
+  el("ignoredBox").addEventListener("click", function(e){
+    var t;
+    if((t = e.target.closest("[data-unignore]"))) onUnignore(+t.getAttribute("data-unignore"));
+    else if((t = e.target.closest("[data-del]"))) onDelete(+t.getAttribute("data-del"));
+  });
+  el("ignoredToggle").addEventListener("click", onToggleIgnoredOpen);
+  el("btnPurgeIgnored").addEventListener("click", onPurgeIgnored);
   el("hwList").addEventListener("click", function(e){
     var t;
     if((t = e.target.closest("[data-ai]"))) onAiChat(+t.getAttribute("data-ai"), true);
@@ -2942,6 +3020,16 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });
 </script>
+<!-- 应用内确认弹窗：内嵌/沙箱环境拦截原生 confirm 时的统一兜底 -->
+<div id="cfmMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;max-width:420px;width:90%;padding:20px 22px;box-shadow:0 12px 40px rgba(0,0,0,.18)">
+    <div id="cfmMsg" style="white-space:pre-line;font-size:14px;line-height:1.8;color:#1f2430"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="btn" id="cfmCancel">取消</button>
+      <button class="btn primary" id="cfmOk">确定</button>
+    </div>
+  </div>
+</div>
 <script>
 /* ---------- 主题（仿 RoleWeave theme-mode.ts）：显式选择存 localStorage，未选跟随系统 ---------- */
 (function(){
