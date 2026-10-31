@@ -453,6 +453,18 @@ test("cloud send probes the gateway with healthCheck before the first chat", () 
       "failed probe lands in cloudChatFail with the real healthCheck code");
   has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
 });
+test("cloud chat network failure auto-retries once before surfacing the error", () => {
+  has(/var cloudFail = function\(err\)/, "chat-stage errors funnel through cloudFail");
+  has(/code === "gateway_network_error" && !cloudSent && !netRetried/,
+      "one-shot retry only for network errors before any streamed output (no duplicate content)");
+  has(/CloudAI\._hcOk = false/, "the stale health cache is invalidated before retrying");
+  has(/setTimeout\(startCloud, 1200\)/, "the retry goes back through the healthCheck gate");
+});
+test("cloudChatFail refines gateway_network_error with a live diagnosis", () => {
+  has(/if\(typeof CloudAI !== "undefined"\) CloudAI\._hcOk = false/,
+      "final failure also invalidates the cached probe for the next send");
+  has(/CloudAI\.diagnose\(function\(msg\)/, "diagnose() replaces the one-size-fits-all copy");
+});
 const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
 test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");

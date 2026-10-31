@@ -306,6 +306,87 @@ test("applyConfig: sharecode 可合法覆盖、非法值整单拒绝", () => {
   assert.equal(bad.code, "invalid_sharecode");
 });
 
+/* ============ diagnose 网络失败现场诊断（收窄 errText 罗列的 ①②③） ============ */
+
+/* makeCloudAI 的沙箱不带 location；diagnose 依赖 contextHints 读全局 location，
+ * 这里补一个可注入 location 的变体（mocks 仍进 window）。 */
+function makeCloudAIAt(loc, mocks) {
+  const sandbox = {
+    window: {},
+    URL, Promise, setTimeout, clearTimeout, AbortController, console,
+  };
+  if (loc !== undefined) sandbox.location = loc;
+  Object.assign(sandbox.window, mocks || {});
+  vm.runInNewContext(src, sandbox);
+  return sandbox.window.CloudAI;
+}
+function diagnoseMsg(C) {
+  return new Promise((resolve) => C.diagnose((m) => resolve(m)));
+}
+
+test("diagnose: 重探测通过 → 判定瞬时抖动/代理干扰，提示可直接重试、不说站点下线", async () => {
+  const C = makeCloudAIAt(undefined, {
+    fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: "auto" }] }),
+    localStorage: mockStorage(),
+  });
+  const msg = await diagnoseMsg(C);
+  assert.ok(msg.includes("重试"), "应告诉用户可直接重试: " + msg);
+  assert.ok(msg.includes("代理"), "应点出代理干扰的可能性: " + msg);
+  assert.ok(!msg.includes("已下线") && !msg.includes("file://"), "探活通过就不该翻旧账: " + msg);
+});
+
+test("diagnose: file:// 打开 → 指向打开方式，别让用户去查网络", async () => {
+  const C = makeCloudAIAt(
+    { protocol: "file:", search: "", hostname: "" },
+    { fetch: async () => { throw new Error("net down"); }, localStorage: mockStorage() },
+  );
+  const msg = await diagnoseMsg(C);
+  assert.ok(msg.includes("file://"), "应指出 file:// 打开没有云端权限: " + msg);
+  assert.ok(msg.includes("API Key"), "给出兜底出路: " + msg);
+});
+
+test("diagnose: 发布域名但缺 sharecode → 指向完整分享链接", async () => {
+  const C = makeCloudAIAt(
+    { protocol: "https:", search: "", hostname: "hwdesk-workbench-95242.app.workbuddy.host" },
+    { fetch: async () => { throw new Error("net down"); }, localStorage: mockStorage() },
+  );
+  const msg = await diagnoseMsg(C);
+  assert.ok(msg.includes("sharecode"), "应要求带 sharecode 的完整链接: " + msg);
+});
+
+test("diagnose: 重探测也失败 → 承认网关不可达（下线/网络代理拦截）+ 兜底出路", async () => {
+  const C = makeCloudAIAt(undefined, {
+    fetch: async () => { throw new Error("ECONNREFUSED"); },
+    localStorage: mockStorage(),
+  });
+  const msg = await diagnoseMsg(C);
+  assert.ok(msg.includes("连不上"), "应承认网关不可达: " + msg);
+  assert.ok(msg.includes("代理") && msg.includes("API Key"), "可操作结论 + 兜底出路: " + msg);
+});
+
+test("diagnose: 重探测失败时带回真实错误码（gateway_timeout 也要出现在文案里）", async () => {
+  const fetchHangs = (url, opts) => new Promise((resolve, reject) => {
+    opts.signal.addEventListener("abort", () => {
+      const e = new Error("The operation was aborted");
+      e.name = "AbortError";
+      reject(e);
+    });
+  });
+  const C = makeCloudAIAt(undefined, { fetch: fetchHangs, localStorage: mockStorage() });
+  const msg = await diagnoseMsg(C);
+  assert.ok(msg.includes("gateway_timeout"), "保留真实探测错误码便于检索: " + msg);
+});
+
+test("diagnose: 无 fetch 环境（旧内核）同步回退提示且不抛异常", async () => {
+  const sandbox = { window: {}, URL, Promise, setTimeout, clearTimeout, AbortController, console };
+  Object.assign(sandbox.window, { localStorage: mockStorage() });
+  vm.runInNewContext(src, sandbox);
+  const C = sandbox.window.CloudAI;
+  let msg = null;
+  C.diagnose((m) => { msg = m; });
+  assert.ok(msg && msg.includes("API Key"), "无 fetch 应回退到填 Key 的提示: " + msg);
+});
+
 /* ============ runner（异步感知） ============ */
 (async () => {
   for (const t of tests) {
