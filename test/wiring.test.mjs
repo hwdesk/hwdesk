@@ -286,7 +286,7 @@ test("onLogin verifies credentials via the layered /verify before SSO.set", () =
   has(/登录工作台（" \+ \(ep\.kind === "local" \? "本机" : "云端"\) \+ "验证通过）/,
       "audit log marks which path (local/cloud) verified the login");
 });
-test("cloud verify fallback exists: verifyserver.py is a stateless verify-only service", () => {
+test("cloud fallback exists: verifyserver.py is a stateless verify+sync service", () => {
   assert.ok(/<script src="verifynet\.js">/.test(html), "verifynet.js must be referenced");
   /* 断言对象是 verifyserver.py 本身（pyHas 只查 syncserver.py，会漏） */
   const vs = readFileSync(path.join(root, "verifyserver.py"), "utf8");
@@ -297,10 +297,29 @@ test("cloud verify fallback exists: verifyserver.py is a stateless verify-only s
   assert.ok(/_rate_limited\(\)/.test(vs), "verifyserver rate-limits verify attempts");
   assert.ok(/def log_message\(self, fmt, \*args\):\s*(?:#[^\n]*)?\n\s*pass/.test(vs),
             "verifyserver silences access logs");
-  /* 数据面端点：断言没有路由注册（文件注释里提到 /data、/ingest 属正常说明） */
-  assert.ok(!/startswith\("\/data"\)|startswith\("\/ingest"\)/.test(vs),
-            "verifyserver must not route data-plane endpoints");
+  /* 数据面：/data 无状态同步兜底必须有（登录+实时采集，结果随响应返回）；
+   * /ingest（外部投递、落盘语义）仍然不许有 */
+  assert.ok(/self\.path\.startswith\("\/data"\)/.test(vs),
+            "verifyserver routes POST /data (stateless cloud sync fallback)");
+  assert.ok(/hzcu_collect\(s\)/.test(vs),
+            "cloud /data collects via the shared hzcu_collect implementation");
+  assert.ok(!/startswith\("\/ingest"\)/.test(vs),
+            "verifyserver must not route /ingest (ingest has disk-write semantics)");
   assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
+  assert.ok(/VERSION = "1\.1\.0"/.test(vs), "verifyserver bumped to 1.1.0 (cloud sync)");
+});
+test("cloud sync fallback wired: one-click sync walks the same layered endpoints", () => {
+  has(/function dataEndpoints\(\)\{[\s\S]{0,200}VerifyNet\.endpoints\(VerifyNet\.loadOverrides\(\)\)/,
+      "runDirectSync builds the endpoint order from verifynet.js (overrides aware)");
+  has(/fetch\(VerifyNet\.dataPath\(ep\)/,
+      "each endpoint is tried via verifynet.js dataPath (sharecode-aware)");
+  has(/w\.kind === "rejected"/, "explicit rejection stops the sync walk and shows the reason");
+  has(/\/\* stale \/ unreachable \/ timeout → 降级下一路 \*\//,
+      "unreachable/stale sync endpoints fall through to the next one");
+  assert.ok(!/DIRECT_URL/.test(app), "hardwired 127.0.0.1:8765 endpoint must be gone");
+  const vn = readFileSync(path.join(root, "verifynet.js"), "utf8");
+  assert.ok(/VerifyNet\.dataPath = function \(ep\)/.test(vn), "verifynet exposes dataPath(ep)");
+  assert.ok(/VerifyNet\.apiPath = function \(ep, name\)/.test(vn), "dataPath/verifyPath share apiPath");
 });
 test("syncserver /verify only logs in (no collection) and returns ok/error JSON", () => {
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
@@ -452,6 +471,18 @@ test("cloud send probes the gateway with healthCheck before the first chat", () 
   has(/cloudChatFail\(chat, \{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
       "failed probe lands in cloudChatFail with the real healthCheck code");
   has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
+});
+test("cloud chat network failure auto-retries once before surfacing the error", () => {
+  has(/var cloudFail = function\(err\)/, "chat-stage errors funnel through cloudFail");
+  has(/code === "gateway_network_error" && !cloudSent && !netRetried/,
+      "one-shot retry only for network errors before any streamed output (no duplicate content)");
+  has(/CloudAI\._hcOk = false/, "the stale health cache is invalidated before retrying");
+  has(/setTimeout\(startCloud, 1200\)/, "the retry goes back through the healthCheck gate");
+});
+test("cloudChatFail refines gateway_network_error with a live diagnosis", () => {
+  has(/if\(typeof CloudAI !== "undefined"\) CloudAI\._hcOk = false/,
+      "final failure also invalidates the cached probe for the next send");
+  has(/CloudAI\.diagnose\(function\(msg\)/, "diagnose() replaces the one-size-fits-all copy");
 });
 const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
 test("online launcher has no machine-specific hardcoding", () => {
