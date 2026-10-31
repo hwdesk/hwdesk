@@ -15,7 +15,8 @@ repo = fso.GetParentFolderName(WScript.ScriptFullName)
 If repo = "" Then repo = sh.CurrentDirectory
 bridge   = repo & "\syncserver.py"
 url      = "https://hwdesk-workbench-95242.app.workbuddy.host/?sharecode=COAVIMSN3Z"
-chrome   = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+chrome   = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe")
+If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 profile  = repo & "\.chrome-hwdesk-profile"
 
 ' python for the bridge: windowless first (pyw/pythonw -> zero extra windows),
@@ -70,7 +71,7 @@ desk = sh.SpecialFolders("Desktop")
 lnk  = desk & "\hwdesk online.lnk"
 If Not fso.FileExists(lnk) Then
   Set sc = sh.CreateShortcut(lnk)
-  sc.TargetPath = "wscript.exe"
+  sc.TargetPath = sh.ExpandEnvironmentStrings("%SystemRoot%\System32\wscript.exe")
   sc.Arguments = """" & WScript.ScriptFullName & """"
   sc.WorkingDirectory = repo
   sc.IconLocation = chrome & ",0"
