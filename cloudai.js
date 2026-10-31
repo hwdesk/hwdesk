@@ -239,5 +239,57 @@
     });
   };
 
+  /* ---------- 网络抖动记忆 + 阶梯自动重试 ----------
+   * Clash / 系统代理的抖动是连发的：单次重试经常不够，用户还是看到报错。
+   * 这里把「瞬时失败判定 / 重试计划 / 本机记忆」收进纯函数层，页面只管执行：
+   *   isTransient(code) — 哪些失败值得自动重试：连不上 / 超时 / 网关 5xx。
+   *                       403/404 是链接或配置问题，重试无意义，不算瞬时。
+   *   recordFlap()      — 失败当下记一笔：这台机器出现过网络抖动
+   *   recordRescue()    — 自动重试救回来一次也记一笔（证明重试在这台机器有效）
+   *   flapMemory()      — 读取本机记忆（脏数据 / 无 localStorage 安全返回 null）
+   *   retryPlan()       — 没记忆 → 常规档 3 连试；这台机器抖过 → 抖动档 6 连试
+   * 记忆落在 localStorage，跨打开生效：下次打开工作台 retryPlan() 直接读到
+   * 「这台机器会抖」，一上来就按激进档重试 —— 打开即可用，不再让用户看到报错。 */
+  CloudAI.FLAP_KEY = "hwdesk.cloudai.flap";
+  CloudAI.RETRY_PLAN = {
+    base:   { max: 3, delaysMs: [1000, 3000, 6000] },
+    flappy: { max: 6, delaysMs: [1000, 2000, 4000, 8000, 15000, 25000] }
+  };
+  CloudAI.isTransient = function (code) {
+    code = String(code || "");
+    return code === "gateway_network_error" || code === "gateway_timeout" ||
+      /^gateway_http_5/.test(code);
+  };
+  function _flapRead() {
+    try {
+      var o = JSON.parse(global.localStorage.getItem(CloudAI.FLAP_KEY));
+      if (o && typeof o === "object" && typeof o.count === "number") return o;
+    } catch (e) { /* 无 localStorage / 脏数据：安全跳过 */ }
+    return null;
+  }
+  function _flapWrite(m) {
+    try { global.localStorage.setItem(CloudAI.FLAP_KEY, JSON.stringify(m)); }
+    catch (e) { /* 隐私模式写不进去：本次会话内 retryPlan 仍按读取结果走 */ }
+  }
+  CloudAI.flapMemory = _flapRead;
+  CloudAI.recordFlap = function () {
+    var m = _flapRead() || { count: 0, rescued: 0 };
+    m.count += 1;
+    m.lastAt = new Date().toISOString();
+    _flapWrite(m);
+    return m;
+  };
+  CloudAI.recordRescue = function () {
+    var m = _flapRead() || { count: 0, rescued: 0 };
+    m.rescued = (m.rescued || 0) + 1;
+    m.lastAt = new Date().toISOString();
+    _flapWrite(m);
+    return m;
+  };
+  CloudAI.retryPlan = function () {
+    var m = _flapRead();
+    return (m && m.count > 0) ? CloudAI.RETRY_PLAN.flappy : CloudAI.RETRY_PLAN.base;
+  };
+
   global.CloudAI = CloudAI;
 })(typeof window !== "undefined" ? window : this);

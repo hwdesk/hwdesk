@@ -473,16 +473,31 @@ test("cloud send probes the gateway with healthCheck before the first chat", () 
   has(/if\(CloudAI\._hcOk\)\{ doCloudChat\(\); return; \}\s*CloudAI\.healthCheck\(8000\)\.then/,
       "the only chat call is gated behind the healthCheck probe");
   has(/var doCloudChat = function\(\)/, "chat call wrapped in doCloudChat for the probe gate");
-  has(/cloudChatFail\(chat, \{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
-      "failed probe lands in cloudChatFail with the real healthCheck code");
+  has(/cloudFail\(\{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
+      "failed probe lands in cloudFail with the real healthCheck code (transient ones retry)");
   has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
 });
-test("cloud chat network failure auto-retries once before surfacing the error", () => {
+test("cloud chat transient failures auto-retry on an escalating plan with machine memory", () => {
   has(/var cloudFail = function\(err\)/, "chat-stage errors funnel through cloudFail");
-  has(/code === "gateway_network_error" && !cloudSent && !netRetried/,
-      "one-shot retry only for network errors before any streamed output (no duplicate content)");
+  has(/var plan = \(typeof CloudAI\.retryPlan === "function"\) \? CloudAI\.retryPlan\(\)/,
+      "the retry plan comes from cloudai.js (machine-memory aware, old sdk falls back)");
+  has(/transient && !cloudSent && netRetries < plan\.max/,
+      "transient-only retry before any streamed output (no duplicate content), capped by plan");
+  has(/setTimeout\(startCloud, plan\.delaysMs\[/,
+      "each retry goes back through the healthCheck gate after the plan delay");
   has(/CloudAI\._hcOk = false/, "the stale health cache is invalidated before retrying");
-  has(/setTimeout\(startCloud, 1200\)/, "the retry goes back through the healthCheck gate");
+  has(/if\(transient && typeof CloudAI\.recordFlap === "function"\) CloudAI\.recordFlap\(\)/,
+      "every transient failure is remembered on this machine");
+  has(/if\(typeof CloudAI\.recordRescue === "function"\) CloudAI\.recordRescue\(\)/,
+      "a rescued send is remembered too (proof retry works here)");
+});
+test("transient probe failures go through the same retry loop; permanent ones do not", () => {
+  has(/if\(hc && hc\.ok\)\{ CloudAI\._hcOk = true; doCloudChat\(\); return; \}\s*cloudFail\(\{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
+      "probe failure now funnels into cloudFail (transient codes retry, 403/404 don't)");
+  /* 该分支在 cloudFail 声明之前 return，catch 里拿到的 cloudFail 是 undefined（会抛 TypeError
+   * 反而吞掉兜底提示）→ 模型目录拉取失败直接走 cloudChatFail，不进重试环。 */
+  has(/\.catch\(function\(err\)\{ cloudChatFail\(chat, err\); \}\)/,
+      "model-catalog fetch failures fall back directly (cloudFail is not in scope on that branch)");
 });
 test("cloudChatFail refines gateway_network_error with a live diagnosis", () => {
   has(/if\(typeof CloudAI !== "undefined"\) CloudAI\._hcOk = false/,
