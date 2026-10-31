@@ -558,15 +558,19 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
       </div>
     </div>
 
-    <div class="lg-field">
-      <label>保存方式</label>
-      <div class="lg-input-wrap">
-        <select id="lgMode">
-          <option value="session">仅本次（关闭浏览器即忘）</option>
-          <option value="local">记住到本机（下次免登录）</option>
-        </select>
-        <svg class="lg-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
+    <div class="lg-field lg-remember-row">
+      <label class="lg-remember">
+        <input type="checkbox" id="lgRemember" checked>
+        <span class="lg-checkbox" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        <span class="lg-remember-txt">记住密码</span>
+      </label>
+      <!-- 隐藏的 lgMode：由上方勾选框同步（local=记住密码 / session=仅本次），登录逻辑不变 -->
+      <select id="lgMode" style="display:none" aria-hidden="true" tabindex="-1">
+        <option value="session">仅本次（关闭浏览器即忘）</option>
+        <option value="local">记住到本机（下次免登录）</option>
+      </select>
     </div>
 
     <button class="lg-btn" id="btnLogin">登录进入工作台</button>
@@ -623,10 +627,30 @@ footer.ops{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .lg-btn:disabled::after{content:"";display:inline-block;width:20px;height:20px;margin-left:10px;vertical-align:-4px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:lgSpin .7s linear infinite}
   @keyframes lgSheen{0%{background-position:0% 0}100%{background-position:220% 0}}
   @keyframes lgSpin{to{transform:rotate(360deg)}}
+  /* ---- 记住密码勾选框 ---- */
+  .lg-remember-row{animation:lgFadeUp .7s ease .8s both}
+  .lg-remember{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;-webkit-user-select:none;width:fit-content}
+  .lg-remember input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+  .lg-checkbox{width:19px;height:19px;flex:none;border:1.5px solid #c9d2e3;background:#f8faff;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:background .2s,border-color .2s,box-shadow .2s}
+  .lg-checkbox svg{opacity:0;transform:scale(.4);transition:opacity .18s,transform .18s cubic-bezier(.34,1.56,.64,1)}
+  .lg-remember:hover .lg-checkbox{border-color:var(--blue)}
+  .lg-remember input:checked + .lg-checkbox{background:linear-gradient(135deg,#4d7bff,#2b55e0);border-color:#2b55e0;box-shadow:0 3px 10px rgba(59,110,246,.30)}
+  .lg-remember input:checked + .lg-checkbox svg{opacity:1;transform:scale(1)}
+  .lg-remember input:focus-visible + .lg-checkbox{box-shadow:0 0 0 4px rgba(59,110,246,.14)}
+  .lg-remember-txt{font-size:13.5px;color:var(--sub)}
   /* ---- 错误提示 & 脚注 ---- */
   .lg-err{margin-top:12px;padding:9px 12px;border:1px solid #f0c0c0;background:#fdf2f2;border-radius:11px;font-size:12.5px;color:#a33;line-height:1.6;animation:lgFadeUp .4s ease both}
   .lg-foot{margin-top:18px;text-align:center;font-size:12px;color:#a6adc0;animation:lgFadeUp .7s ease .95s both}
 </style>
+<script>
+  /* 记住密码勾选框 → 隐藏的 lgMode（session/local），登录逻辑读取 lgMode 不变 */
+  (function(){
+    var cb = document.getElementById("lgRemember"), sel = document.getElementById("lgMode");
+    if(!cb || !sel) return;
+    function sync(){ sel.value = cb.checked ? "local" : "session"; }
+    cb.addEventListener("change", sync); sync();
+  })();
+</script>
 <div class="toast" id="toast"></div>
 
 <script src="bridge.js"></script>
