@@ -33,14 +33,36 @@ End If
 pagePath = repo & "\" & largest
 url = "file:///" & Replace(Replace(pagePath, "\", "/"), " ", "%20")
 
-' ---- python: py launcher, then any python on PATH ----
-If fso.FileExists(sh.SystemFolder & "\py.exe") Then
-  pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
-ElseIf sh.Run("cmd /c where python >nul 2>nul", 0, True) = 0 Then
-  pyCmd = "python"
-Else
-  pyCmd = ""
+' ---- python for the bridge: windowless first, console as hidden fallback ----
+' pyw.exe / pythonw.exe run the bridge with NO window at all: the workbench
+' window is the only thing the user ever sees. Console python stays as a
+' fallback and is started hidden (style 0), so nothing else pops on screen.
+Dim pyWinCmd, ex, pyLines, firstLine, pywPath, bridgeCmd
+pyCmd = ""
+pyWinCmd = ""
+If fso.FileExists(sh.SystemFolder & "\pyw.exe") Then
+  pyWinCmd = """" & sh.SystemFolder & "\pyw.exe" & """ -3"
 End If
+pyLines = ""
+On Error Resume Next
+Set ex = sh.Exec("cmd /c where python")
+pyLines = ex.StdOut.ReadAll()
+On Error GoTo 0
+If pyLines <> "" Then
+  firstLine = Trim(Split(Replace(pyLines, vbCr, ""), vbLf)(0))
+  If firstLine <> "" Then
+    If pyCmd = "" And fso.FileExists(firstLine) Then pyCmd = """" & firstLine & """"
+    pywPath = Replace(firstLine, "python.exe", "pythonw.exe", 1, -1, vbTextCompare)
+    If pyWinCmd = "" And pywPath <> firstLine And fso.FileExists(pywPath) Then
+      pyWinCmd = """" & pywPath & """"
+    End If
+  End If
+End If
+If pyWinCmd = "" And pyCmd = "" And fso.FileExists(sh.SystemFolder & "\py.exe") Then
+  pyCmd = """" & sh.SystemFolder & "\py.exe" & """ -3"
+End If
+bridgeCmd = pyWinCmd
+If bridgeCmd = "" Then bridgeCmd = pyCmd
 
 ' ---- probe the local bridge; start it if not running ----
 ready = False
@@ -52,9 +74,9 @@ http.send
 ready = (Err.Number = 0 And http.status = 200)
 On Error GoTo 0
 
-If Not ready And pyCmd <> "" And fso.FileExists(bridge) Then
+If Not ready And bridgeCmd <> "" And fso.FileExists(bridge) Then
   sh.CurrentDirectory = repo
-  sh.Run pyCmd & " """ & bridge & """", 7, False   ' minimized window
+  sh.Run bridgeCmd & " """ & bridge & """", 0, False   ' hidden: pythonw has no window; console python is hidden too
 End If
 
 ' ---- wait until /health answers (max ~8s) ----
@@ -93,3 +115,34 @@ If Not fso.FileExists(lnk) Then
   sc.Description = "hwdesk workbench (local mode, auto-starts the AI bridge)"
   sc.Save
 End If
+
+' ---- upgrade legacy desktop shortcuts that open the workbench html directly ----
+' Older setups (make_lnk.py) put Chrome --app="file:///...html" on the desktop:
+' those skip the local bridge, so login gate / data fetch fail and the user has
+' to start files one by one. Repoint any such shortcut to THIS launcher so one
+' double-click boots bridge + page together. Idempotent: our own shortcuts
+' (wscript.exe + a .vbs argument) never match the --app=/.html filter.
+Dim dskFolder, scOld, isLegacy, iconPath
+Set dskFolder = fso.GetFolder(desk)
+For Each f In dskFolder.Files
+  If LCase(fso.GetExtensionName(f.Name)) = "lnk" Then
+    isLegacy = False
+    On Error Resume Next
+    Set scOld = sh.CreateShortcut(dskFolder.Path & "\" & f.Name)
+    If Err.Number = 0 Then
+      isLegacy = (InStr(LCase(scOld.Arguments), "--app=") > 0 _
+        And InStr(LCase(scOld.Arguments), ".html") > 0)
+    End If
+    On Error GoTo 0
+    If isLegacy Then
+      iconPath = repo & "\hwdesk.ico,0"
+      If Not fso.FileExists(repo & "\hwdesk.ico") Then iconPath = chrome & ",0"
+      scOld.TargetPath = "wscript.exe"
+      scOld.Arguments = """" & WScript.ScriptFullName & """"
+      scOld.WorkingDirectory = repo
+      scOld.IconLocation = iconPath
+      scOld.Description = "hwdesk workbench (one click: auto-starts the local bridge + opens the page)"
+      scOld.Save
+    End If
+  End If
+Next
