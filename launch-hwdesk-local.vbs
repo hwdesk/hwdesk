@@ -64,6 +64,23 @@ End If
 bridgeCmd = pyWinCmd
 If bridgeCmd = "" Then bridgeCmd = pyCmd
 
+' ---- keep this machine on the default gateway: neutralize local system proxy ----
+' The workbench stack is already direct (Chrome --proxy-server=direct://,
+' syncserver ProxyHandler({})), but a Clash-style system proxy switched on later
+' still hijacks every other page / app. Policy (user decision 2026-10-31): if the
+' system proxy is ON and points at a loopback port (Clash/mihomo style), switch
+' the system back to direct (default gateway). Non-local / corporate proxies and
+' PAC are left untouched.
+Dim proxyOn, proxyAddr
+On Error Resume Next
+proxyOn = sh.RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable")
+proxyAddr = sh.RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer")
+On Error GoTo 0
+If proxyOn = 1 And VarType(proxyAddr) = vbString _
+   And InStr(LCase(proxyAddr & ""), "127.0.0.1") > 0 Then
+  sh.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable", 0, "REG_DWORD"
+End If
+
 ' ---- probe the local bridge; start it if not running ----
 ready = False
 On Error Resume Next
