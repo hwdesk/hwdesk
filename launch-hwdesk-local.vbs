@@ -92,7 +92,8 @@ For i = 1 To 16
 Next
 
 ' ---- open the local workbench in app mode, direct network ----
-chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+chrome = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe")
+If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
@@ -108,7 +109,7 @@ desk = sh.SpecialFolders("Desktop")
 lnk = desk & "\hwdesk.lnk"
 If Not fso.FileExists(lnk) Then
   Set sc = sh.CreateShortcut(lnk)
-  sc.TargetPath = "wscript.exe"
+  sc.TargetPath = sh.ExpandEnvironmentStrings("%SystemRoot%\System32\wscript.exe")
   sc.Arguments = """" & WScript.ScriptFullName & """"
   sc.WorkingDirectory = repo
   sc.IconLocation = chrome & ",0"
@@ -137,7 +138,7 @@ For Each f In dskFolder.Files
     If isLegacy Then
       iconPath = repo & "\hwdesk.ico,0"
       If Not fso.FileExists(repo & "\hwdesk.ico") Then iconPath = chrome & ",0"
-      scOld.TargetPath = "wscript.exe"
+      scOld.TargetPath = sh.ExpandEnvironmentStrings("%SystemRoot%\System32\wscript.exe")
       scOld.Arguments = """" & WScript.ScriptFullName & """"
       scOld.WorkingDirectory = repo
       scOld.IconLocation = iconPath
