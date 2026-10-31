@@ -284,6 +284,26 @@ async function atest(name, fn) {
     assert.equal(Agent.config.preset, "deepseek");
   });
 
+  await atest("autoSelect: 探测带回宿主模型目录 → 自动对应第一个可用模型（免 Key 不 502）", async () => {
+    freshConfig();
+    Agent.autoSelect({ layer: 1, presetId: "cloudproxy",
+                       models: { data: [{ id: "hunyuan-turbos-latest" }, { id: "deepseek-chat" }] } });
+    assert.equal(Agent.config.preset, "cloudproxy");
+    assert.equal(Agent.config.model, "hunyuan-turbos-latest");
+  });
+
+  await atest("autoSelect: 模型目录为字符串数组也能对应；空目录保持预设默认模型", async () => {
+    freshConfig();
+    Agent.autoSelect({ layer: 1, presetId: "cloudproxy", models: { data: ["qwen-plus"] } });
+    assert.equal(Agent.config.model, "qwen-plus");
+    freshConfig();
+    Agent.autoSelect({ layer: 1, presetId: "cloudproxy" });
+    assert.equal(Agent.config.model, Agent.PRESETS.cloudproxy.model);
+    freshConfig();
+    Agent.autoSelect({ layer: 1, presetId: "cloudproxy", models: { data: [] } });
+    assert.equal(Agent.config.model, Agent.PRESETS.cloudproxy.model);
+  });
+
   globalThis.fetch = realFetch;
   if (realCloudAI === undefined) delete globalThis.CloudAI; else globalThis.CloudAI = realCloudAI;
   console.log(passed + " passed, " + (process.exitCode ? 1 : 0) + " failed");

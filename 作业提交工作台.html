@@ -1914,6 +1914,7 @@ function onLogin(){
         showToast("已登录：" + SSO.mask(acc) +
           (ep.kind === "cloud" ? "（云端验证；一键直连需启动本机同步服务）" : ""));
         autoSyncAfterLogin({ verbose: true });   /* 登录即同步（本机桥不在时给出离线指引） */
+        agentProbeLayers();   /* 登录时检测本地 AI 部署：代理在不在、能用哪些模型，自动对应用户免 Key */
         return;
       }
       if(out.kind === "rejected"){
@@ -2702,15 +2703,20 @@ function cloudSelfCheck(){
         CloudAI.errText({ error: { code: (r && r.code) || "" } }).slice(0, 60);
   }).catch(function(){ if(st) st.textContent = "☁️ 云端通道异常"; });
 }
-/* 分层自动降级（issue #56）：代理 → CloudAI → 本机已存 key；探测到可用层就自动切换 */
+/* 分层自动降级（issue #56）：代理 → CloudAI → 本机已存 key；探测到可用层就自动切换。
+ * 登录成功后也会重跑一次（onLogin），保证「登录时检测本地部署」而不是只看开机那一刻。 */
 function agentProbeLayers(){
   if(typeof Agent === "undefined" || !Agent.probeLayers) return;
   Agent.probeLayers(4000).then(function(r){
+    var st = el("cloudStatus");
     if(r && r.layer === 1){
       var picked = Agent.autoSelect(r);
       if(picked === "cloudproxy" && typeof fillAgentSettings === "function") fillAgentSettings();
-      var st = el("cloudStatus");
-      if(st) st.textContent = "☁️ 云端代理可用（免配置，" + Agent.PRESETS.cloudproxy.label + "）";
+      if(st) st.textContent = "☁️ 本机 AI 代理可用（免 Key，自动对应模型 " + Agent.config.model + "）";
+    }else if(r && r.layer === 2){
+      if(st && !Agent.config.manualLock) st.textContent = "☁️ 云端通道可用（免 Key，发送时自动走云端）";
+    }else if(r && r.layer === 3){
+      if(st) st.textContent = "☁️ 使用已存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
     }
   }).catch(function(){ /* 探测失败静默，走 CloudAI/手动层 */ });
 }
