@@ -128,16 +128,21 @@ test("legacy per-section views are gone from the markup", () => {
     assert.ok(!html.includes(gone), gone + " should be merged away");
   }
 });
-test("AI view hosts the chat, risk-check and agent-config blocks", () => {
+test("AI view hosts chat + risk-check; agent-config blocks live in settings (#73 UI revamp)", () => {
   const chatStart = html.indexOf('id="view-chat"');
   const settingsStart = html.indexOf('id="view-settings"');
   assert.ok(chatStart !== -1 && settingsStart !== -1 && chatStart < settingsStart,
       "view-chat section missing or misordered");
   const chatView = html.slice(chatStart, settingsStart);
-  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi", "rText", "btnRisk", "chatLog"]) {
+  for (const id of ["rText", "btnRisk", "chatLog", "chatTask", "agentGrid"]) {
     assert.ok(chatView.includes('id="' + id + '"'), "#" + id + " not inside the AI view");
   }
-  assert.ok(!html.slice(settingsStart).includes('id="agPreset"'), "agPreset still inside settings view");
+  /* Agent 配置与默认执行 AI 收进设置页，AI 视图不再外显 */
+  const settingsView = html.slice(settingsStart);
+  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi"]) {
+    assert.ok(settingsView.includes('id="' + id + '"'), "#" + id + " not inside the settings view");
+  }
+  assert.ok(!chatView.includes('id="agPreset"'), "agPreset still inside the AI view");
 });
 test("workflow view hosts the approval / delivery / review boxes", () => {
   const wfStart = html.indexOf('id="view-workflow"');
@@ -165,7 +170,7 @@ test("agent picker closes via mask click / Escape / 管理配置 button", () => 
   has(/e\.target === el\("agPick"\)\s*\)\s*closeAgPick\(\)/, "mask click -> closeAgPick()");
   has(/e\.key === "Escape" && el\("agPick"\)\.style\.display !== "none"/, "Escape closes agPick");
   has(/el\("agPickCfg"\)\.addEventListener\(\s*"click"/, "agPickCfg wired");
-  has(/closeAgPick\(\); switchView\("chat"\); fillAgentSettings\(\);/, "管理配置 jumps to the AI view");
+  has(/closeAgPick\(\); switchView\("settings"\); fillAgentSettings\(\);/, "管理配置 jumps to the settings view");
 });
 
 /* ---------- 6. AI 代提交改走工作台内嵌对话（不再开浏览器） ---------- */
@@ -519,13 +524,18 @@ test("togglePanel scrolls the opened form into view and focuses its first field"
 });
 
 /* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
-test("data view keeps only the refresh button + course selector + status", () => {
+test("data view keeps only the refresh button + course selector + status; 资料库 lives in settings", () => {
   const dataStart = html.indexOf('id="view-data"');
   const wfStart = html.indexOf('id="view-workflow"');
   assert.ok(dataStart !== -1 && wfStart !== -1 && dataStart < wfStart, "view-data missing");
   const dataView = html.slice(dataStart, wfStart);
-  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut", "capBox", "matBox", "btnMat"]) {
+  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut"]) {
     assert.ok(dataView.includes('id="' + id + '"'), "#" + id + " missing from the data view");
+  }
+  /* 资料库（采集库 + 材料）收进设置页，不在数据页外显 */
+  const settingsView = html.slice(html.indexOf('id="view-settings"'));
+  for (const id of ["capBox", "matBox", "btnMat", "matForm"]) {
+    assert.ok(settingsView.includes('id="' + id + '"'), "#" + id + " missing from the settings view");
   }
   for (const gone of ["btnDirectHealth", "btnSync", "btnCapGen", "ssoIncPw", "syncImportBox",
                       "syncPayload", "btnSyncImport", "btnSyncCancel", "btnCap", "capForm",
