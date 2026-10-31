@@ -1,4 +1,4 @@
-/*! verifynet.js 1.1.0 | hwdesk 验证/同步通道选择（纯计算，DOM 无关）
+/*! verifynet.js 1.2.0 | hwdesk 验证/同步通道选择（纯计算，DOM 无关）
  *
  * 登录验证与数据同步都走「分层端点」：本机桥（syncserver.py 127.0.0.1:8765，
  * 凭据不出本机）优先；本机桥没启动时降级到云端服务（verifyserver.py 部署实例，
@@ -8,7 +8,7 @@
 (function (global) {
   "use strict";
 
-  var VerifyNet = { version: "1.1.0" };
+  var VerifyNet = { version: "1.2.0" };
 
   /* 默认端点表。云端地址可用 #45 的机覆盖模式随时顶上（发布域名变更时不必发新版）。
    * 云端端点带 sharecode（公开值）：WorkBuddy 发布站点的网关要求完整分享参数，
@@ -128,6 +128,19 @@
   /* 一键同步（POST /data）的请求地址，sharecode 规则与 verifyPath 一致 */
   VerifyNet.dataPath = function (ep) {
     return VerifyNet.apiPath(ep, "data");
+  };
+  /* 异步采集（1.2.0 云端）：start 秒回任务号，poll 轮询结果。
+   * 长请求会被公网网关掐断（表现为「同步服务全部连不上」），云端一律走异步。 */
+  VerifyNet.dataStartPath = function (ep) {
+    return VerifyNet.apiPath(ep, "data/start");
+  };
+  VerifyNet.dataPollPath = function (ep) {
+    return VerifyNet.apiPath(ep, "data/poll");
+  };
+  /* 任务号走 POST body 而不是 URL query：query 会进中间网关的 access log，
+   * TTL 内任何人拿到日志就能凭任务号取走这次采集结果。 */
+  VerifyNet.dataPollBody = function (job) {
+    return { job: job || "" };
   };
 
   /* 单次验证结果分类：
