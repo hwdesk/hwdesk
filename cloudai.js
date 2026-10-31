@@ -1,8 +1,8 @@
-/*! cloudai.js 1.0.0 | hwdesk 云端 LLM 通道（WorkBuddy Cloud 免密钥，点开即聊） */
+/*! cloudai.js 1.1.0 | hwdesk 云端 LLM 通道（WorkBuddy Cloud 免密钥，点开即聊） */
 (function (global) {
   "use strict";
 
-  var CloudAI = { version: "1.0.0" };
+  var CloudAI = { version: "1.1.0" };  /* 1.1.0: diagnose() 网络失败现场诊断 */
 
   /* publicConfig：仅含应用标识与数据面端点（无任何密钥；服务端按 Origin 严格校验，
    * 只有本应用的发布域名能调用） */
@@ -209,6 +209,34 @@
     if (code.indexOf("gateway_") === 0 || code.indexOf("model_") === 0) return "模型服务暂时不可用（" + code + "），请重试一次。";
     if (code.indexOf("request_") === 0) return "请求参数问题（" + code + "），请联系维护者检查版本。";
     return "云端通道请求失败：" + (err && err.message ? String(err.message).slice(0, 120) : JSON.stringify(err).slice(0, 120));
+  };
+
+  /* 网络失败现场诊断：errText 的 gateway_network_error 文案只能罗列 ①②③ 让用户自己猜，
+   * 这里在失败当下用 contextHints（打开方式）+ 一次重新 healthCheck 把原因收窄成一句话：
+   *   探测通过   → 刚才是瞬时网络抖动 / 本机代理干扰，直接重试即可
+   *   file://    → 打开方式不对，云端按 Origin 校验必拒
+   *   缺 sharecode → 链接不完整（平台网关 403 的前兆）
+   *   探测仍失败 → 站点真的不可达（下线 / 网络、代理拦截）
+   * done(msg)：异步回传给 UI 替换兜底文案（无 fetch 环境安全跳过）。 */
+  CloudAI.diagnose = function (done) {
+    if (typeof done !== "function") return;
+    var hints = null;
+    try { hints = CloudAI.contextHints(); } catch (e) { hints = null; }
+    if (typeof global.fetch !== "function") { done("云端通道需要 fetch 支持，当前环境无法使用云端网关，请在设置里填自己的 API Key。"); return; }
+    CloudAI.healthCheck(5000).then(function (hc) {
+      var code = (hc && hc.code) || "gateway_network_error";
+      var msg;
+      if (hc && hc.ok) {
+        msg = "云端网关刚才探测正常：这次失败多半是瞬时网络抖动或本机代理干扰（如 Clash / 系统代理）。点「发送」即可重试；反复出现请关掉代理或换个网络。";
+      } else if (hints && hints.isFile) {
+        msg = "本页是 file:// 本地打开，云端网关按 Origin 校验必拒（" + code + "）。请改用发布后的完整网址打开，或在设置里填自己的 API Key。";
+      } else if (hints && hints.isPublishedHost && !hints.hasSharecode) {
+        msg = "本页虽在发布域名下，但地址缺少 sharecode 分享参数（" + code + "）。请用带 sharecode 的完整分享链接重新打开本页。";
+      } else {
+        msg = "云端网关现在也连不上（" + code + "）：站点可能已下线，或网络 / 代理拦截了该域名。请关掉代理或换个网络后重试；持续失败请联系维护者重新发布，或在设置里填自己的 API Key。";
+      }
+      done(msg);
+    });
   };
 
   global.CloudAI = CloudAI;

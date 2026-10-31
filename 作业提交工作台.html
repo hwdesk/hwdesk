@@ -1380,26 +1380,48 @@ function streamChat(chat){
       return;
     }
     var lastSave = 0;
+    var cloudSent = false;    /* 本次流是否已吐出增量：吐过字就不自动重试，避免内容重复 */
+    var netRetried = false;   /* 网络层失败自动重试一次（每次发送独立计数） */
     var doCloudChat = function(){
+      cloudSent = false;
       CloudAI.chat({
         messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
         conversationId: "hwdesk-chat-" + _chatId,
         onDelta: function(d){
+          cloudSent = true;
           chat.messages[chat.messages.length - 1].content += d;
           renderChatTail();
           var now = Date.now();
           if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
         },
         onDone: function(){ finishChat(); },
-        onErr: function(err){ cloudChatFail(chat, err); }
+        onErr: function(err){ cloudFail(err); }
       });
     };
+    /* 网络层失败（gateway_network_error）且还没吐过字：自动重试一次，别让一次
+     * 瞬时抖动直接打断交作业流程。重试前清掉 _hcOk 体检缓存、重新走预检——
+     * 探测还能过就再发一次聊天；探测不过则把真实错误码交给 cloudChatFail。
+     * 流中途失败或重试仍失败：维持原兜底，不重试。 */
+    var cloudFail = function(err){
+      var code = (err && err.error && err.error.code) || "";
+      if(code === "gateway_network_error" && !cloudSent && !netRetried){
+        netRetried = true;
+        CloudAI._hcOk = false;
+        setTimeout(startCloud, 1200);
+        return;
+      }
+      cloudChatFail(chat, err);
+    };
+    var startCloud = function(){
     /* 开聊前先体检网关（#45/#48）：链接不完整/已失效在发送前拦下，别等打完字才报错 */
     if(CloudAI._hcOk){ doCloudChat(); return; }
     CloudAI.healthCheck(8000).then(function(hc){
       if(hc && hc.ok){ CloudAI._hcOk = true; doCloudChat(); }
       else cloudChatFail(chat, { error: { code: (hc && hc.code) || "gateway_network_error" } });
     }).catch(function(){ cloudChatFail(chat, { error: { code: "gateway_network_error" } }); });
+    return;
+    };
+    startCloud();
     return;
   }
   var cfg = Agent.config;
@@ -1462,10 +1484,18 @@ function cloudChatFail(chat, err){
   if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
   Agent.saveChat(_chatId, chat);
   renderChat(chat);
+  var code = (err && err.error && err.error.code) || "";
   el("chatRisk").style.display = "block";
   el("chatRisk").textContent = (typeof CloudAI !== "undefined" && CloudAI.errText)
     ? CloudAI.errText(err)
     : "云端通道请求失败：" + (err && err.message ? err.message.slice(0, 120) : String(err));
+  if(typeof CloudAI !== "undefined") CloudAI._hcOk = false;   /* 失败后体检缓存作废：下次发送重新预检 */
+  /* 网络层失败别让用户对着一刀切长文案猜：现场重探测 + 打开方式自检，收窄成一句可操作的结论 */
+  if(code === "gateway_network_error" && typeof CloudAI !== "undefined" && typeof CloudAI.diagnose === "function"){
+    CloudAI.diagnose(function(msg){
+      if(_chatId !== null){ el("chatRisk").textContent = msg; }
+    });
+  }
   addLog("云端通道请求失败：" + ((err && err.error && err.error.code) || (err && err.message) || "").slice(0, 80));
 }
 function finishChat(){
