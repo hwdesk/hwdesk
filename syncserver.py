@@ -713,7 +713,9 @@ class Handler(BaseHTTPRequestHandler):
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # Authorization 必须在白名单里：页面带 Bearer 令牌的请求会触发预检，
+        # 缺了它浏览器直接拒掉整个请求（issue #81）
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
     def _json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -730,6 +732,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
+        # Private Network Access 预检（issue #81）：云端 https 页面 fetch 本机
+        # 127.0.0.1 属公网→私网请求，Chrome 要求预检响应回带此 allow 头，缺了就拦
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
     def do_GET(self):
@@ -1084,6 +1089,37 @@ def self_test_proxy():
     print(("ok  - proxy_available_models empty-when-unconfigured, ark passthrough marker, hunyuan" if good
            else "FAIL - proxy_available_models: %r %r %r" % (empty_ok, ark_ok, hy_ok)))
     ok &= good
+
+    # 12) CORS/PNA 预检（issue #81）：浏览器带 Authorization 的请求会先发 OPTIONS 预检，
+    #     响应必须放行 authorization 头并回带 Access-Control-Allow-Private-Network，
+    #     否则云端 https 页面 fetch 本机代理整条链路被浏览器拦死（curl 测不出来）
+    srv = None
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        port = srv.server_address[1]
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/v1/models" % port, method="OPTIONS",
+            headers={"Access-Control-Request-Method": "POST",
+                     "Access-Control-Request-Headers": "content-type, authorization",
+                     "Access-Control-Request-Private-Network": "true",
+                     "Origin": "https://" + urllib.parse.urlparse(CLOUDAI_ENDPOINT).hostname})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            allow_headers = resp.headers.get("Access-Control-Allow-Headers", "")
+            pna = resp.headers.get("Access-Control-Allow-Private-Network", "")
+            acao = resp.headers.get("Access-Control-Allow-Origin", "")
+        good = ("authorization" in allow_headers.lower()) and pna.lower() == "true" and acao == "*"
+        print(("ok  - OPTIONS preflight allows Authorization + Private-Network (cloud page → local proxy)" if good
+               else "FAIL - OPTIONS preflight headers: allow-headers=%r pna=%r acao=%r"
+                    % (allow_headers, pna, acao)))
+        ok &= good
+    except Exception as e:
+        print("FAIL - OPTIONS preflight request: %r" % e)
+        ok = False
+    finally:
+        if srv is not None:
+            srv.shutdown()
+            srv.server_close()
 
     return ok
 

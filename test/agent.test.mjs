@@ -103,12 +103,12 @@ test("legacy single apiKey migrates into keys[preset] on load", () => {
   assert.equal(Agent.config.keys.kimi, "sk-legacy");
   assert.equal(Agent.config.apiKey, "sk-legacy");
 });
-test("usablePresets lists only presets with keys, in PRESET_ORDER", () => {
+test("usablePresets lists keyOptional (cloudproxy) + keyed presets, in PRESET_ORDER (#81)", () => {
   store.clear();
   Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {} };
   Agent.setKey("qwen", "sk-q");
   Agent.setKey("deepseek", "sk-d");
-  assert.deepEqual(Agent.usablePresets(), ["deepseek", "qwen"]);
+  assert.deepEqual(Agent.usablePresets(), ["cloudproxy", "deepseek", "qwen"]);
 });
 test("use() applies a known preset and rejects unknown ones", () => {
   assert.equal(Agent.use("nope"), false);

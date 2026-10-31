@@ -1,8 +1,8 @@
-/*! agent.js 1.1.0 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 1.2.1 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.2.0" };  /* 1.2.0: cloud-proxy 预设 + 分层自动降级（issue #56） */
+  var Agent = { version: "1.2.1" };  /* 1.2.1: keyOptional 免 Key 预设 + ready()/needsKey() 统一口径（issue #81） */
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
@@ -15,7 +15,8 @@
       keyUrl: "",
       hint: "维护者本机 syncserver.py /v1 代理网关：厂商 key 全在服务端环境变量，本机零配置即可用；令牌可选",
       cors: "ok",
-      builtin: true
+      builtin: true,
+      keyOptional: true   /* 本机信任模式（服务端不设 HWDESK_PROXY_TOKENS）下无需任何令牌（issue #81） */
     },
     deepseek: {
       label: "DeepSeek",
@@ -130,10 +131,13 @@
     if (presetId === Agent.config.preset) Agent.config.apiKey = key;
     Agent.save();
   };
-  /* 已配好 Key 的预设（「选择 Agent」列表只把这些标为可用） */
+  /* 已可用的预设（「选择 Agent」列表只把这些标为可用）；
+   * keyOptional 预设（cloudproxy）无需 Key 即算可用（issue #81） */
   Agent.usablePresets = function () {
     Agent.load();
-    return Agent.PRESET_ORDER.filter(function (id) { return !!Agent.config.keys[id]; });
+    return Agent.PRESET_ORDER.filter(function (id) {
+      return !Agent.needsKey(id) || !!Agent.config.keys[id];
+    });
   };
   /* ---------- 分层自动降级（issue #56） ----------
    * 第 1 层 cloudproxy（本机 syncserver /v1，key 在服务端）
@@ -204,9 +208,17 @@
     return Agent.config.preset;
   };
 
+  /* 该预设是否必须配 Key（issue #81：keyOptional 预设在本机信任模式下零 Key 可用） */
+  Agent.needsKey = function (presetId) {
+    var p = Agent.PRESETS[presetId];
+    return !(p && p.keyOptional);
+  };
+
   Agent.ready = function () {
     Agent.load();
-    return !!(Agent.config.baseUrl && Agent.config.model && Agent.config.apiKey);
+    /* keyOptional 预设（cloudproxy）：本机信任模式无需 Key，baseUrl+model 即就绪（issue #81） */
+    return !!(Agent.config.baseUrl && Agent.config.model &&
+      (!Agent.needsKey(Agent.config.preset) || Agent.config.apiKey));
   };
 
   /* ---------- 聊天历史（按作业 ID 分库，独立 LS 键） ---------- */
