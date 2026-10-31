@@ -2235,7 +2235,7 @@ function humanReason(kind, res){
   if(kind === "rejected") return "平台拒绝：" + ((res && res.error) || "").slice(0, 50);
   return "连不上" + ((res && res.error) ? ("（" + String(res.error).slice(0, 50) + "）") : "");
 }
-/* 单路同步：POST <ep>/data，120s 超时（本机桥在局域网，一次请求够用）。
+/* 本机桥：POST <ep>/data 直取（局域网快，120s 超时）。
  * 返回 {kind:"ok"|"rejected"|"stale"|"unreachable"|"timeout", res, via}；
  * 只有「服务连不上/是旧版」才降级下一路，明确报错（密码错误等）立即终止。 */
 function syncOnce(ep, body){
@@ -2258,6 +2258,84 @@ function syncOnce(ep, body){
     });
   });
 }
+/* 云端：异步采集（start 秒回任务号 → poll 轮询），单条请求都很短，
+ * 不会被公网网关的超时掐断。返回与本机路同构的 {kind, res, via}；
+ * onProgress(ms) 用于把已等待时长画到输出区。 */
+function syncViaCloud(ep, body, onProgress){
+  var POLL_MS = 2500, POLL_TIMEOUT = 30000, BUDGET = 8 * 60000;
+  var t0 = Date.now();
+  function step(ms){ if(onProgress) onProgress(Date.now() - t0); }
+  return new Promise(function(resolve){
+    var ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = ac ? setTimeout(function(){ ac.abort(); }, POLL_TIMEOUT) : null;
+    fetch(VerifyNet.dataStartPath(ep), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(body),
+      signal: ac ? ac.signal : undefined
+    }).then(function(r){
+      return r.json().then(function(res){ return { status: r.status, res: res }; });
+    }).then(function(w){
+      if(timer) clearTimeout(timer);
+      var res = w.res;
+      if(w.status >= 200 && w.status < 300 && res && res.ok && res.job){
+        poll(res.job, t0 + BUDGET);
+        return;
+      }
+      if(res && res.error && res.ok === false){
+        resolve({ kind: VerifyNet.classify(w.status, res), res: res, via: ep });
+        return;
+      }
+      resolve({ kind: VerifyNet.classify(w.status, res), res: res, via: ep });
+    }).catch(function(e){
+      if(timer) clearTimeout(timer);
+      resolve({ kind: VerifyNet.classifyError(e), res: null, via: ep });
+    });
+  });
+  function poll(job, deadline){
+    var ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = ac ? setTimeout(function(){ ac.abort(); }, POLL_TIMEOUT) : null;
+    fetch(VerifyNet.dataPollPath(ep), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },   /* 免 CORS 预检 */
+      body: JSON.stringify(VerifyNet.dataPollBody(job)),   /* 任务号走 body，不进网关日志 */
+      signal: ac ? ac.signal : undefined
+    })
+      .then(function(r){
+        return r.json().then(function(res){ return { status: r.status, res: res }; });
+      }).then(function(w){
+        if(timer) clearTimeout(timer);
+        var res = w.res;
+        if(w.status >= 200 && w.status < 300 && res && res.ok && res.status === "done" && res.payload){
+          resolve({ kind: "ok", res: res, via: ep });
+          return;
+        }
+        if(w.status >= 200 && w.status < 300 && res && res.ok && res.status === "running"){
+          if(Date.now() > deadline){
+            resolve({ kind: "timeout", res: null, via: ep });
+            return;
+          }
+          step(Date.now() - 0);
+          setTimeout(function(){ poll(job, deadline); }, POLL_MS);
+          return;
+        }
+        if(w.status >= 200 && w.status < 300 && res && res.ok && res.status === "error"){
+          resolve({ kind: "rejected", res: { ok: false, error: res.error || "采集失败" }, via: ep });
+          return;
+        }
+        /* 任务号不合法/过期/旧版服务 → 降级 */
+        resolve({ kind: (res && res.stale) ? "stale" : VerifyNet.classify(w.status, res), res: res, via: ep });
+      }).catch(function(e){
+        if(timer) clearTimeout(timer);
+        /* 单次轮询网络抖动：只要还在预算内就继续轮，别一票否决 */
+        if(Date.now() <= deadline){
+          setTimeout(function(){ poll(job, deadline); }, POLL_MS);
+          return;
+        }
+        resolve({ kind: VerifyNet.classifyError(e), res: null, via: ep });
+      });
+  }
+}
 function runDirectSync(opts){
   opts = opts || {};
   var auto = !!opts.auto;
@@ -2271,10 +2349,10 @@ function runDirectSync(opts){
     body.account = st.creds.account;      /* 只发往本机桥或云端同步服务，本页不落第三处 */
     body.password = st.creds.password;
   }
-  var eps = dataEndpoints(), i = 0;
+  var eps = dataEndpoints(), i = 0, reasons = [];
   function next(){
     if(i >= eps.length){
-      out.innerHTML = directHelp(eps).replace(/python syncserver\.py/, "<b>python syncserver.py</b>");
+      out.innerHTML = directHelp(eps, reasons).replace(/python syncserver\.py/, "<b>python syncserver.py</b>");
       showToast(auto ? "自动同步跳过：同步服务不可用" : "同步服务不可用");
       if(auto){
         addLog("自动同步未执行：" + (typeof AutoSync !== "undefined" ? AutoSync.offlineHint() : "同步服务（本机与云端）均不可达"));
@@ -2284,8 +2362,11 @@ function runDirectSync(opts){
       return;
     }
     var ep = eps[i++];
+    var useCloudAsync = (ep.kind === "cloud");   /* 云端走 start+poll，防网关掐长请求 */
     out.textContent = "正在" + ep.label + "拉取学在城院数据…";
-    syncOnce(ep, body).then(function(w){
+    (useCloudAsync ? syncViaCloud(ep, body, function(ms){
+      out.textContent = "正在" + ep.label + "拉取学在城院数据…（云端采集进行中，已等待 " + Math.round(ms / 1000) + " 秒）";
+    }) : syncOnce(ep, body)).then(function(w){
       var res = w.res;
       if(w.kind === "ok" && res && res.ok && res.payload){
         applyPlatformPayload(res.payload, auto, opts.course);
@@ -2300,7 +2381,8 @@ function runDirectSync(opts){
         }
         return;
       }
-      /* stale / unreachable / timeout → 降级下一路 */
+      /* stale / unreachable / timeout → 记录原因，降级下一路 */
+      reasons.push(ep.label + "：" + humanReason(w.kind, res));
       next();
     });
   }

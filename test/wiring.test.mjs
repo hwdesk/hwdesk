@@ -328,8 +328,9 @@ test("cloud sync fallback wired: one-click sync walks the same layered endpoints
   has(/syncViaCloud\(ep, body/,
       "cloud endpoint goes through async start+poll (no single long request)");
   has(/fetch\(VerifyNet\.dataStartPath\(ep\)/ &&
-      /VerifyNet\.dataPollPath\(ep, job\)/,
-      "async flow fetches dataStartPath then polls dataPollPath");
+      /VerifyNet\.dataPollPath\(ep\)/ &&
+      /body: JSON\.stringify\(VerifyNet\.dataPollBody\(job\)\)/,
+      "async flow fetches dataStartPath then polls dataPollPath (job in POST body)");
   has(/reasons\.push\(ep\.label/,
       "each failed endpoint's reason is collected for the all-down hint");
   has(/w\.kind === "rejected"/, "explicit rejection stops the sync walk and shows the reason");
@@ -339,8 +340,9 @@ test("cloud sync fallback wired: one-click sync walks the same layered endpoints
   const vn = readFileSync(path.join(root, "verifynet.js"), "utf8");
   assert.ok(/VerifyNet\.dataPath = function \(ep\)/.test(vn), "verifynet exposes dataPath(ep)");
   assert.ok(/VerifyNet\.dataStartPath = function \(ep\)/.test(vn) &&
-            /VerifyNet\.dataPollPath = function \(ep, job\)/.test(vn),
-            "verifynet exposes dataStartPath/dataPollPath");
+            /VerifyNet\.dataPollPath = function \(ep\)/.test(vn) &&
+            /VerifyNet\.dataPollBody = function \(job\)/.test(vn),
+            "verifynet exposes dataStartPath/dataPollPath/dataPollBody");
 });
 test("syncserver /verify only logs in (no collection) and returns ok/error JSON", () => {
   pyHas(/hzcu_login\(str\(creds\["account"\]\),\s*str\(creds\["password"\]\)\)/,
@@ -540,13 +542,18 @@ test("togglePanel scrolls the opened form into view and focuses its first field"
 });
 
 /* ---------- 10. issue #50：数据页收敛为「刷新键 + 课程选择器」 ---------- */
-test("data view keeps only the refresh button + course selector + status", () => {
+test("data view keeps only the refresh button + course selector + status; 资料库 lives in settings", () => {
   const dataStart = html.indexOf('id="view-data"');
   const wfStart = html.indexOf('id="view-workflow"');
   assert.ok(dataStart !== -1 && wfStart !== -1 && dataStart < wfStart, "view-data missing");
   const dataView = html.slice(dataStart, wfStart);
-  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut", "capBox", "matBox", "btnMat"]) {
+  for (const id of ["btnDirectSync", "capCourse", "syncHint", "directOut"]) {
     assert.ok(dataView.includes('id="' + id + '"'), "#" + id + " missing from the data view");
+  }
+  /* 资料库（采集库 + 材料）收进设置页，不在数据页外显（#86 后布局） */
+  const settingsView = html.slice(html.indexOf('id="view-settings"'));
+  for (const id of ["capBox", "matBox", "btnMat", "matForm"]) {
+    assert.ok(settingsView.includes('id="' + id + '"'), "#" + id + " missing from the settings view");
   }
   for (const gone of ["btnDirectHealth", "btnSync", "btnCapGen", "ssoIncPw", "syncImportBox",
                       "syncPayload", "btnSyncImport", "btnSyncCancel", "btnCap", "capForm",
