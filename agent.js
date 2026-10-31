@@ -180,11 +180,27 @@
     return { layer: 0, presetId: null, detail: "none" };
   };
 
-  /* 按探测结果自动切换；用户显式选过（manualLock）则不抢 */
+  /* 按探测结果自动切换；用户显式选过（manualLock）则不抢。
+   * 自动对应 AI 工具：探测带回宿主机实际可用的模型目录（/v1/models 只列
+   * 已配好 key 的 provider）时，自动选中第一个可用模型 —— 否则预设默认模型
+   * （deepseek-chat）在宿主没配对应 key 时会 502「provider not configured」。 */
   Agent.autoSelect = function (result) {
     if (!result || !result.presetId || !Agent.PRESETS[result.presetId]) return null;
     if (Agent.config.manualLock) return null;
     Agent.applyPreset(result.presetId);
+    var list = result.models && result.models.data;
+    if (Array.isArray(list) && list.length) {
+      var pick = null;
+      for (var i = 0; i < list.length && !pick; i++) {
+        var m = list[i];
+        if (typeof m === "string" && m) pick = m;
+        else if (m && typeof m.id === "string" && m.id) pick = m.id;
+      }
+      if (pick && pick !== Agent.config.model) {
+        Agent.config.model = pick;
+        Agent.save();
+      }
+    }
     return Agent.config.preset;
   };
 
