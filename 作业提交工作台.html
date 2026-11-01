@@ -856,7 +856,7 @@ var state = { items: [], logs: [], materials: [], filter: "all", view: "overview
 /* 总览统计方块 → 分类筛选器定义（key 与 stats() 的统计口径一一对应） */
 var OV_DEFS = {
   overdue: { label: "逾期未交",   empty: "没有逾期未交的作业，保持得不错 ✓" },
-  week:    { label: "7 天内·不含逾期", empty: "7 天内没有要处理的作业（不含逾期，逾期作业请点「逾期未交」方块查看），安心自习 ✓" },
+  week:    { label: "7 天内·不含逾期", empty: "7 天内没有要处理的作业，安心自习 ✓" },
   review:  { label: "需我自查",   empty: "没有需要人工自查的作业，AI 产出可直接交付 ✓" },
   done:    { label: "已提交",     empty: "还没有已提交的作业" }
 };
@@ -1083,7 +1083,15 @@ function renderToday(){
   /* 标题跟随当前分类；非默认分类时提示可点同一方块返回 */
   el("todayTitle").innerHTML = '今天要处理 <span class="hint" style="font-weight:400">· 当前：' + OV_DEFS[f].label
     + (f !== "week" ? "（再点该方块返回默认）" : "（默认）") + '</span>';
-  if(!list.length){ box.innerHTML = '<div class="empty">' + OV_DEFS[f].empty + '</div>'; return; }
+  if(!list.length){
+    var emptyMsg = OV_DEFS[f].empty;
+    if(f === "week"){                                   // 空态动态提示：有逾期时提示去「逾期未交」处理，避免「安心自习」与逾期数字同屏自相矛盾（#104 review ①）
+      var od = stats().overdue;
+      if(od > 0) emptyMsg = "7 天内没有要处理的作业，但有 " + od + " 条已逾期，点「逾期未交」方块处理";
+    }
+    box.innerHTML = '<div class="empty">' + emptyMsg + '</div>';
+    return;
+  }
   var html = "";
   list.forEach(function(it){
     var n = dayDiff(it.due);
