@@ -71,7 +71,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # 学在城院（浙大城市学院，Tronclass 体系；不是超星学习通）
 URL_LMS = "https://courses.hzcu.edu.cn"            # 课程端（数据都在这）
 URL_IDENTITY = "https://identity.hzcu.edu.cn"      # Keycloak（CAS 协议中间层）
-URL_CAS = "https://ca.hzcu.edu.cn"                 # 学校统一身份认证账密表单
+URL_CAS = "http://ca.hzcu.edu.cn"                  # 学校统一身份认证账密表单（当前公开链路为 HTTP）
 
 # ca.hzcu.edu.cn 账密登录的 AES 参数（逆向自登录页内联脚本 submitForm('0')：
 # CryptoJS.AES.encrypt(psw, "c6dda3852e2d4be2", {mode: ECB, padding: Pkcs7}).toString()）
@@ -233,6 +233,14 @@ def parse_cas_login(html_text):
     return {"action": action, "execution": e.group(1), "lt": lt.group(1) if lt else ""}
 
 
+def cas_origin(page_url):
+    """从实际 CAS 表单页派生 Origin，避免把协议或端口写死。"""
+    parsed = urllib.parse.urlsplit(page_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise SyncError("统一身份认证页面地址异常，无法确定请求来源")
+    return "%s://%s" % (parsed.scheme, parsed.netloc)
+
+
 def parse_cas_error(html_text):
     """尽力从 CAS 登录失败页提取错误文案并译成中文（拿不到就返回空）"""
     m = _ERR_RE.search(html_text)
@@ -316,19 +324,23 @@ def hzcu_login(account, password):
         "_eventId": "submit",
         "validTime": "5",
     }).encode()
-    post_url = urllib.parse.urljoin(getattr(resp, "url", URL_CAS + "/cas/login"), form_info["action"])
+    cas_page_url = getattr(resp, "url", URL_CAS + "/cas/login")
+    post_url = urllib.parse.urljoin(cas_page_url, form_info["action"])
     resp2, body2 = s.open(post_url, data=form, headers={
         "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": getattr(resp, "url", URL_CAS),
-        "Origin": URL_CAS,
+        "Referer": cas_page_url,
+        "Origin": cas_origin(cas_page_url),
     })
     status2, text2 = _resp_text(resp2, body2)
 
     # 3) 成功：最终应回到课程端并返回 JSON；失败：仍是 CAS 登录页
     if is_cas_login_page(text2, getattr(resp2, "url", "")):
         err = parse_cas_error(text2)
-        raise SyncError("统一身份认证登录失败：%s（检查账号密码；多次失败后平台可能要求验证码，"
-                        "请到 course.hzcu.edu.cn 网页端正常登录一次后再试）" % (err or "账号或密码错误"))
+        if err:
+            raise SyncError("统一身份认证登录失败：%s（请检查账号密码；若多次失败或平台要求验证，"
+                            "请先到 course.hzcu.edu.cn 网页端正常登录一次后再试）" % err)
+        raise SyncError("统一身份认证未完成：认证端仍返回登录页（可能是认证请求被拒绝或平台协议已变更；"
+                        "请先到 course.hzcu.edu.cn 网页端正常登录一次后再试）")
     try:
         json.loads(text2)
         return s
@@ -1362,7 +1374,14 @@ def self_test():
            else "FAIL - parse_cas_login: %r" % info))
     ok &= good
 
-    # 5) 待办映射：UTC → 北京时间 +8，类型映射
+    # 5) Origin 必须跟随实际表单页协议，不能固定为 HTTPS。
+    good = cas_origin("http://ca.hzcu.edu.cn/cas//login?service=x") == "http://ca.hzcu.edu.cn" and \
+        cas_origin("https://ca.hzcu.edu.cn:8443/cas/login") == "https://ca.hzcu.edu.cn:8443"
+    print(("ok  - cas_origin follows the actual CAS page URL" if good
+           else "FAIL - cas_origin"))
+    ok &= good
+
+    # 6) 待办映射：UTC → 北京时间 +8，类型映射
     row = todo_to_assignment({"course_name": "电力电子技术", "title": "实验1报告",
                            "type": "homework", "end_time": "2026-11-01T15:59:59.000Z"})
     good = row["course"] == "电力电子技术" and row["title"] == "实验1报告" and \
