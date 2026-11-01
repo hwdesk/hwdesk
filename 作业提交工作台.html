@@ -90,8 +90,11 @@ textarea{resize:vertical;min-height:64px}
 .chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* 统计 */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
-.stat{padding:16px 14px;text-align:center;transition:transform .15s}
+.stat{padding:16px 14px;text-align:center;transition:transform .15s;cursor:pointer}
 .stat:hover{transform:translateY(-1px)}
+.stat:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.stat.on{border-color:var(--blue);box-shadow:0 0 0 2px rgba(59,110,246,.14),0 10px 26px rgba(59,110,246,.14)}
+.stat.on .lab{color:var(--blue);font-weight:600}
 .stat .num{font-size:26px;font-weight:700;line-height:1.2}
 .stat .lab{font-size:12px;color:var(--sub);margin-top:2px}
 .num.red{color:var(--red)} .num.green{color:var(--green)} .num.blue{color:var(--blue)}
@@ -347,15 +350,16 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
   <main class="main">
   <!-- ========== 1) 总览 ========== -->
   <section class="view on" id="view-overview">
-    <div class="stats">
-      <div class="card stat"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
-      <div class="card stat"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内截止</div></div>
-      <div class="card stat"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
-      <div class="card stat"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
+    <!-- 统计方块 = 总览分类筛选器：点击切换「今天要处理」列表展示的作业类别，再点一次回到默认「7 天内截止（含逾期）」 -->
+    <div class="stats" id="statCards">
+      <div class="card stat" data-ov="overdue" role="button" tabindex="0" aria-pressed="false"><div class="num red" id="stOverdue">0</div><div class="lab">逾期未交</div></div>
+      <div class="card stat" data-ov="week" role="button" tabindex="0" aria-pressed="true"><div class="num blue" id="stWeek">0</div><div class="lab">7 天内·含逾期</div></div>
+      <div class="card stat" data-ov="review" role="button" tabindex="0" aria-pressed="false"><div class="num" style="color:var(--orange)" id="stReview">0</div><div class="lab">需我自查</div></div>
+      <div class="card stat" data-ov="done" role="button" tabindex="0" aria-pressed="false"><div class="num green" id="stDone">0</div><div class="lab">已提交</div></div>
     </div>
 
     <div class="section-title">
-      <h2>今天要处理</h2>
+      <h2 id="todayTitle">今天要处理</h2>
     </div>
     <div class="card"><div id="todayBox"></div></div>
 
@@ -848,7 +852,14 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
 /* ---------- 数据层 ---------- */
 var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
 var LS_OWNER = "wb_hwdesk_owner";   /* #92：本机最后登录的学在城院账号（数据空间归属记账） */
-var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null, pendingAgent: null } };
+var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", ovFilter: "week", chat: { taskId: null, agentId: null, pendingAgent: null } };
+/* 总览统计方块 → 分类筛选器定义（key 与 stats() 的统计口径一一对应） */
+var OV_DEFS = {
+  overdue: { label: "逾期未交",   empty: "没有逾期未交的作业，保持得不错 ✓" },
+  week:    { label: "7 天内·含逾期", empty: "7 天内没有要处理的作业（含逾期），安心自习 ✓" },
+  review:  { label: "需我自查",   empty: "没有需要人工自查的作业，AI 产出可直接交付 ✓" },
+  done:    { label: "已提交",     empty: "还没有已提交的作业" }
+};
 
 /* ---------- 账号数据空间（issue #92：多账号数据串号） ----------
  * 核心原则：每个学在城院账号只读写自己的数据。所有用户数据键在登录后
@@ -994,20 +1005,37 @@ function dueText(it){
 }
 
 /* ---------- 计算层（纯函数，不碰 DOM） ---------- */
-function todayItems(){
+/* 总览分类过滤：按统计方块的口径筛选作业（口径与 stats() 完全一致，保证数字对得上）。
+ * 默认 ovFilter = "week"（7 天内截止，含逾期）：未点击任何方块时总览就展示这一类。 */
+function overviewItems(){
+  var f = OV_DEFS[state.ovFilter] ? state.ovFilter : "week";
   var out = [];
   state.items.forEach(function(it){
-    if(it.ignored) return;                              // 已忽略：不进「今天要处理」
-    if(it.status === "todo" || it.status === "review"){
-      var n = dayDiff(it.due);
-      if(n !== null && n <= 3) out.push(it);           // 逾期、今天、3天内
+    if(it.ignored) return;                              // 已忽略：不进任何分类
+    if(f === "done"){                                   // 已提交：只看 submitted
+      if(it.status === "submitted") out.push(it);
+      return;
+    }
+    if(it.status !== "todo" && it.status !== "review") return;
+    var n = dayDiff(it.due);
+    if(f === "overdue"){                                // 逾期未交：截止日已过且未提交
+      if(n !== null && n < 0) out.push(it);
+    }else if(f === "week"){                             // 7 天内截止（含逾期）：默认分类，逾期优先级最高不能藏
+      if(n !== null && n <= 7) out.push(it);
+    }else if(f === "review"){                           // 需我自查：Laya 判定需要人工复核
+      if(typeof Laya !== "undefined" && Laya.analyze(it).review.needed) out.push(it);
     }
   });
-  if(typeof Laya !== "undefined"){
-    /* Laya 决策：紧急度 + 复杂度 + 时间压力综合排序（替代纯日期排序） */
+  if(f === "review" && typeof Laya !== "undefined"){
     out.sort(function(a,b){ return Laya.analyze(b).priority - Laya.analyze(a).priority; });
   }else{
-    out.sort(function(a,b){ return dayDiff(a.due) - dayDiff(b.due); });
+    out.sort(function(a,b){
+      var da = dayDiff(a.due), db = dayDiff(b.due);
+      if(da === null && db === null) return 0;
+      if(da === null) return 1;
+      if(db === null) return -1;
+      return da - db;
+    });
   }
   return out;
 }
@@ -1033,7 +1061,7 @@ function stats(){
     if(it.status === "submitted"){ s.done++; return; }
     var n = dayDiff(it.due);
     if(n !== null && n < 0) s.overdue++;
-    if(n !== null && n >= 0 && n <= 7) s.week++;
+    if(n !== null && n <= 7) s.week++;
     if(typeof Laya !== "undefined" && Laya.analyze(it).review.needed) s.review++;
   });
   return s;
@@ -1048,13 +1076,31 @@ var ICO = {
 };
 function el(id){ return document.getElementById(id); }
 function renderToday(){
-  var box = el("todayBox"), list = todayItems();
-  if(!list.length){ box.innerHTML = '<div class="empty">最近 3 天没有要处理的作业，安心自习 ✓</div>'; return; }
+  var box = el("todayBox");
+  var f = OV_DEFS[state.ovFilter] ? state.ovFilter : "week";
+  var list = overviewItems();
+  /* 标题跟随当前分类；非默认分类时提示可点同一方块返回 */
+  el("todayTitle").innerHTML = '今天要处理 <span class="hint" style="font-weight:400">· 当前：' + OV_DEFS[f].label
+    + (f !== "week" ? "（再点该方块返回默认）" : "（默认）") + '</span>';
+  if(!list.length){ box.innerHTML = '<div class="empty">' + OV_DEFS[f].empty + '</div>'; return; }
   var html = "";
   list.forEach(function(it){
     var n = dayDiff(it.due);
+    if(f === "done"){
+      /* 已提交分类：展示已提交标识，提供撤回入口（与作业看板一致） */
+      html += '<div class="today-item">'
+        + '<span class="badge soon" style="background:#e8f7ee;color:#1a9e5c;border-color:#bfe8cf">已提交</span>'
+        + '<div class="t-info"><div class="t-name">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
+        + '<div class="t-meta">' + esc(it.course) + ' · ' + dueText(it) + '</div></div>'
+        + '<button class="btn sm" data-undo="' + it.id + '">撤回为待办</button>'
+        + '</div>';
+      return;
+    }
     var cls = n < 0 ? "overdue" : (n === 0 ? "today" : "soon");
     var lab = n < 0 ? "逾期" : (n === 0 ? "今天" : "临期");
+    if(f === "review" && typeof Laya !== "undefined" && Laya.analyze(it).review.needed){
+      lab = '需自查'; cls = "today";
+    }
     html += '<div class="today-item">'
       + '<span class="badge ' + cls + '">' + lab + '</span>'
       + '<div class="t-info"><div class="t-name">' + esc(it.name) + (it.ai ? ' ' + ICO.spark : '') + '</div>'
@@ -1089,6 +1135,12 @@ function renderIgnored(){
 function onToggleIgnoredOpen(){
   localStorage.setItem("hwdesk_ignoredOpen", localStorage.getItem("hwdesk_ignoredOpen") === "1" ? "0" : "1");
   renderIgnored();
+}
+/* 总览分类切换：点击统计方块筛选对应类别；再点当前方块回到默认「7 天内截止（含逾期）」 */
+function toggleOverviewFilter(f){
+  if(!OV_DEFS[f]) return;
+  state.ovFilter = (state.ovFilter === f) ? "week" : f;
+  refreshAll();
 }
 function onPurgeIgnored(){
   var list = state.items.filter(function(it){ return !!it.ignored; });
@@ -1148,6 +1200,13 @@ function renderStats(){
   el("stWeek").textContent = s.week;
   el("stReview").textContent = s.review;
   el("stDone").textContent = s.done;
+  /* 方块选中态与 state.ovFilter 同步：当前分类高亮 */
+  var cards = document.querySelectorAll("#statCards .stat");
+  for(var i = 0; i < cards.length; i++){
+    var on = cards[i].getAttribute("data-ov") === state.ovFilter;
+    cards[i].classList.toggle("on", on);
+    cards[i].setAttribute("aria-pressed", on ? "true" : "false");
+  }
 }
 /* Laya 决策中心：待办 → 优先级排序 + AI 路由 + 自查标记 */
 function renderLaya(){
@@ -3205,6 +3264,21 @@ function bind(){
     if(b) onChatDeliver(+b.getAttribute("data-deliver"));
   });
 
+  /* 总览统计方块 = 分类筛选器：点击切换「今天要处理」展示的作业类别；
+   * 再点当前选中的方块回到默认「7 天内截止（含逾期）」；支持键盘 Enter / 空格 */
+  function onStatCardKey(e){
+    if(e.key !== "Enter" && e.key !== " ") return;
+    var c = e.target.closest("[data-ov]");
+    if(!c) return;
+    e.preventDefault();
+    toggleOverviewFilter(c.getAttribute("data-ov"));
+  }
+  el("statCards").addEventListener("click", function(e){
+    var c = e.target.closest("[data-ov]");
+    if(c) toggleOverviewFilter(c.getAttribute("data-ov"));
+  });
+  el("statCards").addEventListener("keydown", onStatCardKey);
+
   el("todayBox").addEventListener("click", function(e){
     var b = e.target.closest("[data-ai]");
     if(b) onAiChat(+b.getAttribute("data-ai"), true);
@@ -3212,6 +3286,8 @@ function bind(){
     if(c) onChatOpen(+c.getAttribute("data-chat"));
     var g = e.target.closest("[data-ignore]");
     if(g) onIgnore(+g.getAttribute("data-ignore"));
+    var u = e.target.closest("[data-undo]");
+    if(u) onToggleDone(+u.getAttribute("data-undo"), false);
   });
   el("ignoredBox").addEventListener("click", function(e){
     var t;
