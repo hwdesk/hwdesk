@@ -1,54 +1,26 @@
-/*! bridge.js 1.0.0 | hwdesk AI 直连桥 */
+/*! bridge.js 1.1.0 | hwdesk AI 直连桥（唯一 Agent：Qoder CLI）
+ * 1.1.0：注册表收敛 —— 外部 AI 网页（豆包/元宝/DeepSeek/Kimi/通义/WorkBuddy）
+ * 全部下线，只剩本机 Qoder CLI 一个条目（url 为空 → 复制指令兜底流程）。 */
 (function (global) {
   "use strict";
 
-  var Bridge = { version: "1.0.0" };
+  var Bridge = { version: "1.1.0" };
 
   /* ---------- 直连 AI 注册表 ----------
    * 每个条目 = 一个可从工作台直达的 AI。
-   * url 为空（workbuddy）时退回旧的「复制指令」流程。
-   * categories：该 AI 擅长承接的 Laya 路由类别（reasoner/writer/fastsolver/coder/polisher/formatter），
-   * 用于按 Laya 决策结果自动挑选直连目标。 */
+   * url 为空（qoder）时退回旧的「复制指令」流程；
+   * 带任务上下文的派发一律走工作台内嵌对话（agent.js /agent/qoder 通道）。
+   * categories：承接 laya.js 全部路由类别（reasoner/writer/fastsolver/coder/polisher/formatter）。 */
   Bridge.AI = {
-    doubao: {
-      label: "豆包",
-      url: "https://www.doubao.com/chat/",
-      categories: ["reasoner", "writer", "fastsolver", "polisher"],
-      desc: "综合对话 / 写作 / 快速作答"
-    },
-    yuanbao: {
-      label: "腾讯元宝",
-      url: "https://yuanbao.tencent.com/",
-      categories: ["writer", "polisher", "formatter", "fastsolver"],
-      desc: "写作、文档处理与润色"
-    },
-    deepseek: {
-      label: "DeepSeek",
-      url: "https://chat.deepseek.com/",
-      categories: ["reasoner", "coder", "writer"],
-      desc: "深度推理与代码"
-    },
-    kimi: {
-      label: "Kimi",
-      url: "https://kimi.moonshot.cn/",
-      categories: ["writer", "reasoner", "formatter"],
-      desc: "长文档阅读与写作"
-    },
-    qwen: {
-      label: "通义千问",
-      url: "https://www.tongyi.com/",
-      categories: ["coder", "reasoner", "formatter"],
-      desc: "代码 / 仿真 / 格式处理"
-    },
-    workbuddy: {
-      label: "WorkBuddy（本地代理）",
+    qoder: {
+      label: "Qoder CLI（本机）",
       url: "",
       categories: ["reasoner", "writer", "fastsolver", "coder", "polisher", "formatter"],
-      desc: "复制指令回本地代理执行（可代登录学在城院提交）"
+      desc: "本机唯一执行 Agent：工作台内嵌对话，自动开工"
     }
   };
 
-  Bridge.ORDER = ["doubao", "yuanbao", "deepseek", "kimi", "qwen", "workbuddy"];
+  Bridge.ORDER = ["qoder"];
 
   /* ---------- 偏好：默认 AI + 按路由类别的指定 ---------- */
   var LS_KEY = "wb_hwdesk_bridge";
@@ -126,9 +98,9 @@
   /* ---------- 派发描述（DOM 无关，纯计算，便于单测） ----------
    * 返回 { ai, label, url, action }：
    *   action = "open+copy" → 复制指令并打开 url
-   *          = "copy"      → 仅复制（workbuddy 旧流程） */
+   *          = "copy"      → 仅复制（qoder 本机流程） */
   Bridge.describe = function (pickResult) {
-    var knownId = pickResult && Bridge.AI[pickResult.ai] ? pickResult.ai : "workbuddy";
+    var knownId = pickResult && Bridge.AI[pickResult.ai] ? pickResult.ai : "qoder";
     var ai = Bridge.AI[knownId];
     return {
       ai: knownId,
@@ -143,7 +115,7 @@
     if (plan.action === "open+copy") {
       return "指令已复制并打开" + plan.label + "，在对话框 Ctrl+V 发送即可";
     }
-    return "指令已复制，回 WorkBuddy 粘贴发送即可";
+    return "指令已复制，粘到「AI 对话」发送即可";
   };
 
   global.Bridge = Bridge;

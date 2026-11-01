@@ -1,5 +1,5 @@
 /*!
- * agents.js — hwdesk 多 AI Agent Hub（对话 + 一键交付）
+ * agents.js — hwdesk Agent Hub（唯一 Agent：Qoder CLI，对话 + 一键交付）
  * ------------------------------------------------------------
  * 框架参照 bytefolk/roleweave 的三层结构，降维为本地零依赖实现：
  *
@@ -10,10 +10,10 @@
  *   roleweave apps/desktop/renderer/src/turns/*
  *     → AgentHub.composePrompt / addTurn / chat   会话 turns
  *
- * hwdesk 是 file:// 单文件应用，页面不起服务、不存凭据：
- * 「对话」= 页面组装完整提示词 → 复制到所选 AI 自己的窗口发送 →
- * 把回复粘贴回对话记录；「一键交付」= 生成 WorkBuddy 交付指令 +
- * 写入交付库（needsReview 的任务先进审批队列）。
+ * 2.0.0：工作台 AI 全部收敛 —— 注册表只剩 Qoder CLI 一个条目（本机唯一
+ * 执行 Agent，经 agent.js /agent/qoder 通道在对话抽屉里完成作业）。
+ * 「对话」= 页面组装完整提示词 → 复制（或直接在对话抽屉里由 Qoder 执行）；
+ * 「一键交付」= 生成交付指令 + 写入交付库（needsReview 的任务先进审批队列）。
  *
  * 依赖约定：与 laya.js / humanize.js / db.js 互不依赖；
  * 页面通过 opts 注入钩子：
@@ -26,76 +26,29 @@
   "use strict";
 
   var AgentHub = {};
-  AgentHub.VERSION = "1.1.0";
+  AgentHub.VERSION = "1.2.0";
 
   /* ---------- Agent 注册表（roleweave AgentHostDescriptor 的本地版） ----------
-   * archetypes: 覆盖 laya.js Laya.AI_REGISTRY 里的哪些原型
+   * 只有 Qoder CLI 一个条目：所有 Laya 原型都由它承接（推荐逻辑保持兼容，
+   * 只是恒推荐同一个 Agent）。
+   * archetypes: 覆盖 laya.js Laya.AI_REGISTRY 里的全部原型
    * strengths : 关键词证据（推荐时命中加分）
    * style     : 提示词风格指令（composePrompt 会附加）
    */
   AgentHub.REGISTRY = {
-    workbuddy: {
-      label: "WorkBuddy", emoji: "🧩",
-      archetypes: ["polisher", "formatter"],
-      strengths: ["交付", "提交", "上传", "平台", "学在城院", "整理", "执行"],
-      desc: "全流程执行代理：能登录学在城院完成上传与作答，交付动作只能由它执行",
-      style: "作为我的执行代理，请完整执行任务并把结果与回执一起回报。"
-    },
     qoder: {
-      label: "Qoder", emoji: "⌨️",
-      archetypes: ["coder"],
-      strengths: ["代码", "编程", "仿真", "PLC", "单片机", "调试", "嵌入式", "C语言", "Keil"],
-      desc: "编程与嵌入式/PLC 实验、仿真、调试",
-      style: "请给出可直接运行的代码/工程，关键步骤加注释，并说明验证方法。"
-    },
-    claude: {
-      label: "Claude", emoji: "🎼",
-      archetypes: ["reasoner", "writer"],
-      strengths: ["推导", "证明", "论证", "分析", "建模", "论文"],
-      desc: "深度推理、推导证明、长链分析",
-      style: "请一步一步推导，先给出思路框架再展开细节，最后核对一遍关键步骤。"
-    },
-    qwen: {
-      label: "千问", emoji: "❓",
-      archetypes: ["writer", "formatter"],
-      strengths: ["报告", "PPT", "演示", "排版", "总结", "汇报"],
-      desc: "写作、报告、PPT 文案与排版",
-      style: "请按学生作业口径写作，结构清晰但不要过度分点，标题口语化。"
-    },
-    deepseek: {
-      label: "DeepSeek", emoji: "🐋",
-      archetypes: ["reasoner"],
-      strengths: ["推导", "计算", "证明", "数学", "物理", "力学", "电路", "分析"],
-      desc: "数理推导、计算与分析",
-      style: "请严格按步骤推导，单位与符号规范，最后代入一组数据验证。"
-    },
-    kimi: {
-      label: "Kimi", emoji: "🌙",
-      archetypes: ["writer", "reasoner"],
-      strengths: ["文献", "长文", "阅读", "综述", "报告", "论文", "Word"],
-      desc: "长文档阅读、综述与长文写作",
-      style: "请先概述你从参考材料里抓到的要点，再据此写作，引用处注明出处。"
-    },
-    doubao: {
-      label: "豆包", emoji: "🫘",
-      archetypes: ["fastsolver"],
-      strengths: ["选择", "填空", "判断", "简答", "线上作答", "练习", "快"],
-      desc: "客观题、短作答，速度优先",
-      style: "请直接给出答案，每题附一句依据，不要展开长分析。"
-    },
-    jimeng: {
-      label: "即梦", emoji: "🎨",
-      archetypes: ["formatter"],
-      strengths: ["图", "插图", "封面", "配图", "海报", "PPT", "可视化"],
-      desc: "图像生成：PPT 配图、封面、示意图",
-      style: "请为以下内容生成配图：风格贴近学生课件，避免过度精美暴露 AI 生成痕迹。"
+      label: "Qoder CLI", emoji: "🛠️",
+      archetypes: ["reasoner", "writer", "fastsolver", "coder", "polisher", "formatter"],
+      strengths: ["代码", "编程", "仿真", "PLC", "单片机", "调试", "嵌入式", "C语言", "Keil",
+        "报告", "推导", "计算", "论文", "文档", "提交", "整理"],
+      desc: "本机唯一执行 Agent：编程 / 推理 / 写作 / 作答全包",
+      style: "作为我的执行 Agent，请直接给出可交付的成稿（代码给可运行版本，文字给成稿），关键步骤加说明。"
     }
   };
 
-  /* 交付格式 → 偏好 Agent（choice 的先验证据） */
+  /* 交付格式 → 偏好 Agent（choice 的先验证据；唯一 Agent 恒为 qoder） */
   AgentHub.FORMAT_HINTS = [
-    [/PPT|演示/, ["jimeng", "qwen"]],
-    [/Word|文档|报告/, ["kimi", "qwen"]]
+    [/./, ["qoder"]]
   ];
 
   function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }

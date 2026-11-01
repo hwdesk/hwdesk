@@ -1,283 +1,80 @@
-/*! agent.js 1.3.2 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 2.0.0 | hwdesk 作业内嵌 Agent 对话（唯一 Agent：本机 Qoder CLI）
+ * 2.0.0：工作台 AI 全部收敛为 Qoder CLI —— 删除 API 预设 / 分层降级 / 云端
+ * 免密钥通道 / 本机凭据发现采用；对话改为本机桥 /agent/qoder（syncserver
+ * 调 Qoder CLI -p，提示词走 stdin，不出本机）。零配置：无 Key、无 baseUrl、
+ * 无模型选择。 */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.3.2" };  /* 1.3.2: buildMessages 请求体预算裁剪（云端网关拒绝超大 POST → gateway_network_error）；1.3.1: 启动自动采用本机检测（autoAdoptLocal，所有对话统一）；1.3.0: 本地检测采用（matchPreset/applyDiscovered） */
+  var Agent = { version: "2.0.0" };  /* 2.0.0: 收敛为唯一 Agent Qoder CLI（删预设/分层/发现采用），移植 1.3.2 的 buildMessages 请求体预算裁剪 */
 
-  /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
-   * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
-   * 豆包走火山方舟兼容模式，model 需填自己的推理接入点或模型 ID。 */
-  Agent.PRESETS = {
-    cloudproxy: {
-      label: "云端代理（免配置）",
-      baseUrl: "http://127.0.0.1:8765/v1",
-      model: "deepseek-chat",
-      keyUrl: "",
-      hint: "维护者本机 syncserver.py /v1 代理网关：厂商 key 全在服务端环境变量，本机零配置即可用；令牌可选",
-      cors: "ok",
-      builtin: true,
-      keyOptional: true   /* 本机信任模式（服务端不设 HWDESK_PROXY_TOKENS）下无需任何令牌（issue #81） */
-    },
-    deepseek: {
-      label: "DeepSeek",
-      baseUrl: "https://api.deepseek.com/v1",
-      model: "deepseek-chat",
-      keyUrl: "https://platform.deepseek.com/api_keys",
-      hint: "性价比高，推理 / 写作均衡",
-      cors: "ok"
-    },
-    kimi: {
-      label: "Kimi（月之暗面）",
-      baseUrl: "https://api.moonshot.cn/v1",
-      model: "moonshot-v1-8k",
-      keyUrl: "https://platform.moonshot.cn/console/api-keys",
-      hint: "长上下文，适合带课件摘要的任务",
-      cors: "ok"
-    },
-    qwen: {
-      label: "通义千问",
-      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      model: "qwen-plus",
-      keyUrl: "https://bailian.console.aliyun.com/?apiKey=1",
-      hint: "代码 / 仿真类任务表现好",
-      cors: "ok"
-    },
-    hunyuan: {
-      label: "腾讯混元",
-      baseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
-      model: "hunyuan-turbos-latest",
-      keyUrl: "https://console.cloud.tencent.com/hunyuan/api-key",
-      hint: "腾讯混元（OpenAI 兼容端点）；浏览器直连一般被拦，建议走本机代理",
-      cors: "proxy"
-    },
-    doubao: {
-      label: "豆包（火山方舟）",
-      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-      model: "",
-      keyUrl: "https://console.volcengine.com/ark",
-      hint: "model 需填你在方舟创建的推理接入点 ID；方舟一般不允许浏览器直连，建议走本地代理",
-      cors: "proxy"
-    },
-    custom: {
-      label: "自定义（OpenAI 兼容）",
-      baseUrl: "",
-      model: "",
-      keyUrl: "",
-      hint: "任何兼容 /chat/completions 的服务（含本地网关）",
-      cors: "custom"
-    }
-  };
-  Agent.PRESET_ORDER = ["cloudproxy", "deepseek", "kimi", "qwen", "hunyuan", "doubao", "custom"];
-
-  /* ---------- 配置存取 ----------
-   * keys = 按预设分存的 API Key（换 Agent 不丢 Key）；兼容旧的单 apiKey 字段。 */
-  /* ---------- 浏览器直连（CORS）标注 ----------
-   * ok     = 该服务放行了跨域请求，浏览器可直连
-   * proxy  = 官方未放行跨域，建议填本地代理地址（如 http://127.0.0.1:8787/v1）
-   * custom = 取决于自建网关，由使用者自行判断 */
-  Agent.CORS_LABEL = {
-    ok: "可浏览器直连",
-    proxy: "建议本地代理",
-    custom: "取决于网关"
-  };
-  Agent.corsLabel = function (presetId) {
-    var p = Agent.PRESETS[presetId];
-    return Agent.CORS_LABEL[(p && p.cors) || "custom"] || Agent.CORS_LABEL.custom;
-  };
-
-  /* ---------- 配置存取 ---------- */
-  var LS_CFG = "wb_hwdesk_agent";
-  Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "", model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false };
-
-  Agent.load = function () {
+  /* ---------- 本机桥定位 ----------
+   * 页面被本机桥同源托管（syncserver GET /，见 PR #91）时直接用同源；
+   * file:// 或其他来源回退 http://127.0.0.1:8765。 */
+  Agent.bridgeRoot = function () {
     try {
-      var raw = global.localStorage ? global.localStorage.getItem(LS_CFG) : null;
-      var c = raw ? JSON.parse(raw) : null;
-      if (c && typeof c === "object") {
-        for (var k in Agent.config) if (k in c) Agent.config[k] = c[k];
+      if (global.location && global.location.origin
+          && /^https?:\/\/(127\.0\.0\.1|localhost):8765$/.test(global.location.origin)) {
+        return global.location.origin;
       }
-    } catch (e) { /* 损坏即回默认 */ }
-    if (!Agent.config.keys || typeof Agent.config.keys !== "object") Agent.config.keys = {};
-    /* 迁移：旧版只存单 apiKey → 归入当前预设名下 */
-    if (Agent.config.apiKey && !Agent.config.keys[Agent.config.preset]) {
-      Agent.config.keys[Agent.config.preset] = Agent.config.apiKey;
-    }
-    return Agent.config;
-  };
-  Agent.save = function () {
-    try {
-      if (global.localStorage) global.localStorage.setItem(LS_CFG, JSON.stringify(Agent.config));
-    } catch (e) { /* 隐私模式等，静默 */ }
-  };
-  Agent.applyPreset = function (presetId) {
-    var p = Agent.PRESETS[presetId];
-    if (!p) return;
-    Agent.load();
-    Agent.config.preset = presetId;
-    Agent.config.baseUrl = p.baseUrl;
-    Agent.config.model = p.model;
-    Agent.config.apiKey = Agent.config.keys[presetId] || "";
-    Agent.save();
-  };
-  /* 一键切换到某个 Agent（含 Key 同步）；页面「选择 Agent」后调用 */
-  Agent.use = function (presetId) {
-    if (!Agent.PRESETS[presetId]) return false;
-    Agent.applyPreset(presetId);
-    return true;
-  };
-  Agent.setKey = function (presetId, key) {
-    Agent.load();
-    Agent.config.keys[presetId] = key;
-    if (presetId === Agent.config.preset) Agent.config.apiKey = key;
-    Agent.save();
-  };
-  /* 已可用的预设（「选择 Agent」列表只把这些标为可用）；
-   * keyOptional 预设（cloudproxy）无需 Key 即算可用（issue #81） */
-  Agent.usablePresets = function () {
-    Agent.load();
-    return Agent.PRESET_ORDER.filter(function (id) {
-      return !Agent.needsKey(id) || !!Agent.config.keys[id];
-    });
-  };
-  /* ---------- 分层自动降级（issue #56） ----------
-   * 第 1 层 cloudproxy（本机 syncserver /v1，key 在服务端）
-   * 第 2 层 CloudAI（发布站点免密钥通道）
-   * 第 3 层 本机已存 key 的手动预设
-   * 全灭 → { layer: 0 }，维持现状提示配 Key。 */
-  Agent.currentProxyBase = function () {
-    if (Agent.config.preset === "cloudproxy" && Agent.config.baseUrl) {
-      return String(Agent.config.baseUrl).replace(/\/+$/, "");
-    }
-    return Agent.PRESETS.cloudproxy.baseUrl;
+    } catch (e) { /* file:// 下 origin 可能抛错，走默认 */ }
+    return "http://127.0.0.1:8765";
   };
 
-  Agent.probeLayers = async function (timeoutMs) {
-    var ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 4000;
+  /* ---------- 就绪语义 ----------
+   * Qoder 通道零配置：配置层面永远就绪；真实可用性在发送/检测时确认
+   * （桥没开 / CLI 没装会在发送时报人话错误，不把用户赶去填 Key）。 */
+  Agent.ready = function () { return true; };
+
+  /* ---------- Qoder CLI 状态检测（GET /agent/qoder/status） ---------- */
+  Agent.qoderStatus = async function (timeoutMs) {
+    var ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 6000;
     var g = typeof global !== "undefined" ? global : globalThis;
-    /* 第 1 层：本机代理网关 */
-    if (typeof g.fetch === "function") {
-      try {
-        var ctl = new g.AbortController();
-        var timer = setTimeout(function () { ctl.abort(); }, ms);
-        var headers = {};
-        var tok = Agent.config.keys && Agent.config.keys.cloudproxy;
-        if (tok) headers["Authorization"] = "Bearer " + tok;
-        var res = await g.fetch(Agent.currentProxyBase() + "/models", { signal: ctl.signal, headers: headers });
-        clearTimeout(timer);
-        var models = null;
-        if (res.ok) { try { models = await res.json(); } catch (e) { models = null; } }
-        /* 代理可达但一台 key 都没配（models 目录为空）→ 有库无药，继续向下层降级（issue #70） */
-        var hasModels = !!(models && models.data && models.data.length);
-        if (res.ok && hasModels) return { layer: 1, presetId: "cloudproxy", models: models, detail: "cloud-proxy reachable" };
-      } catch (e) { /* 代理未开，落到下一层 */ }
+    if (typeof g.fetch !== "function") return { ok: false, error: "环境无 fetch" };
+    try {
+      var ctl = g.AbortController ? new g.AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms) : null;
+      var res = await g.fetch(Agent.bridgeRoot() + "/agent/qoder/status", ctl ? { signal: ctl.signal } : undefined);
+      if (timer) clearTimeout(timer);
+      var j = null;
+      try { j = await res.json(); } catch (e) { j = null; }
+      if (res.status === 403) return { ok: false, error: "本机 Agent 只对本机页面开放（当前页面来源不被信任）" };
+      if (j && typeof j === "object") return j;
+      return { ok: false, error: "本机桥响应异常（HTTP " + res.status + "）" };
+    } catch (e) {
+      return { ok: false, error: "本机桥连不上（127.0.0.1:8765）——请先运行 python syncserver.py" };
     }
-    /* 第 2 层：发布站点免密钥通道 */
-    if (g.CloudAI && typeof g.CloudAI.healthCheck === "function") {
-      try {
-        var hc = await g.CloudAI.healthCheck(ms);
-        if (hc && hc.ok) return { layer: 2, presetId: null, models: hc.models, detail: "cloudai" };
-      } catch (e) { /* 网关不可达 */ }
-    }
-    /* 第 3 层：本机已配 key 的手动预设（不含 cloudproxy / custom 空壳） */
-    var usable = Agent.usablePresets().filter(function (id) { return id !== "cloudproxy"; });
-    if (usable.length) return { layer: 3, presetId: usable[0], detail: usable.join(",") };
-    return { layer: 0, presetId: null, detail: "none" };
   };
 
-  /* 按探测结果自动切换；用户显式选过（manualLock）则不抢。
-   * 自动对应 AI 工具：探测带回宿主机实际可用的模型目录（/v1/models 只列
-   * 已配好 key 的 provider）时，自动选中第一个可用模型 —— 否则预设默认模型
-   * （deepseek-chat）在宿主没配对应 key 时会 502「provider not configured」。 */
-  Agent.autoSelect = function (result) {
-    if (!result || !result.presetId || !Agent.PRESETS[result.presetId]) return null;
-    if (Agent.config.manualLock) return null;
-    Agent.applyPreset(result.presetId);
-    var list = result.models && result.models.data;
-    if (Array.isArray(list) && list.length) {
-      var pick = null;
-      for (var i = 0; i < list.length && !pick; i++) {
-        var m = list[i];
-        if (typeof m === "string" && m) pick = m;
-        else if (m && typeof m.id === "string" && m.id) pick = m.id;
-      }
-      if (pick && pick !== Agent.config.model) {
-        Agent.config.model = pick;
-        Agent.save();
-      }
+  /* ---------- 问答（POST /agent/qoder）----------
+   * messages = Agent.buildMessages 的产物；CLI 一轮一出（无流式），耗时
+   * 数十秒属正常。成功 resolve {output, model}，失败 reject {code, message}。 */
+  Agent.askQoder = async function (messages, opts) {
+    opts = opts || {};
+    var g = typeof global !== "undefined" ? global : globalThis;
+    if (typeof g.fetch !== "function") {
+      throw { code: "no_fetch", message: "当前环境不支持 fetch" };
     }
-    return Agent.config.preset;
-  };
-
-  /* 该预设是否必须配 Key（issue #81：keyOptional 预设在本机信任模式下零 Key 可用） */
-  Agent.needsKey = function (presetId) {
-    var p = Agent.PRESETS[presetId];
-    return !(p && p.keyOptional);
-  };
-
-  /* ---------- 本地检测采用（配 syncserver /agents/discover） ----------
-   * 本机桥扫描机器上已装 AI CLI（codex/claude 等）与环境变量里的现成凭据，
-   * 页面一键采用 —— 不用再手工申请/粘贴 Key。凭据只在本机文件 ↔ 本机桥 ↔
-   * 本机页面之间流转，不经过任何第三方。 */
-  Agent.matchPreset = function (baseUrl) {
-    var u = String(baseUrl || "").replace(/\/+$/, "");
-    if (!u) return "custom";
-    for (var i = 0; i < Agent.PRESET_ORDER.length; i++) {
-      var id = Agent.PRESET_ORDER[i];
-      var b = Agent.PRESETS[id].baseUrl;
-      if (b && b.replace(/\/+$/, "") === u) return id;
+    var ctl = g.AbortController ? new g.AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, opts.timeoutMs || 330000) : null;
+    try {
+      var res = await g.fetch(Agent.bridgeRoot() + "/agent/qoder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages || [] }),
+        signal: ctl ? ctl.signal : undefined
+      });
+      var j = null;
+      try { j = await res.json(); } catch (e) { j = null; }
+      if (res.ok && j && j.ok) return { output: j.output || "", model: j.model || "" };
+      var msg = (j && (j.error || j.message)) || ("HTTP " + res.status);
+      throw { code: res.status === 403 ? "forbidden" : "qoder_error", message: String(msg) };
+    } catch (e) {
+      if (e && e.code) throw e;                       /* 已是结构化错误 */
+      throw { code: "network", message: "本机桥连不上（127.0.0.1:8765）——请先运行 python syncserver.py" };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return "custom";
-  };
-  /* 一键采用检测到的候选：{baseUrl, apiKey, model?, label?}。
-   * 预设按 baseUrl 匹配（绝大多数是 custom），Key 按预设分存；成功返回预设 id。 */
-  Agent.applyDiscovered = function (c) {
-    if (!c || !c.baseUrl || !c.apiKey) return null;
-    Agent.load();
-    var preset = Agent.matchPreset(c.baseUrl);
-    Agent.applyPreset(preset);
-    Agent.config.baseUrl = String(c.baseUrl).replace(/\/+$/, "");
-    if (c.model) Agent.config.model = c.model;
-    Agent.config.keys[preset] = c.apiKey;
-    Agent.config.apiKey = c.apiKey;
-    Agent.save();
-    return preset;
-  };
-
-  /* ---------- 启动自动采用（所有对话统一走本机已可用 Agent） ----------
-   * 页面启动时把 /agents/discover 的候选交给这里：
-   * - 用户手动保存过配置（manualLock）→ 绝不覆盖；
-   * - 当前配置已可用（ready）→ 不动（已有的对话配置就是最优先）；
-   * - 否则自动采用最优候选：OpenAI 协议且有模型 > OpenAI 无模型 > 中转。 */
-  Agent.pickLocalCandidate = function (agents) {
-    var list = (agents || []).filter(function (c) { return c && c.baseUrl && c.apiKey; });
-    var score = function (c) {
-      return (c.protocol === "openai" ? 2 : 0) + (c.model ? 1 : 0);
-    };
-    var best = null;
-    for (var i = 0; i < list.length; i++) {
-      if (!best || score(list[i]) > score(best)) best = list[i];
-    }
-    return best;
-  };
-  Agent.autoAdoptLocal = function (agents) {
-    Agent.load();
-    if (Agent.config.manualLock) return null;
-    /* ready() 在全新环境里也恒真（cloudproxy 免 Key 预设，issue #81）——
-     * 只有「出厂默认 cloudproxy 且一个 Key 都没存过」才视为未配置，可自动采用；
-     * 其余 ready 情形（用户手动选过 / 早已采用过）一律不覆盖。 */
-    var pristine = Agent.config.preset === "cloudproxy" && !Agent.config.apiKey
-      && (!Agent.config.keys || Object.keys(Agent.config.keys).length === 0);
-    if (Agent.ready() && !pristine) return null;
-    var best = Agent.pickLocalCandidate(agents);
-    if (!best) return null;
-    return Agent.applyDiscovered(best);
-  };
-
-  Agent.ready = function () {
-    Agent.load();
-    /* keyOptional 预设（cloudproxy）：本机信任模式无需 Key，baseUrl+model 即就绪（issue #81） */
-    return !!(Agent.config.baseUrl && Agent.config.model &&
-      (!Agent.needsKey(Agent.config.preset) || Agent.config.apiKey));
   };
 
   /* ---------- 聊天历史（按作业 ID 分库，独立 LS 键） ---------- */
@@ -326,11 +123,10 @@
   };
 
   /* ---------- 消息组装 ----------
-   * 消息体整体作为 chat/completions 的 JSON body 发出。实测云端网关对超大 POST
-   * 会直接拒绝（body ≈600KB → 502/连接被掐，浏览器表现为 gateway_network_error:
-   * "Failed to fetch"，而探活 GET 极小永远通过）——课程材料上下文 + 长对话历史
-   * 越滚越大就会踩线，且表现为「有的作业能聊有的必挂」。这里做请求体预算裁剪：
-   * 先丢最旧的对话历史，还超限再截断 system 里的巨型材料。 */
+   * 消息体整体作为 /agent/qoder 的 JSON body 发出，桥侧再拼成 CLI 提示词。
+   * 请求体预算裁剪（自 1.3.2 移植）：课程材料上下文 + 长对话历史越滚越大，
+   * 会超出 CLI/桥的处理预算 —— 先丢最旧的对话历史，还超限再截断 system 里
+   * 的巨型材料。 */
   Agent.BODY_BUDGET = 80000;   /* JSON 字符数预算；中文 UTF-8 最坏 ≈240KB，留足安全余量 */
   Agent.buildMessages = function (system, messages) {
     var out = [{ role: "system", content: String(system || "") }];
