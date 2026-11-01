@@ -551,6 +551,21 @@ test("启动器 Python 探测覆盖非 PATH 位置（WorkBuddy 管理运行时 /
     assert.ok(!/[^\x00-\x7F]/.test(vbs), name + ": vbs stays ASCII-only");
   }
 });
+test("syncserver 托管工作台页面：同源打开，绕开 Chrome 公网→本机拦截（PNA/LNA）", () => {
+  pyHas(/def _serve_static\(self, path\)/, "static-file route exists");
+  pyHas(/Access-Control-Allow-Private-Network/, "PNA preflight header is sent");
+  /* 安全边界：只服务脚本目录下白名单扩展名的单个文件名 */
+  pyHas(/split\("\/"\)\[-1\]/, "only the bare filename is used (no path traversal)");
+  pyHas(/name\.startswith\("wb_"\)/, "wb_*.json (credentials/cache) are never served");
+  pyHas(/ext not in STATIC_MIME/, "whitelisted extensions only");
+  pyHas(/Cache-Control", "no-store"/, "static responses are no-store (no stale page)");
+});
+test("启动器优先打开桥同源页面；桥没起来才退回 file://", () => {
+  const lvbs = readFileSync(path.join(root, "launch-hwdesk-local.vbs"), "utf8");
+  assert.ok(/If ready Then url = "http:\/\/127\.0\.0\.1:8765\/"/.test(lvbs),
+      "local launcher uses the bridge-served page when the bridge is ready");
+  assert.ok(/file:\/\/\//.test(lvbs), "file:// fallback kept for the bridge-down case");
+});
 test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");
   assert.ok(!/F:\\hwdesk/.test(vbs), "no hardcoded F:\\hwdesk repo path");

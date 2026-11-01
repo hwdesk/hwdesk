@@ -156,6 +156,14 @@ For i = 1 To 16
   On Error GoTo 0
 Next
 
+' ---- prefer the bridge-served page (same-origin, zero cross-origin) ----
+' Cloud https pages can no longer fetch http://127.0.0.1: Chrome's local-network
+' access blocks public->local requests (a response header alone does not lift
+' it), which is what made the online page report "sync down (local + cloud)".
+' The bridge now serves the workbench itself at / , so the page and its APIs
+' share one origin. file:// stays as the fallback if the bridge never came up.
+If ready Then url = "http://127.0.0.1:8765/"
+
 ' ---- open the local workbench in app mode, direct network ----
 chrome = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe")
 If Not fso.FileExists(chrome) Then chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
