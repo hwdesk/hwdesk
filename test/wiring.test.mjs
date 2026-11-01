@@ -821,7 +821,36 @@ test("启动自动采用：所有作业对话统一走本机 Agent；手动配�
   assert.ok(/safe\("agentAutoDiscover"/.test(html), "wired into fault-tolerant init");
 });
 
-/* ============ #93 同步时间本地时区显示 ============ */
+/* ============ 对话体验：卡「生成中」看门狗 + 「插入」按钮 ============ */
+test("对话看门狗：90 秒无增量主动中止，所有收尾路径统一清表", () => {
+  has(/function stopChatWatchdog/, "watchdog stop helper exists");
+  has(/90 秒没有任何响应，已自动停止/, "watchdog fires with an actionable message");
+  has(/wdAbort = CloudAI\.chat\(/, "cloud path's abort fn is captured for the watchdog");
+  has(/var _ac = \(typeof AbortController !== "undefined"\) \? new AbortController\(\) : null;\s*\n\s*wdAbort = function\(\)\{ if\(_ac\) _ac\.abort\(\); \};/,
+      "direct path is abortable (AbortController wired up)");
+  has(/fetch\(url, \{ method: "POST", headers: _headers, body: body, signal: _ac \? _ac\.signal : undefined \}\)/,
+      "direct fetch honors the abort signal");
+  has(/function finishChat\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "finishChat clears the watchdog");
+  has(/function cloudChatFail\(chat, err\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "cloudChatFail clears the watchdog");
+  has(/function resetChatBtn\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "resetChatBtn clears the watchdog");
+  assert.ok((app.match(/wdBump\(\)/g) || []).length >= 2,
+      "both stream paths feed the watchdog on delta");
+  /* #93 的本机 Agent 发现前端不许被本 PR 波及（v1 曾误删，review 抓到） */
+  has(/agFound|agentBridgeRoot/, "#93 local-agent-discovery frontend stays intact");
+});
+test("「插入」按钮：AI 回复可一键插入输入框光标处（像 WorkBuddy）", () => {
+  has(/data-ins="' \+ i \+ '" title="把这条回复插入到下方输入框光标处/,
+      "every assistant reply carries an insert button");
+  has(/function onChatInsert\(i\)\{[\s\S]{0,1200}setSelectionRange/,
+      "insert places the caret right after the inserted piece");
+  has(/var ins = e\.target\.closest\("\[data-ins\]"\);\s*\n\s*if\(ins\) onChatInsert\(\+ins\.getAttribute\("data-ins"\)\);/,
+      "chatMsgs click delegation routes data-ins");
+});
+
+/* ============ #98 同步时间本地时区显示 ============ */
 test("同步时间显示本地时区：不许再直接切 ISO(UTC) 串（差 8 小时）", () => {
   has(/function fmtLocalIso\(iso, withSec\)/, "local-time formatter exists");
   has(/renderSyncHint[\s\S]{0,300}fmtLocalIso\(t\)/,

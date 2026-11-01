@@ -1745,7 +1745,8 @@ function renderChat(chat){
     var picked = (m.role === "assistant" && m.content && chat.pick === i);
     var ops = (m.role === "assistant" && m.content)
       ? '<div class="b-ops"><button class="btn sm' + (picked ? " primary" : "") + '" data-pick="' + i + '">'
-        + (picked ? "✓ 已选用此版 · 再点取消" : "选用此版") + '</button></div>'
+        + (picked ? "✓ 已选用此版 · 再点取消" : "选用此版") + '</button>'
+        + '<button class="btn sm" data-ins="' + i + '" title="把这条回复插入到下方输入框光标处，改一改就能接着发">插入</button></div>'
       : "";
     html += '<div class="chat-b ' + m.role + (picked ? " picked" : "") + (last ? '" id="chatLast' : '') + '">'
       + esc(m.content || (last ? "思考中…" : "")) + ops + '</div>';
@@ -1776,13 +1777,47 @@ function onChatSend(){
 }
 function resetChatBtn(){
   _chatBusy = false;
+  stopChatWatchdog();
   var b = el("chatSend");
   if(b){ b.disabled = false; b.textContent = "发送"; }
+}
+/* 看门狗计时器（streamChat 专用）：所有收尾路径统一到这里清表，防泄漏 */
+var _chatWdTimer = null;
+function stopChatWatchdog(){ if(_chatWdTimer){ clearInterval(_chatWdTimer); _chatWdTimer = null; } }
+/* 看门狗触发的兜底收尾：与直连 catch 同构（弹错误、恢复按钮、清掉空回复） */
+function streamChatFail(msg){
+  resetChatBtn();
+  var chat = Agent.loadChat(_chatId);
+  if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
+  Agent.saveChat(_chatId, chat);
+  renderChat(chat);
+  el("chatRisk").style.display = "block";
+  el("chatRisk").textContent = "✗ " + msg;
+  addLog("Agent 对话无响应已中断：" + msg.slice(0, 60));
 }
 function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
   var _lastSave = Date.now();
+  /* 看门狗（根治「永远生成中」）：此前云端流 / 直连流被网关半开连接挂住时
+   * 没有任何超时——不吐字、不报错、不收尾，按钮永远停在生成中。现在只要
+   * 90 秒既没吐字也没报错也没收尾，就主动中止并给出可操作的提示；按钮
+   * 同时显示已等待秒数，让等待「看得见」。吐过字的正常长文生成不受影响
+   * （看门狗看的是「无增量时长」，不是总时长）。 */
+  var wdLastAct = Date.now(), wdStart = wdLastAct, wdAbort = null, wdOver = false;
+  function wdBump(){ wdLastAct = Date.now(); }
+  stopChatWatchdog();
+  _chatWdTimer = setInterval(function(){
+    if(wdOver){ stopChatWatchdog(); return; }
+    var b = el("chatSend");
+    if(b && b.disabled) b.textContent = "生成中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
+    if(Date.now() - wdLastAct <= 90000) return;
+    wdOver = true; stopChatWatchdog();
+    if(wdAbort){ try{ wdAbort(); }catch(e){} }
+    streamChatFail("90 秒没有任何响应，已自动停止——请求被网络半开连接挂住了。可点「发送」重试；"
+      + "反复出现时：换一条 AI 通道（抽屉上方「接口」下拉），或双击 hwdesk 目录里的 "
+      + "launch-hwdesk-local.vbs 拉起本机桥后重试。");
+  }, 3000);
   /* 云端免密钥通道：Agent 层不可用（非免 Key 预设且没填自己的 Key）才走这里（点开即聊，#56） */
   var agentUsable = Agent.config && Agent.config.baseUrl && Agent.config.model &&
     (typeof Agent.needsKey === "function"
@@ -1807,10 +1842,11 @@ function streamChat(chat){
              : { max: 1, delaysMs: [1200] };
     var doCloudChat = function(){
       cloudSent = false;
-      CloudAI.chat({
+      wdAbort = CloudAI.chat({
         messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
         conversationId: "hwdesk-chat-" + _chatId,
         onDelta: function(d){
+          wdBump();
           cloudSent = true;
           if(netRetries > 0 && !rescueMarked){
             rescueMarked = true;
@@ -1866,7 +1902,9 @@ function streamChat(chat){
    * 触发预检 + 在服务端日志/语义上造成歧义（issue #81） */
   var _headers = { "Content-Type": "application/json" };
   if(cfg.apiKey) _headers["Authorization"] = "Bearer " + cfg.apiKey;
-  fetch(url, { method: "POST", headers: _headers, body: body })
+  var _ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  wdAbort = function(){ if(_ac) _ac.abort(); };
+  fetch(url, { method: "POST", headers: _headers, body: body, signal: _ac ? _ac.signal : undefined })
   .then(function(res){
     if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP " + res.status + " " + String(t).slice(0, 160)); }); }
     return res.body;
@@ -1887,6 +1925,7 @@ function streamChat(chat){
             var j = JSON.parse(payload);
             var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
             if(d){
+            wdBump();
             chat.messages[chat.messages.length - 1].content += d;
             renderChatTail();
             /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
@@ -1915,6 +1954,7 @@ function streamChat(chat){
 /* 云端通道失败兜底：与直连 catch 同样的收尾 + 人话错误提示 */
 function cloudChatFail(chat, err){
   _chatBusy = false;
+  stopChatWatchdog();
   el("chatSend").disabled = false; el("chatSend").textContent = "发送";
   chat = Agent.loadChat(_chatId);
   if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
@@ -1936,6 +1976,7 @@ function cloudChatFail(chat, err){
 }
 function finishChat(){
   _chatBusy = false;
+  stopChatWatchdog();
   el("chatSend").disabled = false; el("chatSend").textContent = "发送";
   var chat = Agent.loadChat(_chatId);
   if(chat.messages.length){
@@ -2076,6 +2117,30 @@ function onChatPick(i){
   renderChat(chat);
   showChatRisk(chat);
   showToast(chat.pick === i ? "已选用此版，提交时用它" : "已取消选用");
+}
+/* 「插入」（像 WorkBuddy）：把这条回复插入到输入框光标处（替换选中段），
+ * 自动补好空行分隔——改一改就能接着发，不用手动复制粘贴。 */
+function onChatInsert(i){
+  if(_chatId === null) return;
+  var chat = Agent.loadChat(_chatId);
+  var m = chat.messages[i];
+  if(!(m && m.role === "assistant" && m.content)) return;
+  var input = el("chatInput");
+  var cur = input.value;
+  var s = (input.selectionStart == null) ? cur.length : input.selectionStart;
+  var e2 = (input.selectionEnd == null) ? cur.length : input.selectionEnd;
+  var piece = m.content;
+  var pre = "";
+  if(s > 0){
+    var before = cur.slice(0, s);
+    pre = /\n$/.test(before) ? (/\n\n$/.test(before) ? "" : "\n") : "\n\n";
+  }
+  var post = (e2 < cur.length && cur.charAt(e2) !== "\n") ? "\n" : "";
+  input.value = cur.slice(0, s) + pre + piece + post + cur.slice(e2);
+  var np = s + pre.length + piece.length;
+  input.focus();
+  try{ input.setSelectionRange(np, np); }catch(err){}
+  showToast("已插入第 " + (i + 1) + " 条回复，改一改就能接着发");
 }
 function onChatFinal(mode){
   if(_chatId === null) return;
@@ -3173,6 +3238,8 @@ function bind(){
   el("chatMsgs").addEventListener("click", function(e){
     var b = e.target.closest("[data-pick]");
     if(b) onChatPick(+b.getAttribute("data-pick"));
+    var ins = e.target.closest("[data-ins]");
+    if(ins) onChatInsert(+ins.getAttribute("data-ins"));
   });
   var _fmtSel = el("chatFmt");
   _fmtSel.value = localStorage.getItem("hwdesk_chatFmt") || "auto";
