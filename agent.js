@@ -1,8 +1,8 @@
-/*! agent.js 1.2.1 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 1.3.0 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.2.1" };  /* 1.2.1: keyOptional 免 Key 预设 + ready()/needsKey() 统一口径（issue #81） */
+  var Agent = { version: "1.3.1" };  /* 1.3.1: 启动自动采用本机检测（autoAdoptLocal，所有对话统一）；1.3.0: 本地检测采用（matchPreset/applyDiscovered） */
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
@@ -212,6 +212,65 @@
   Agent.needsKey = function (presetId) {
     var p = Agent.PRESETS[presetId];
     return !(p && p.keyOptional);
+  };
+
+  /* ---------- 本地检测采用（配 syncserver /agents/discover） ----------
+   * 本机桥扫描机器上已装 AI CLI（codex/claude 等）与环境变量里的现成凭据，
+   * 页面一键采用 —— 不用再手工申请/粘贴 Key。凭据只在本机文件 ↔ 本机桥 ↔
+   * 本机页面之间流转，不经过任何第三方。 */
+  Agent.matchPreset = function (baseUrl) {
+    var u = String(baseUrl || "").replace(/\/+$/, "");
+    if (!u) return "custom";
+    for (var i = 0; i < Agent.PRESET_ORDER.length; i++) {
+      var id = Agent.PRESET_ORDER[i];
+      var b = Agent.PRESETS[id].baseUrl;
+      if (b && b.replace(/\/+$/, "") === u) return id;
+    }
+    return "custom";
+  };
+  /* 一键采用检测到的候选：{baseUrl, apiKey, model?, label?}。
+   * 预设按 baseUrl 匹配（绝大多数是 custom），Key 按预设分存；成功返回预设 id。 */
+  Agent.applyDiscovered = function (c) {
+    if (!c || !c.baseUrl || !c.apiKey) return null;
+    Agent.load();
+    var preset = Agent.matchPreset(c.baseUrl);
+    Agent.applyPreset(preset);
+    Agent.config.baseUrl = String(c.baseUrl).replace(/\/+$/, "");
+    if (c.model) Agent.config.model = c.model;
+    Agent.config.keys[preset] = c.apiKey;
+    Agent.config.apiKey = c.apiKey;
+    Agent.save();
+    return preset;
+  };
+
+  /* ---------- 启动自动采用（所有对话统一走本机已可用 Agent） ----------
+   * 页面启动时把 /agents/discover 的候选交给这里：
+   * - 用户手动保存过配置（manualLock）→ 绝不覆盖；
+   * - 当前配置已可用（ready）→ 不动（已有的对话配置就是最优先）；
+   * - 否则自动采用最优候选：OpenAI 协议且有模型 > OpenAI 无模型 > 中转。 */
+  Agent.pickLocalCandidate = function (agents) {
+    var list = (agents || []).filter(function (c) { return c && c.baseUrl && c.apiKey; });
+    var score = function (c) {
+      return (c.protocol === "openai" ? 2 : 0) + (c.model ? 1 : 0);
+    };
+    var best = null;
+    for (var i = 0; i < list.length; i++) {
+      if (!best || score(list[i]) > score(best)) best = list[i];
+    }
+    return best;
+  };
+  Agent.autoAdoptLocal = function (agents) {
+    Agent.load();
+    if (Agent.config.manualLock) return null;
+    /* ready() 在全新环境里也恒真（cloudproxy 免 Key 预设，issue #81）——
+     * 只有「出厂默认 cloudproxy 且一个 Key 都没存过」才视为未配置，可自动采用；
+     * 其余 ready 情形（用户手动选过 / 早已采用过）一律不覆盖。 */
+    var pristine = Agent.config.preset === "cloudproxy" && !Agent.config.apiKey
+      && (!Agent.config.keys || Object.keys(Agent.config.keys).length === 0);
+    if (Agent.ready() && !pristine) return null;
+    var best = Agent.pickLocalCandidate(agents);
+    if (!best) return null;
+    return Agent.applyDiscovered(best);
   };
 
   Agent.ready = function () {

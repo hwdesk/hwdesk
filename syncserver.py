@@ -58,7 +58,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.6.0"  # 2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "2.7.0"  # 2.7.0: /agents/discover 本机 Agent 凭据发现（codex/claude CLI + 厂商环境变量）；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -755,6 +755,99 @@ def collect_payload(creds=None, force=True):
 
 
 # ---------------------------------------------------------------- HTTP 服务
+# ---- 本地 Agent 凭据发现（页面「检测本机可用 Agent」，只读本机、只回本机） ----
+DISCOVER_ENV_VARS = [
+    ("ark", "ARK_API_KEY", "豆包（火山方舟）",
+     "https://ark.cn-beijing.volces.com/api/v3", ""),
+    ("deepseek", "DEEPSEEK_API_KEY", "DeepSeek",
+     "https://api.deepseek.com/v1", "deepseek-chat"),
+    ("moonshot", "MOONSHOT_API_KEY", "Kimi（月之暗面）",
+     "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+    ("dashscope", "DASHSCOPE_API_KEY", "通义千问",
+     "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+    ("zhipu", "ZHIPUAI_API_KEY", "智谱 GLM",
+     "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+    ("openai", "OPENAI_API_KEY", "OpenAI",
+     "https://api.openai.com/v1", "gpt-4o-mini"),
+]
+
+
+def _read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _codex_cfg(cfg_path):
+    """codex config.toml → (base_url, model)：tomllib 优先，坏文件回空串（不抛）"""
+    base, model = "", ""
+    try:
+        import tomllib
+        with open(cfg_path, "rb") as f:
+            data = tomllib.load(f)
+        model = data.get("model") or ""
+        provs = data.get("model_providers") or {}
+        cur = data.get("model_provider") or ""
+        if cur and isinstance(provs.get(cur), dict):
+            base = provs[cur].get("base_url") or ""
+        if not base:
+            for v in provs.values():
+                if isinstance(v, dict) and v.get("base_url"):
+                    base = v["base_url"]
+                    break
+    except Exception:
+        pass
+    return base, model
+
+
+def discover_local_agents():
+    """扫描本机已装 AI CLI 与环境变量里的现成凭据（绝不写日志、绝不回给非本机来源）。"""
+    home = os.path.expanduser("~")
+    out = []
+    # 1) Codex CLI：auth.json 的 key + config.toml 的 base_url/model（OpenAI 兼容）
+    try:
+        auth = _read_json_file(os.path.join(home, ".codex", "auth.json")) or {}
+        key = auth.get("OPENAI_API_KEY") or ""
+        cfg = os.path.join(home, ".codex", "config.toml")
+        base, model = _codex_cfg(cfg) if os.path.isfile(cfg) else ("", "")
+        if key:
+            out.append({"id": "codex", "label": "Codex CLI（OpenAI 兼容）",
+                        "source": "~/.codex",
+                        "baseUrl": base or "https://api.openai.com/v1",
+                        "model": model, "apiKey": key, "protocol": "openai",
+                        "note": "来自 ~/.codex（auth.json + config.toml）"})
+    except Exception:
+        pass
+    # 2) Claude CLI：settings.json env 里的中转站令牌（第三方中转一般也开 OpenAI 兼容端点）
+    try:
+        st = _read_json_file(os.path.join(home, ".claude", "settings.json")) or {}
+        envc = st.get("env") or {}
+        tok = envc.get("ANTHROPIC_AUTH_TOKEN") or envc.get("ANTHROPIC_API_KEY") or ""
+        base = envc.get("ANTHROPIC_BASE_URL") or ""
+        if tok and base:
+            out.append({"id": "claude", "label": "Claude CLI（中转站）",
+                        "source": "~/.claude/settings.json",
+                        "baseUrl": base, "model": "", "apiKey": tok,
+                        "protocol": "relay",
+                        "note": "Anthropic 中转令牌；中转站通常同时提供 OpenAI 兼容 /v1——采用后按需在 baseUrl 末尾补 /v1 并填模型"})
+    except Exception:
+        pass
+    # 3) 厂商环境变量
+    try:
+        for aid, var, label, base, model in DISCOVER_ENV_VARS:
+            v = os.environ.get(var) or ""
+            if v:
+                out.append({"id": aid, "label": label + "（环境变量）",
+                            "source": "env:" + var, "baseUrl": base,
+                            "model": model, "apiKey": v,
+                            "protocol": "openai", "note": "来自环境变量 " + var})
+    except Exception:
+        pass
+    return out
+
+
 PAGE_FILE = "作业提交工作台.html"
 STATIC_MIME = {
     ".html": "text/html; charset=utf-8",
@@ -833,6 +926,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._json(200, {"ok": True, "version": VERSION, "service": "hwdesk-syncserver",
                              "platform": "学在城院 courses.hzcu.edu.cn (Tronclass)"})
+        elif self.path.startswith("/agents/discover"):
+            # 本机凭据发现：只回本机页面。file:// 页（本地模式回退）的 fetch 会带
+            # Origin: null —— 同样放行；真正的威胁是云端 https 页（公网站点），
+            # 其 Origin 含真实域名，一律 403，凭据不出本机。
+            origin = (self.headers.get("Origin") or "").strip()
+            bad_origin = (origin and origin.lower() != "null"
+                          and ("127.0.0.1" not in origin) and ("localhost" not in origin))
+            if bad_origin:
+                self._json(403, {"ok": False,
+                                 "error": "local-only: 凭据发现只对本机页面开放"})
+                return
+            self._json(200, {"ok": True, "agents": discover_local_agents()})
         elif self.path.startswith("/v1/models"):
             ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
                                                  self.headers.get("Origin"))
