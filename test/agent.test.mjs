@@ -117,6 +117,96 @@ test("use() applies a known preset and rejects unknown ones", () => {
   Agent.applyPreset("deepseek");
 });
 
+/* ---------- 本地检测采用（matchPreset / applyDiscovered） ---------- */
+test("matchPreset maps a known baseUrl to its preset (trailing slash tolerated), unknown to custom", () => {
+  assert.equal(Agent.matchPreset("https://api.deepseek.com/v1"), "deepseek");
+  assert.equal(Agent.matchPreset("https://api.deepseek.com/v1/"), "deepseek");
+  assert.equal(Agent.matchPreset("https://www.onetopai.com/v1"), "custom");
+  assert.equal(Agent.matchPreset(""), "custom");
+});
+test("applyDiscovered adopts a local candidate: preset by baseUrl, key per-preset, model/baseUrl overridden", () => {
+  store.clear();
+  const preset = Agent.applyDiscovered({
+    baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-test-1",
+    model: "gpt-6-astra", label: "Codex CLI"
+  });
+  assert.equal(preset, "custom");
+  assert.equal(Agent.config.preset, "custom");
+  assert.equal(Agent.config.baseUrl, "https://www.onetopai.com/v1");
+  assert.equal(Agent.config.model, "gpt-6-astra");
+  assert.equal(Agent.config.apiKey, "sk-test-1");
+  assert.equal(Agent.config.keys.custom, "sk-test-1");
+  assert.ok(Agent.ready(), "ready() right after adoption (baseUrl+model+key)");
+});
+test("applyDiscovered picks the matching preset when the baseUrl belongs to one", () => {
+  store.clear();
+  const preset = Agent.applyDiscovered({
+    baseUrl: "https://api.moonshot.cn/v1", apiKey: "sk-kimi", model: "moonshot-v1-8k"
+  });
+  assert.equal(preset, "kimi");
+  assert.equal(Agent.config.preset, "kimi");
+  assert.equal(Agent.config.keys.kimi, "sk-kimi");
+  assert.equal(Agent.config.model, "moonshot-v1-8k");
+});
+test("applyDiscovered returns null for incomplete candidates", () => {
+  assert.equal(Agent.applyDiscovered({ baseUrl: "https://x/v1" }), null);
+  assert.equal(Agent.applyDiscovered({ apiKey: "sk-x" }), null);
+  assert.equal(Agent.applyDiscovered(null), null);
+});
+
+/* ---------- 启动自动采用（所有对话统一走本机 Agent） ---------- */
+test("pickLocalCandidate prefers openai+model over relay, and skips incomplete entries", () => {
+  const best = Agent.pickLocalCandidate([
+    { baseUrl: "https://relay/x", apiKey: "k1", protocol: "relay" },
+    { baseUrl: "https://www.onetopai.com/v1", apiKey: "k2", protocol: "openai", model: "gpt-6-astra" },
+    { baseUrl: "", apiKey: "k3" },
+    null
+  ]);
+  assert.equal(best.apiKey, "k2");
+  assert.equal(Agent.pickLocalCandidate([]), null);
+  assert.equal(Agent.pickLocalCandidate(null), null);
+});
+test("autoAdoptLocal adopts the best candidate when config is not ready", () => {
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {}, manualLock: false };
+  const p = Agent.autoAdoptLocal([
+    { baseUrl: "https://timesniper.club", apiKey: "k-relay", protocol: "relay" },
+    { baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }
+  ]);
+  assert.equal(p, "custom");
+  assert.equal(Agent.config.apiKey, "sk-auto");
+  assert.equal(Agent.config.model, "gpt-6-astra");
+});
+test("autoAdoptLocal adopts on a pristine default profile (cloudproxy keyOptional is ready()==true but counts as unconfigured, issue #81)", () => {
+  store.clear();
+  Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "", model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false };
+  const p = Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }]);
+  assert.equal(p, "custom");
+  assert.equal(Agent.config.apiKey, "sk-auto");
+});
+test("autoAdoptLocal never overrides a ready config or a manualLock one", () => {
+  // ready（已采用/已手动配置）→ 不动
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "sk-d", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: { deepseek: "sk-d" }, manualLock: false };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.preset, "deepseek");
+  assert.equal(Agent.config.apiKey, "sk-d");
+  // 已通过采用按钮配好（custom + key，未手动保存）→ 不动
+  store.clear();
+  Agent.config = { preset: "custom", baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-prev", model: "gpt-6-astra", temperature: 0.7, keys: { custom: "sk-prev" }, manualLock: false };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-new", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.apiKey, "sk-prev");
+  // manualLock → 绝不覆盖
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {}, manualLock: true };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto2", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.apiKey, "");
+  // 空候选 → null
+  Agent.config.manualLock = false;
+  assert.equal(Agent.autoAdoptLocal([]), null);
+  assert.equal(Agent.autoAdoptLocal(null), null);
+});
+
 /* ---------- 聊天历史 ---------- */
 test("loadChat returns empty structure for unknown item", () => {
   store.delete("wb_hwdesk_chats");

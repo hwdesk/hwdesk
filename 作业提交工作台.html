@@ -516,6 +516,12 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
             <span class="hint" id="agKeyHint" style="display:block;margin-top:5px">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
           <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
           <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
+          <div><label class="f">本地检测</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn sm" id="agDiscover">🔍 检测本机可用 Agent</button>
+              <span class="hint" id="agDiscoverHint" style="margin:0">扫描 ~/.codex、~/.claude、环境变量里的现成凭据，一键采用</span>
+            </div>
+            <div id="agFound" style="margin-top:8px;display:none"></div></div>
           <div style="display:flex;justify-content:flex-end"><button class="btn sm primary" id="agSave">保存配置</button></div>
         </div>
       </details>
@@ -2164,6 +2170,82 @@ function refreshAgentChannel(){
     }
   }).catch(function(){ if(box) box.textContent = "⚠️ 通道检测失败，可稍后重试"; });
 }
+/* 本地检测 Agent 凭据：本机桥扫描机器上已装 AI CLI（~/.codex、~/.claude）与
+ * 厂商环境变量里的现成 Key，一键采用 —— 免去手工申请/粘贴。
+ * 凭据只在本机文件 ↔ 本机桥 ↔ 本机页面之间流转；云端页面会被桥的 local-only
+ * Origin 守卫拒绝（该功能仅本地模式可用）。 */
+function agentBridgeRoot(){
+  var base = (typeof Agent !== "undefined" && Agent.currentProxyBase)
+    ? Agent.currentProxyBase() : "http://127.0.0.1:8765/v1";
+  return String(base).replace(/\/v1\/?$/, "");
+}
+function adoptDiscovered(c){
+  if(typeof Agent === "undefined" || !Agent.applyDiscovered) return;
+  var preset = Agent.applyDiscovered(c);
+  fillAgentSettings();
+  addLog("采用本机检测到的 Agent：" + (c.label || c.baseUrl)
+    + "（预设 " + preset + "，Key 已按预设分存）");
+  showToast(preset ? "已采用：" + (c.label || c.baseUrl) + "，保存后即可开聊" : "采用失败（候选缺 baseUrl 或 Key）");
+}
+function onAgentDiscover(){
+  var btn = el("agDiscover"), hint = el("agDiscoverHint"), box = el("agFound");
+  if(!btn || typeof Agent === "undefined") return;
+  btn.disabled = true;
+  hint.textContent = "正在扫描本机（~/.codex、~/.claude、环境变量）…";
+  fetch(agentBridgeRoot() + "/agents/discover").then(function(r){ return r.json(); }).then(function(res){
+    btn.disabled = false;
+    var list = (res && res.ok && res.agents) ? res.agents : [];
+    box.style.display = "";
+    if(!list.length){
+      box.innerHTML = "";
+      hint.textContent = (res && res.error)
+        ? "✗ " + res.error
+        : "本机没扫到现成凭据——装过 codex/claude CLI 或配了厂商环境变量后再试";
+      return;
+    }
+    hint.textContent = "扫到 " + list.length + " 个本机可用 Agent：";
+    box.innerHTML = list.map(function(c, i){
+      return '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid #e5e6eb;border-radius:8px;margin-bottom:6px">'
+        + '<div style="flex:1;min-width:0"><b>' + esc(c.label) + '</b>'
+        + '<span class="hint" style="display:block;word-break:break-all">' + esc(c.baseUrl || "-")
+        + (c.model ? " · " + esc(c.model) : "") + '（' + esc(c.source) + '）</span></div>'
+        + '<button class="btn sm primary" data-adopt="' + i + '">采用</button></div>';
+    }).join("");
+    box._candidates = list;
+    Array.prototype.forEach.call(box.querySelectorAll("[data-adopt]"), function(b){
+      b.addEventListener("click", function(){
+        var c = (box._candidates || [])[+b.getAttribute("data-adopt")];
+        if(c) adoptDiscovered(c);
+      });
+    });
+  }).catch(function(){
+    btn.disabled = false;
+    hint.textContent = "本机桥不可达——该功能需要本地模式（桌面快捷方式启动会自动拉起桥）";
+  });
+}
+/* 启动自动采用：页面打开就静默扫一次本机，把扫到的 Agent 直接用于所有作业对话。
+ * 绝不覆盖手动配置（manualLock）与已可用配置（ready）；桥不可达静默跳过，
+ * 云端页面 / 云端通道行为完全不变。 */
+function autoDiscoverLocalAgent(){
+  if(typeof Agent === "undefined" || !Agent.autoAdoptLocal) return Promise.resolve(null);
+  var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 6000) : null;
+  return fetch(agentBridgeRoot() + "/agents/discover", { signal: ctl ? ctl.signal : undefined })
+  .then(function(r){ return r.json(); })
+  .then(function(res){
+    if(timer) clearTimeout(timer);
+    var preset = Agent.autoAdoptLocal((res && res.agents) || []);
+    if(preset){
+      addLog("已自动采用本机检测到的 Agent（预设 " + preset + "）——所有作业对话即刻生效，无需逐个配置");
+      showToast("已自动采用本机 Agent，所有对话即刻可用");
+      fillAgentSettings();
+    }
+    return preset;
+  }).catch(function(){
+    if(timer) clearTimeout(timer);
+    return null;   /* 桥不可达：静默，维持原有分层降级 */
+  });
+}
 /* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
 function onLayaPlan(){
   if(typeof Laya === "undefined"){ showToast("laya.js 未加载"); return; }
@@ -3142,6 +3224,7 @@ function bind(){
       addLog("Agent 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "，已配 Key：" + Agent.usablePresets().length + " 个预设）");
       showToast(Agent.ready() ? "已保存，作业卡「💬 对话 / AI 代提交」直接可用" : "已保存（暂无免 Key 通道可用，配 Key / 启动本机代理后才能开聊）");
     });
+    el("agDiscover").addEventListener("click", onAgentDiscover);
   }
   el("filterRow").addEventListener("click", function(e){
     var c = e.target.closest("[data-f]");
@@ -3222,6 +3305,7 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("switchView", function(){ switchView("overview"); });
   safe("cloudSelfCheck", function(){ if(typeof CloudAI !== "undefined") cloudSelfCheck(); });
   safe("agentProbeLayers", agentProbeLayers);
+  safe("agentAutoDiscover", function(){ if(typeof Agent !== "undefined" && Agent.autoAdoptLocal) autoDiscoverLocalAgent(); });
   /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });

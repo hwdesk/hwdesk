@@ -782,4 +782,43 @@ test("#70 syncserver：混元路由 + ark passthrough 标记", () => {
   pyHas(/ark-endpoint-id \(passthrough\)/, "ark passthrough marker in models catalog");
 });
 
+/* ---------- 14. 本地检测 Agent 凭据（syncserver /agents/discover + 页面一键采用） ---------- */
+test("syncserver /agents/discover：本机凭据发现；云端页面（非本机 Origin）一律 403", () => {
+  pyHas(/elif self\.path\.startswith\("\/agents\/discover"\)/, "route exists");
+  pyHas(/origin\.lower\(\) != "null"/, "file:// pages (Origin: null) are allowed");
+  pyHas(/"127\.0\.0\.1" not in origin[\s\S]{0,80}"localhost" not in origin/,
+      "non-local origins are rejected (credentials never leave the machine)");
+  pyHas(/def discover_local_agents\(\)/, "scanner exists");
+  pyHas(/\.codex", "auth\.json/, "scans codex auth.json for OPENAI_API_KEY");
+  pyHas(/def _codex_cfg\(cfg_path\)/, "parses codex config.toml (base_url/model)");
+  pyHas(/ANTHROPIC_AUTH_TOKEN/, "scans claude settings.json relay token");
+  pyHas(/for aid, var, label, base, model in DISCOVER_ENV_VARS/, "scans vendor env vars");
+});
+test("页面「检测本机可用 Agent」：一键发现 + 采用（凭据只在本机流转）", () => {
+  assert.ok(/id="agDiscover"/.test(html), "discover button exists in Agent config card");
+  assert.ok(/id="agFound"/.test(html), "result box exists");
+  has(/function onAgentDiscover\(\)/, "discover handler exists");
+  has(/agentBridgeRoot\(\) \+ "\/agents\/discover"/, "calls the bridge discovery endpoint");
+  has(/function adoptDiscovered\(/, "adopt flow exists (re-fills settings + logs)");
+  has(/Agent\.applyDiscovered\(/, "adoption goes through agent.js applyDiscovered");
+  has(/(res && res\.error)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
+});
+test("agent.js 本地检测采用：matchPreset + applyDiscovered", () => {
+  const ag = readFileSync(path.join(root, "agent.js"), "utf8");
+  assert.ok(/Agent\.matchPreset = function/.test(ag), "matchPreset exists");
+  assert.ok(/Agent\.applyDiscovered = function/.test(ag), "applyDiscovered exists");
+  assert.ok(/keys\[preset\] = c\.apiKey/.test(ag), "key stored per-preset");
+});
+test("启动自动采用：所有作业对话统一走本机 Agent；手动配置（manualLock）与已可用配置绝不覆盖", () => {
+  const ag = readFileSync(path.join(root, "agent.js"), "utf8");
+  assert.ok(/Agent\.pickLocalCandidate = function/.test(ag), "candidate picker exists");
+  assert.ok(/Agent\.autoAdoptLocal = function/.test(ag), "auto-adopt exists");
+  assert.ok(/if \(Agent\.config\.manualLock\) return null;/.test(ag), "manualLock is respected");
+  assert.ok(/var pristine = Agent\.config\.preset === "cloudproxy"/.test(ag),
+      "pristine cloudproxy default counts as unconfigured (ready() is always true on fresh profiles, issue #81)");
+  has(/function autoDiscoverLocalAgent\(\)/, "boot-time discovery step exists");
+  has(/Agent\.autoAdoptLocal\(/, "page adoption goes through the guarded helper");
+  assert.ok(/safe\("agentAutoDiscover"/.test(html), "wired into fault-tolerant init");
+});
+
 console.log("\n" + passed + " passed");
