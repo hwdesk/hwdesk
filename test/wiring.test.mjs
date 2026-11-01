@@ -801,7 +801,7 @@ test("页面「检测本机可用 Agent」：一键发现 + 采用（凭据只�
   has(/agentBridgeRoot\(\) \+ "\/agents\/discover"/, "calls the bridge discovery endpoint");
   has(/function adoptDiscovered\(/, "adopt flow exists (re-fills settings + logs)");
   has(/Agent\.applyDiscovered\(/, "adoption goes through agent.js applyDiscovered");
-  has(/(res && res\.error)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
+  has(/\(res && res\.error\)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
 });
 test("agent.js 本地检测采用：matchPreset + applyDiscovered", () => {
   const ag = readFileSync(path.join(root, "agent.js"), "utf8");
