@@ -46,6 +46,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import datetime
@@ -58,7 +59,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.7.0"  # 2.7.0: /agents/discover 本机 Agent 凭据发现（codex/claude CLI + 厂商环境变量）；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "3.0.0"  # 3.0.0: 工作台 AI 收敛为唯一 Agent —— /agent/qoder（本机 Qoder CLI，提示词走 stdin）+ /agent/qoder/status，移除 /agents/discover；2.7.0: /agents/discover 本机 Agent 凭据发现；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -755,97 +756,96 @@ def collect_payload(creds=None, force=True):
 
 
 # ---------------------------------------------------------------- HTTP 服务
-# ---- 本地 Agent 凭据发现（页面「检测本机可用 Agent」，只读本机、只回本机） ----
-DISCOVER_ENV_VARS = [
-    ("ark", "ARK_API_KEY", "豆包（火山方舟）",
-     "https://ark.cn-beijing.volces.com/api/v3", ""),
-    ("deepseek", "DEEPSEEK_API_KEY", "DeepSeek",
-     "https://api.deepseek.com/v1", "deepseek-chat"),
-    ("moonshot", "MOONSHOT_API_KEY", "Kimi（月之暗面）",
-     "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
-    ("dashscope", "DASHSCOPE_API_KEY", "通义千问",
-     "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
-    ("zhipu", "ZHIPUAI_API_KEY", "智谱 GLM",
-     "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
-    ("openai", "OPENAI_API_KEY", "OpenAI",
-     "https://api.openai.com/v1", "gpt-4o-mini"),
+# ---- Qoder CLI（工作台唯一 Agent，页面不出本机、提示词不出本机） ----
+QODER_ENTRY_CANDIDATES = [
+    os.path.join(os.path.expanduser("~"), ".qoder-cn", "bin", "qoderclicn", "qoderclicn.exe"),
+    os.path.join(os.path.expanduser("~"), ".qoder-cn", "entry", "qodercn.cmd"),
 ]
+QODER_MODEL = "Qwen3.8-Flash"     # qodercn --list-models 当前唯一模型
+QODER_TIMEOUT = 300               # 单次问答上限（作业成稿类任务实测 20~90s）
+QODER_MAX_PROMPT = 60000          # 提示词字符上限（CLI 上下文有限，超长直接拒绝）
 
 
-def _read_json_file(path):
+def qoder_entry():
+    """定位 Qoder CLI：环境变量 HWDESK_QODER_CLI 优先，其次常见安装路径。"""
+    env = os.environ.get("HWDESK_QODER_CLI") or ""
+    if env and os.path.isfile(env):
+        return env
+    for p in QODER_ENTRY_CANDIDATES:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def qoder_status():
+    entry = qoder_entry()
+    return {"ok": bool(entry), "entry": entry, "cli": "qoder-cn", "model": QODER_MODEL}
+
+
+_QODER_LOCK = threading.Lock()
+
+
+def qoder_compose_prompt(messages):
+    """OpenAI 风格 messages → 单段提示词（CLI -p 一次一轮，无服务端会话态）。
+    system 段置顶，user/assistant 轮次带角色前缀，保证多轮上下文不丢。"""
+    parts = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role") or ""
+        content = str(m.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "system":
+            parts.append(content)
+        elif role == "user":
+            parts.append("【用户】\n" + content)
+        elif role == "assistant":
+            parts.append("【你上一轮的回复】\n" + content)
+    return "\n\n".join(parts).strip()
+
+
+def qoder_ask(messages):
+    """调 Qoder CLI 完成一轮问答。提示词走 stdin（不走 argv，无引号注入面）。
+    返回 (ok, output)；同一时刻只放行一个 CLI 进程（本机单用户语义）。"""
+    entry = qoder_entry()
+    if not entry:
+        return False, ("本机未找到 Qoder CLI（qoderclicn）。"
+                       "可用环境变量 HWDESK_QODER_CLI 指定 CLI 路径。")
+    prompt = qoder_compose_prompt(messages)
+    if not prompt:
+        return False, "提示词为空"
+    if len(prompt) > QODER_MAX_PROMPT:
+        return False, ("提示词过长（%d 字符 > 上限 %d），请精简资料后重试"
+                       % (len(prompt), QODER_MAX_PROMPT))
+    if not _QODER_LOCK.acquire(blocking=False):
+        return False, "Qoder CLI 正在处理上一条请求，请稍候再发"
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _codex_cfg(cfg_path):
-    """codex config.toml → (base_url, model)：tomllib 优先，坏文件回空串（不抛）"""
-    base, model = "", ""
-    try:
-        import tomllib
-        with open(cfg_path, "rb") as f:
-            data = tomllib.load(f)
-        model = data.get("model") or ""
-        provs = data.get("model_providers") or {}
-        cur = data.get("model_provider") or ""
-        if cur and isinstance(provs.get(cur), dict):
-            base = provs[cur].get("base_url") or ""
-        if not base:
-            for v in provs.values():
-                if isinstance(v, dict) and v.get("base_url"):
-                    base = v["base_url"]
-                    break
-    except Exception:
-        pass
-    return base, model
-
-
-def discover_local_agents():
-    """扫描本机已装 AI CLI 与环境变量里的现成凭据（绝不写日志、绝不回给非本机来源）。"""
-    home = os.path.expanduser("~")
-    out = []
-    # 1) Codex CLI：auth.json 的 key + config.toml 的 base_url/model（OpenAI 兼容）
-    try:
-        auth = _read_json_file(os.path.join(home, ".codex", "auth.json")) or {}
-        key = auth.get("OPENAI_API_KEY") or ""
-        cfg = os.path.join(home, ".codex", "config.toml")
-        base, model = _codex_cfg(cfg) if os.path.isfile(cfg) else ("", "")
-        if key:
-            out.append({"id": "codex", "label": "Codex CLI（OpenAI 兼容）",
-                        "source": "~/.codex",
-                        "baseUrl": base or "https://api.openai.com/v1",
-                        "model": model, "apiKey": key, "protocol": "openai",
-                        "note": "来自 ~/.codex（auth.json + config.toml）"})
-    except Exception:
-        pass
-    # 2) Claude CLI：settings.json env 里的中转站令牌（第三方中转一般也开 OpenAI 兼容端点）
-    try:
-        st = _read_json_file(os.path.join(home, ".claude", "settings.json")) or {}
-        envc = st.get("env") or {}
-        tok = envc.get("ANTHROPIC_AUTH_TOKEN") or envc.get("ANTHROPIC_API_KEY") or ""
-        base = envc.get("ANTHROPIC_BASE_URL") or ""
-        if tok and base:
-            out.append({"id": "claude", "label": "Claude CLI（中转站）",
-                        "source": "~/.claude/settings.json",
-                        "baseUrl": base, "model": "", "apiKey": tok,
-                        "protocol": "relay",
-                        "note": "Anthropic 中转令牌；中转站通常同时提供 OpenAI 兼容 /v1——采用后按需在 baseUrl 末尾补 /v1 并填模型"})
-    except Exception:
-        pass
-    # 3) 厂商环境变量
-    try:
-        for aid, var, label, base, model in DISCOVER_ENV_VARS:
-            v = os.environ.get(var) or ""
-            if v:
-                out.append({"id": aid, "label": label + "（环境变量）",
-                            "source": "env:" + var, "baseUrl": base,
-                            "model": model, "apiKey": v,
-                            "protocol": "openai", "note": "来自环境变量 " + var})
-    except Exception:
-        pass
-    return out
+        if entry.lower().endswith(".cmd"):
+            cmd = ["cmd.exe", "/d", "/c", entry, "-p"]
+        else:
+            cmd = [entry, "-p"]
+        try:
+            proc = subprocess.run(
+                cmd, input=prompt.encode("utf-8"),
+                capture_output=True, timeout=QODER_TIMEOUT,
+                cwd=os.path.expanduser("~"))
+        except FileNotFoundError:
+            return False, "Qoder CLI 启动失败：找不到 " + entry
+        except subprocess.TimeoutExpired:
+            return False, "Qoder CLI 超时（%d 秒）未完成，请重试或精简任务" % QODER_TIMEOUT
+        out = (proc.stdout or b"").decode("utf-8", "replace").strip()
+        err = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        if proc.returncode != 0 and not out:
+            return False, "Qoder CLI 退出码 %d：%s" % (proc.returncode, err[:300] or "无错误输出")
+        return True, out or err
+    except Exception as e:      # 任何意外都不许把桥打挂
+        return False, "Qoder CLI 调用失败：" + str(e)
+    finally:
+        try:
+            _QODER_LOCK.release()
+        except Exception:
+            pass
 
 
 PAGE_FILE = "作业提交工作台.html"
@@ -926,18 +926,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._json(200, {"ok": True, "version": VERSION, "service": "hwdesk-syncserver",
                              "platform": "学在城院 courses.hzcu.edu.cn (Tronclass)"})
-        elif self.path.startswith("/agents/discover"):
-            # 本机凭据发现：只回本机页面。file:// 页（本地模式回退）的 fetch 会带
-            # Origin: null —— 同样放行；真正的威胁是云端 https 页（公网站点），
-            # 其 Origin 含真实域名，一律 403，凭据不出本机。
+        elif self.path.startswith("/agent/qoder/status"):
+            # 唯一 Agent（Qoder CLI）就绪状态：只回本机页面。file:// 页（本地模式
+            # 回退）的 fetch 会带 Origin: null —— 同样放行；云端 https 页（公网
+            # 站点）的 Origin 含真实域名，一律 403，本机 CLI 不对云端开放。
             origin = (self.headers.get("Origin") or "").strip()
             bad_origin = (origin and origin.lower() != "null"
                           and ("127.0.0.1" not in origin) and ("localhost" not in origin))
             if bad_origin:
                 self._json(403, {"ok": False,
-                                 "error": "local-only: 凭据发现只对本机页面开放"})
+                                 "error": "local-only: 本机 Agent 只对本机页面开放"})
                 return
-            self._json(200, {"ok": True, "agents": discover_local_agents()})
+            self._json(200, qoder_status())
         elif self.path.startswith("/v1/models"):
             ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
                                                  self.headers.get("Origin"))
@@ -1046,6 +1046,27 @@ class Handler(BaseHTTPRequestHandler):
             pass
         if self.path.startswith("/v1/chat/completions"):
             self._proxy_chat(raw)
+            return
+        if self.path.startswith("/agent/qoder"):
+            # 唯一 Agent（Qoder CLI）问答：body = {messages:[{role,content}...]}；
+            # 只回本机页面（Origin 校验与 status 一致），提示词不出本机。
+            origin = (self.headers.get("Origin") or "").strip()
+            bad_origin = (origin and origin.lower() != "null"
+                          and ("127.0.0.1" not in origin) and ("localhost" not in origin))
+            if bad_origin:
+                self._json(403, {"ok": False,
+                                 "error": "local-only: 本机 Agent 只对本机页面开放"})
+                return
+            msgs = creds.get("messages") if isinstance(creds, dict) else None
+            if not isinstance(msgs, list):
+                msgs = [{"role": "user", "content": (creds or {}).get("prompt", "")}] \
+                    if isinstance(creds, dict) and creds.get("prompt") else None
+            if not msgs:
+                self._json(400, {"ok": False, "error": "请求缺少 messages（或 prompt）字段"})
+                return
+            ok, output = qoder_ask(msgs)
+            self._json(200, {"ok": ok, "output": output, "model": QODER_MODEL}
+                       if ok else {"ok": False, "error": output})
             return
         if self.path.startswith("/data"):
             try:

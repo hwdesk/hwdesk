@@ -289,8 +289,7 @@ html[data-theme="dark"] .chat-msgs{background:#0d1015}
 html[data-theme="dark"] .chat-b.assistant{background:var(--card);border-color:var(--line);color:var(--txt)}
 html[data-theme="dark"] .chat-final{background:#161c2a}
 html[data-theme="dark"] .chat-risk{background:#2b2413;border-color:#4a3d1c;color:#d8c07a}
-html[data-theme="dark"] #chatSetup{background:#231d0e!important}
-html[data-theme="dark"] #chatSetup>div{color:#d3b45c!important}
+html[data-theme="dark"] #chatRisk{background:#2a1c14!important}
 html[data-theme="dark"] .today-item:hover,html[data-theme="dark"] .hw-item:hover,html[data-theme="dark"] .mat-item:hover,html[data-theme="dark"] .sub-row:hover,html[data-theme="dark"] .laya-item:hover,html[data-theme="dark"] .log-item:hover{background:#1a2030}
 html[data-theme="dark"] details.set-details summary:hover{background:#1a2030}
 html[data-theme="dark"] .ai-picker{background:var(--card);color:var(--txt)}
@@ -302,12 +301,6 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
 <body>
 <!-- 全局动态背景（与登录页同风格，低存在感） -->
 <div class="bg-deco" aria-hidden="true"><i></i><i></i></div>
-<!-- 云端通道自检横幅（#54）：file:// 打开或地址缺 sharecode 时提示自助修复，可关闭 -->
-<div id="cloudBanner" style="display:none;position:sticky;top:0;z-index:99;margin:0 0 8px;padding:10px 14px;border-radius:10px;background:#fff7e6;border:1px solid #ffd591;color:#614700;font-size:13px;line-height:1.7">
-  <span id="cloudBannerMsg"></span>
-  <button id="cloudBannerCopy" type="button" style="display:none;margin-left:8px;padding:2px 10px;border:1px solid #fa8c16;border-radius:6px;background:#fff;color:#fa8c16;cursor:pointer">复制完整链接</button>
-  <button id="cloudBannerClose" type="button" title="关闭" style="float:right;border:none;background:none;color:#999;cursor:pointer;font-size:14px">✕</button>
-</div>
 <div class="shell">
   <!-- ========== 侧边栏（参照 RoleWeave 区块） ========== -->
   <aside class="side">
@@ -445,7 +438,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
     <div class="card"><div id="reviewBox"></div></div>
   </section>
 
-  <!-- ========== 4) AI（多 Agent 对话 + 成稿检测 + Agent 配置） ========== -->
+  <!-- ========== 4) AI（唯一 Agent：Qoder CLI · 对话 + 成稿检测） ========== -->
   <section class="view" id="view-chat">
     <div class="section-title">
       <h2>AI 对话</h2>
@@ -457,7 +450,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
           <select id="chatTask"></select></div>
         <button class="btn sm danger-ghost" id="btnChatClear" style="align-self:flex-end">清空该任务对话</button>
       </div>
-      <div class="f" style="margin:10px 0 6px">选择 AI Agent</div>
+      <div class="f" style="margin:10px 0 6px">Agent（唯一：Qoder CLI）</div>
       <div id="agentGrid" class="agent-grid"></div>
       <div id="agentConfirm" class="agent-confirm" style="display:none">
         <span id="agentConfirmText" style="min-width:0"></span>
@@ -476,7 +469,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
         <button class="btn sm primary" id="btnChatSend"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>发送给所选 AI</button>
         <button class="btn sm" id="btnChatReply"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></span>记录 AI 回复</button>
       </div>
-      <div class="hint" style="margin-top:8px">复制流程：指令粘到 AI 窗口，回复粘回记录即可。</div>
+      <div class="hint" style="margin-top:8px">工作台内直接对话：发送即由本机 Qoder CLI 执行，回复自动进对话记录（无需跳 PowerShell）；也可把外部回复粘到输入框点「记录 AI 回复」存档。</div>
     </div>
 
     <div class="section-title"><h2>成稿检测</h2></div>
@@ -507,26 +500,19 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
     <div class="section-title"><h2>Agent 与模型</h2></div>
     <div class="card set-card">
       <div class="set-row">
-        <div class="set-info"><b>默认执行 AI</b><span class="set-desc">供「按方案执行」派发；选「每次询问」时执行会弹选择器</span></div>
+        <div class="set-info"><b>默认执行 AI</b><span class="set-desc">供「按方案执行」派发；唯一 Agent：Qoder CLI（本机）</span></div>
         <select id="selDefaultAi" style="width:180px"></select>
       </div>
       <details class="set-details">
-        <summary><b>Agent 接口配置</b><span class="set-desc">接口预设 · API Key · Base URL · 模型（Key 只存本机，不上传）</span></summary>
+        <summary><b>Agent（唯一）：Qoder CLI</b><span class="set-desc">本机 Qoder CLI 直连，零配置，无需任何 Key</span></summary>
         <div class="set-body">
           <div id="agChannel" class="hint" style="display:none;padding:8px 10px;border-radius:8px;background:#f2f8f2;color:#256a2b"></div>
-          <div><label class="f">接口预设</label><select id="agPreset" style="width:100%"></select>
-            <span class="hint" id="agHint" style="display:block;margin-top:5px"></span></div>
-          <div><label class="f" id="agKeyLabel">API Key</label><input type="password" id="agKey" placeholder="sk-...">
-            <span class="hint" id="agKeyHint" style="display:block;margin-top:5px">申请地址：<a id="agKeyLink" href="#" target="_blank" rel="noopener">#</a></span></div>
-          <div><label class="f">Base URL</label><input type="text" id="agUrl" placeholder="https://api.deepseek.com/v1"></div>
-          <div><label class="f">模型 / 接入点</label><input type="text" id="agModel" placeholder="deepseek-chat"></div>
-          <div><label class="f">本地检测</label>
+          <div><label class="f">本机检测</label>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="btn sm" id="agDiscover">🔍 检测本机可用 Agent</button>
-              <span class="hint" id="agDiscoverHint" style="margin:0">扫描 ~/.codex、~/.claude、环境变量里的现成凭据，一键采用</span>
+              <button class="btn sm" id="agQoderCheck">🔍 检测 Qoder CLI</button>
+              <span class="hint" id="agQoderHint" style="margin:0">检测本机桥与 Qoder CLI 是否就绪（对话也走这条通道）</span>
             </div>
             <div id="agFound" style="margin-top:8px;display:none"></div></div>
-          <div style="display:flex;justify-content:flex-end"><button class="btn sm primary" id="agSave">保存配置</button></div>
         </div>
       </details>
     </div>
@@ -610,17 +596,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
   .ai-pick-item b{font-size:14px}
   .ai-pick-item .hint{display:block}
 </style>
-<!-- Agent 选择器（点「AI 代提交」弹出：只选 Agent，选完直接在工作台开聊，不开浏览器） -->
-<div class="ai-picker-mask" id="agPick" style="display:none">
-  <div class="ai-picker">
-    <div class="ai-picker-title">选择 Agent <span class="hint" id="agPickFor"></span></div>
-    <div id="agPickList"></div>
-    <div class="hint" style="margin-top:8px;line-height:1.5;display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <span>点一个 Agent 立即开聊；带 ✓ 的已配好 Key</span>
-      <button class="btn sm" type="button" id="agPickCfg">管理 Agent 配置</button>
-    </div>
-  </div>
-</div>
+<!-- Agent 已收敛为唯一 Qoder CLI：AI 代提交直接进对话抽屉，不再弹选择器 -->
 <!-- 作业 Agent 对话抽屉：每个作业独立对话，成稿后在工作台内预览、选择性提交 -->
 <div class="chat-mask" id="chatPanel" style="display:none">
   <div class="chat-drawer">
@@ -631,15 +607,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
         <button class="btn sm" id="chatClose">关闭</button>
       </div>
     </div>
-    <div id="chatSetup" style="display:none;padding:12px 16px;border-bottom:1px solid #eef0f4;background:#fffdf5">
-      <div style="font-size:12.5px;color:#8a6d1a;margin-bottom:8px">默认免配置直聊；用自己的模型才填 Key（只存本机）。</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <label class="f" style="flex:1;min-width:130px">接口<select id="csPreset"></select></label>
-        <label class="f" style="flex:2;min-width:190px">API Key<input type="password" id="csKey" autocomplete="off" placeholder="sk-…"></label>
-        <label class="f" style="flex:1;min-width:150px">模型<input type="text" id="csModel"></label>
-        <button class="btn sm primary" id="csSave">保存并开聊</button>
-      </div>
-    </div>
+    <!-- Agent 已收敛为唯一 Qoder CLI：零配置直聊，不再有内联配置条 -->
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-risk" id="chatRisk" style="display:none"></div>
     <div class="chat-final" id="chatFinal" style="display:none">
@@ -843,7 +811,6 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
 <script src="verifynet.js"></script>
 <script src="agents.js"></script>
 <script src="workbuddy-cloud.js"></script>
-<script src="cloudai.js"></script>
 <script src="sync.js"></script>
 <script src="platform.js"></script>
 <script src="autosync.js"></script>
@@ -1365,7 +1332,7 @@ function renderChatLog(){
   if(!state.chat.taskId){ box.innerHTML = '<div class="empty">选择任务后开始与 AI 对话</div>'; return; }
   var rec = AgentHub.chat(state.chat.taskId);
   if(!rec || !rec.turns.length){
-    box.innerHTML = '<div class="empty">还没有对话。选好 AI，输入要求点「发送」，把提示词粘到该 AI 的窗口，回复粘回来记录</div>';
+    box.innerHTML = '<div class="empty">还没有对话。选好 Qoder CLI（唯一 Agent），输入要求点「发送」，把提示词粘过去，回复粘回来记录</div>';
     return;
   }
   var html = "";
@@ -1560,59 +1527,15 @@ function onAiSubmit(id){
   saveState();
   refreshAll();
 }
-/* ---------- AI 代提交（新流程）：选 Agent → 工作台内嵌对话 → 预览后选择性提交 ----------
- * 不再复制指令、不再打开 AI 网页；网页直连（bridge.js）仅供「按方案执行」使用。 */
+/* ---------- AI 代提交：工作台内嵌对话（唯一 Agent：Qoder CLI） → 预览后选择性提交 ----------
+ * 不再选 Agent、不再复制指令、不再打开 AI 网页；零配置直开对话抽屉。 */
 function onAiChat(id, auto){
   var it = findItem(id);
   if(!it) return;
   if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
-  Agent.load();
-  /* 零配置优先（issue #81）：云端免密钥通道或本机代理任一可用就直接开聊，
-   * 不再把用户赶去配 Key；两路全灭才提示（startAgentChat 自带内联配置兜底） */
-  var cloudReady0 = (typeof CloudAI !== "undefined") && CloudAI.ok();
-  if(!Agent.ready() && !cloudReady0){
-    showToast("暂无可用通道：可运行 python syncserver.py 拉起本机代理，或到「Agent 配置」填自己的 Key");
-    switchView("chat"); fillAgentSettings(); return;
-  }
-  if(auto && Agent.usablePresets().length > 1){ openAgPick(id); return; }
   startAgentChat(id, auto);
 }
-var _agPickId = null;
-function openAgPick(itemId){
-  _agPickId = itemId;
-  var it = findItem(itemId);
-  el("agPickFor").textContent = it ? "（" + it.name + "）" : "";
-  var usable = Agent.usablePresets();
-  var html = "";
-  Agent.PRESET_ORDER.forEach(function(pid){
-    var p = Agent.PRESETS[pid];
-    var ok = usable.indexOf(pid) !== -1;
-    html += '<div class="ag-pick-item" data-ag="' + pid + '" role="button" tabindex="0">'
-      + '<span><b>' + esc(p.label) + '</b>' + (ok ? ' <span class="ok-mark">✓</span>' : '')
-      + '<span class="hint">' + esc(p.hint) + '</span></span>'
-      + '</div>';
-  });
-  el("agPickList").innerHTML = html;
-  el("agPick").style.display = "flex";
-}
-function closeAgPick(){ el("agPick").style.display = "none"; _agPickId = null; }
-function confirmAgPick(presetId){
-  if(_agPickId === null) return;
-  var itemId = _agPickId;
-  if(!Agent.PRESETS[presetId]) return;
-  Agent.load();
-  /* keyOptional 预设（cloudproxy）无需 Key，选完直接进对话（issue #81） */
-  if(Agent.needsKey(presetId) && !Agent.config.keys[presetId]){
-    Agent.use(presetId);
-    closeAgPick();
-    showToast("先给 " + Agent.PRESETS[presetId].label + " 配一个 Key");
-    switchView("chat"); fillAgentSettings(); return;
-  }
-  Agent.use(presetId);
-  closeAgPick();
-  startAgentChat(itemId, true);
-}
-/* ---------- AI 派发（bridge.js）：API 直连的走工作台内嵌对话，其余复制指令 + 打开对应 AI 网页 ---------- */
+/* ---------- AI 派发（bridge.js）：一律工作台内嵌对话（唯一 Agent：Qoder CLI） ---------- */
 function dispatchToAi(cmd, category, taskName, taskId){
   if(typeof Bridge === "undefined"){ copyText(cmd); showToast("bridge.js 未加载，指令已复制"); return null; }
   var pick = Bridge.pick(category || "");
@@ -1621,21 +1544,16 @@ function dispatchToAi(cmd, category, taskName, taskId){
   if(taskId){ return doAgentChat(pick.ai, cmd, taskName, taskId); }
   return doDispatch(Bridge.describe(pick), cmd, taskName);
 }
-/* 打开作业对话抽屉并自动发出派发指令；未配置任何通道时把指令留在输入框 */
+/* 打开作业对话抽屉并自动发出派发指令；Qoder 通道零配置，就绪即自动发送 */
 function openAgentChatWith(taskId, cmd){
   onChatOpen(taskId);
   if(!cmd) return;
-  var ready = (typeof Agent !== "undefined" && Agent.ready())
-    || (typeof CloudAI !== "undefined" && CloudAI.ok());
   var input = el("chatInput");
   input.value = cmd;
-  if(ready){ onChatSend(); }   /* 就绪即自动发送；否则留给用户点发送 */
+  if(typeof Agent !== "undefined" && Agent.ready()){ onChatSend(); }   /* 就绪即自动发送 */
 }
 function doAgentChat(aiId, cmd, taskName, taskId){
-  if(typeof Agent !== "undefined" && Agent.PRESETS[aiId]){
-    Agent.applyPreset(aiId);
-  }
-  var label = (Bridge.AI[aiId] ? Bridge.AI[aiId].label : "Agent");
+  var label = (Bridge.AI[aiId] ? Bridge.AI[aiId].label : "Qoder CLI");
   addLog("工作台内对话：" + (taskName || "") + " → " + label);
   openAgentChatWith(taskId, cmd);
   return { action: "agent-chat" };
@@ -1708,46 +1626,20 @@ function onChatOpen(id){
   if(typeof Agent === "undefined"){ showToast("agent.js 未加载"); return; }
   startAgentChat(id, false);
 }
-/* 打开（或切入）某作业的对话抽屉；auto=true 时自动发一条开工指令让 Agent 直接产出成稿 */
+/* 打开（或切入）某作业的对话抽屉；auto=true 时自动发一条开工指令让 Agent 直接产出成稿。
+ * 唯一 Agent（Qoder CLI）零配置：无通道选择、无内联配置条，桥/CLI 状态在发送时确认。 */
 function startAgentChat(id, auto){
   var it = findItem(id);
   if(!it) return;
   _chatId = id;
-  Agent.load();
-  /* 直接进对话，点开即聊：默认走云端免密钥通道（CloudAI）；
-   * 用户填了自己的 Key 则优先直连；两者皆无才展示内联配置条 */
-  var customReady = Agent.ready();
-  var cloudReady = (typeof CloudAI !== "undefined") && CloudAI.ok();
-  var ready = customReady || cloudReady;
-  el("chatSetup").style.display = ready ? "none" : "block";
-  fillChatSetup();   /* 绑定一次事件并回填当前配置；已配置时该条不显示 */
   var chat = Agent.loadChat(id);
   if(!chat.system){
     chat.system = Agent.buildSystemPrompt(it, buildAgentCtx(it));
     Agent.saveChat(id, chat);
   }
   el("chatTitle").textContent = it.name;
-  /* 抽屉标题只留作业名 + 课程/截止，不显示预设/模型（#28 规格） */
-  el("chatSub").textContent = it.course + " · " + dueText(it);
+  el("chatSub").textContent = it.course + " · " + dueText(it) + " · Qoder CLI";
   el("chatRisk").style.display = "none"; el("chatRisk").textContent = "";
-  if(cloudReady && !customReady && !CloudAI.model){
-    /* 云端模型目录懒加载：就绪后把副标题补上模型名 */
-    CloudAI.refreshModels().then(function(list){
-      if(_chatId !== id) return;
-      if(CloudAI.model){
-        el("chatSub").textContent = it.course + " · " + dueText(it);
-      }else if(!list.length && !customReady){
-        el("chatRisk").style.display = "block";
-        el("chatRisk").textContent = "云端通道暂无可用模型，可在下方填自己的 API Key";
-        el("chatSetup").style.display = "block";
-      }
-    }).catch(function(err){
-      if(_chatId === id && !customReady){
-        el("chatRisk").style.display = "block";
-        el("chatRisk").textContent = CloudAI.errText(err);
-      }
-    });
-  }
   closeChatFinal();
   el("chatPanel").style.display = "flex";
   renderChat(chat);
@@ -1755,44 +1647,6 @@ function startAgentChat(id, auto){
     el("chatInput").value = "请直接完成这项作业并给出【最终交付】，不要反问，直接输出。";
     onChatSend();
   }
-}
-/* 抽屉内联配置：预设 / Key / 模型，保存后配置条收起，纯聊天 */
-function fillChatSetup(){
-  var sel = el("csPreset");
-  if(sel && !sel.options.length){
-    var html = "";
-    Agent.PRESET_ORDER.forEach(function(pid){
-      html += '<option value="' + pid + '">' + esc(Agent.PRESETS[pid].label) + '</option>';
-    });
-    sel.innerHTML = html;
-    sel.onchange = function(){
-      var p = Agent.PRESETS[sel.value];
-      if(p && p.model) el("csModel").value = p.model;
-    };
-    el("csSave").onclick = onChatSetupSave;
-  }
-  Agent.load();
-  sel.value = Agent.config.preset || "deepseek";
-  el("csModel").value = Agent.config.model || (Agent.PRESETS[sel.value] || {}).model || "";
-  el("csKey").value = Agent.config.apiKey || "";
-}
-function onChatSetupSave(){
-  var pid = el("csPreset").value, p = Agent.PRESETS[pid] || {};
-  Agent.load();
-  Agent.config.preset = pid;
-  if(p.baseUrl) Agent.config.baseUrl = p.baseUrl;
-  Agent.config.model = el("csModel").value.trim() || p.model || "";
-  Agent.config.apiKey = el("csKey").value.trim();
-  Agent.save();
-  /* keyOptional 预设（cloudproxy）免 Key 即可开聊（issue #81） */
-  if(!Agent.config.model || (Agent.needsKey(pid) && !Agent.config.apiKey)){
-    showToast("还差 Key / 模型名，配齐才能开聊"); return;
-  }
-  el("chatSetup").style.display = "none";
-  var it = findItem(_chatId);
-  if(it) el("chatSub").textContent = it.course + " · " + dueText(it);
-  addLog("Agent 对话配置已保存：" + (p.label || pid) + "（" + Agent.config.model + "）");
-  showToast("已保存，直接输入就能与 Agent 对话");
 }
 function renderChat(chat){
   var box = el("chatMsgs"), html = "";
@@ -1843,195 +1697,46 @@ function resetChatBtn(){
 /* 看门狗计时器（streamChat 专用）：所有收尾路径统一到这里清表，防泄漏 */
 var _chatWdTimer = null;
 function stopChatWatchdog(){ if(_chatWdTimer){ clearInterval(_chatWdTimer); _chatWdTimer = null; } }
-/* 看门狗触发的兜底收尾：与直连 catch 同构（弹错误、恢复按钮、清掉空回复） */
-function streamChatFail(msg){
-  resetChatBtn();
-  var chat = Agent.loadChat(_chatId);
-  if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
-  Agent.saveChat(_chatId, chat);
-  renderChat(chat);
-  el("chatRisk").style.display = "block";
-  el("chatRisk").textContent = "✗ " + msg;
-  addLog("Agent 对话无响应已中断：" + msg.slice(0, 60));
-}
+/* 唯一 Agent（Qoder CLI）问答：本机桥 /agent/qoder，CLI 一轮一出（无流式）。
+ * 等待计时（继承 #99 看门狗的「等待看得见」）：CLI 单轮看不到增量 → 按钮实时
+ * 显示已等待秒数；总时长由前端 askQoder 超时 + 桥侧 QODER_TIMEOUT 双保险兜底，
+ * 到点必有报错收尾，不会「永远生成中」。 */
 function streamChat(chat){
   _chatBusy = true;
-  el("chatSend").disabled = true; el("chatSend").textContent = "生成中…";
-  var _lastSave = Date.now();
-  /* 看门狗（根治「永远生成中」）：此前云端流 / 直连流被网关半开连接挂住时
-   * 没有任何超时——不吐字、不报错、不收尾，按钮永远停在生成中。现在只要
-   * 90 秒既没吐字也没报错也没收尾，就主动中止并给出可操作的提示；按钮
-   * 同时显示已等待秒数，让等待「看得见」。吐过字的正常长文生成不受影响
-   * （看门狗看的是「无增量时长」，不是总时长）。 */
-  var wdLastAct = Date.now(), wdStart = wdLastAct, wdAbort = null, wdOver = false;
-  function wdBump(){ wdLastAct = Date.now(); }
+  el("chatSend").disabled = true; el("chatSend").textContent = "思考中…";
+  var msgs = Agent.buildMessages(chat.system, chat.messages.slice(0, -1));
+  var wdStart = Date.now();
   stopChatWatchdog();
   _chatWdTimer = setInterval(function(){
-    if(wdOver){ stopChatWatchdog(); return; }
     var b = el("chatSend");
-    if(b && b.disabled) b.textContent = "生成中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
-    if(Date.now() - wdLastAct <= 90000) return;
-    wdOver = true; stopChatWatchdog();
-    if(wdAbort){ try{ wdAbort(); }catch(e){} }
-    streamChatFail("90 秒没有任何响应，已自动停止——请求被网络半开连接挂住了。可点「发送」重试；"
-      + "反复出现时：换一条 AI 通道（抽屉上方「接口」下拉），或双击 hwdesk 目录里的 "
-      + "launch-hwdesk-local.vbs 拉起本机桥后重试。");
-  }, 3000);
-  /* 云端免密钥通道：Agent 层不可用（非免 Key 预设且没填自己的 Key）才走这里（点开即聊，#56） */
-  var agentUsable = Agent.config && Agent.config.baseUrl && Agent.config.model &&
-    (typeof Agent.needsKey === "function"
-      ? (!Agent.needsKey(Agent.config.preset) || Agent.config.apiKey)
-      : (Agent.config.preset === "cloudproxy" || Agent.config.apiKey));
-  if(!agentUsable && typeof CloudAI !== "undefined" && CloudAI.ok()){
-    if(!CloudAI.model){
-      CloudAI.refreshModels().then(function(){
-        if(CloudAI.model) streamChat(chat);
-        else cloudChatFail(chat, { error: { code: "model_unavailable" } });
-      }).catch(function(err){ cloudChatFail(chat, err); });   /* 本分支在 cloudFail 声明之前 return，catch 里 cloudFail 还是 undefined → 直接兜底 */
-      return;
-    }
-    var lastSave = 0;
-    var cloudSent = false;    /* 本次流是否已吐出增量：吐过字就不自动重试，避免内容重复 */
-    var rescueMarked = false; /* 重试救回来只记一次本机记忆 */
-    var netRetries = 0;       /* 本次发送已自动重试次数 */
-    /* 重试计划来自 cloudai.js 的本机记忆：这台机器抖过（localStorage 有 flap 记录）
-     * → 打开工作台就直接上抖动档 6 连试；没有记忆 → 常规档 3 连试。
-     * 旧版 cloudai.js 没有 retryPlan() 时兜底为单次重试。 */
-    var plan = (typeof CloudAI.retryPlan === "function") ? CloudAI.retryPlan()
-             : { max: 1, delaysMs: [1200] };
-    var doCloudChat = function(){
-      cloudSent = false;
-      wdAbort = CloudAI.chat({
-        messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
-        conversationId: "hwdesk-chat-" + _chatId,
-        onDelta: function(d){
-          wdBump();
-          cloudSent = true;
-          if(netRetries > 0 && !rescueMarked){
-            rescueMarked = true;
-            if(typeof CloudAI.recordRescue === "function") CloudAI.recordRescue();
-          }
-          chat.messages[chat.messages.length - 1].content += d;
-          renderChatTail();
-          var now = Date.now();
-          if(now - lastSave > 2000){ Agent.saveChat(_chatId, chat); lastSave = now; }
-        },
-        onDone: function(){ finishChat(); },
-        onErr: function(err){ cloudFail(err); }
-      });
-    };
-    /* 网络抖动自动重试（阶梯 + 本机记忆，用户全程无感）：
-     * - 瞬时失败（连不上/超时/网关 5xx，见 CloudAI.isTransient）且还没吐过字
-     *   → 自动重试，探测与聊天哪一环抖了都算一次；重试前清掉 _hcOk 重新预检
-     * - 重试次数与间隔按 plan（本机记忆决定档位），不再是一次性的手点「发送」
-     * - 403/404 是链接/配置问题，重试无意义 → 直接兜底
-     * - 流中途失败（已吐字）不重试，避免内容重复 */
-    var cloudFail = function(err){
-      var code = (err && err.error && err.error.code) || "";
-      var transient = (typeof CloudAI.isTransient === "function") ? CloudAI.isTransient(code)
-                    : (code === "gateway_network_error");
-      if(transient && typeof CloudAI.recordFlap === "function") CloudAI.recordFlap();
-      if(transient && !cloudSent && netRetries < plan.max){
-        CloudAI._hcOk = false;
-        setTimeout(startCloud, plan.delaysMs[Math.min(netRetries, plan.delaysMs.length - 1)]);
-        netRetries += 1;
-        return;
-      }
-      cloudChatFail(chat, err);
-    };
-    var startCloud = function(){
-    /* 开聊前先体检网关（#45/#48）：链接不完整/已失效在发送前拦下，别等打完字才报错 */
-    if(CloudAI._hcOk){ doCloudChat(); return; }
-    CloudAI.healthCheck(8000).then(function(hc){
-      if(hc && hc.ok){ CloudAI._hcOk = true; doCloudChat(); return; }
-      cloudFail({ error: { code: (hc && hc.code) || "gateway_network_error" } });
-    }).catch(function(){ cloudFail({ error: { code: "gateway_network_error" } }); });
-    return;
-    };
-    startCloud();
-    return;
-  }
-  var cfg = Agent.config;
-  var url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
-  var body = JSON.stringify({
-    model: cfg.model, messages: Agent.buildMessages(chat.system, chat.messages.slice(0, -1)),
-    stream: true, temperature: cfg.temperature || 0.7
-  });
-  /* 空 Key 不发 Authorization 头：免 Key 预设（cloudproxy 信任模式）不必要地
-   * 触发预检 + 在服务端日志/语义上造成歧义（issue #81） */
-  var _headers = { "Content-Type": "application/json" };
-  if(cfg.apiKey) _headers["Authorization"] = "Bearer " + cfg.apiKey;
-  var _ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
-  wdAbort = function(){ if(_ac) _ac.abort(); };
-  fetch(url, { method: "POST", headers: _headers, body: body, signal: _ac ? _ac.signal : undefined })
-  .then(function(res){
-    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP " + res.status + " " + String(t).slice(0, 160)); }); }
-    return res.body;
-  })
-  .then(function(body){
-    var reader = body.getReader(), dec = new TextDecoder(), buf = "";
-    function pump(){
-      return reader.read().then(function(r){
-        if(r.done){ finishChat(); return; }
-        buf += dec.decode(r.value, { stream: true });
-        var lines = buf.split("\n"); buf = lines.pop();
-        lines.forEach(function(ln){
-          ln = ln.trim();
-          if(ln.slice(0, 5) !== "data:") return;
-          var payload = ln.slice(5).trim();
-          if(payload === "[DONE]") return;
-          try{
-            var j = JSON.parse(payload);
-            var d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
-            if(d){
-            wdBump();
-            chat.messages[chat.messages.length - 1].content += d;
-            renderChatTail();
-            /* 流式过程按 ~1s 落盘一次：中途关抽屉 / 刷新也不会丢已生成内容 */
-            if(Date.now() - _lastSave > 1000){ _lastSave = Date.now(); Agent.saveChat(_chatId, chat); }
-          }
-          }catch(e){ /* 忽略半包 */ }
-        });
-        return pump();
-      });
-    }
-    return pump();
-  })
-  .catch(function(err){
-    resetChatBtn();                       /* 失败一次后按钮不再永久卡死 */
-    chat = Agent.loadChat(_chatId);
-    if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
+    if(b && b.disabled) b.textContent = "思考中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
+  }, 1000);
+  Agent.askQoder(msgs).then(function(r){
+    stopChatWatchdog();
+    if(_chatId === null){ return; }   /* 抽屉已关：内容已随消息对象落库 */
+    chat.messages[chat.messages.length - 1].content = (r && r.output) || "（Qoder 返回了空回复，请重试）";
     Agent.saveChat(_chatId, chat);
     renderChat(chat);
-    el("chatRisk").style.display = "block";
-    el("chatRisk").textContent = "请求失败：" + err.message
-      + "\n常见原因：Key / 模型名不对，或该服务不允许浏览器直连（CORS）——换预设试试（DeepSeek / Kimi / 通义一般可直连）。"
-      + "\n零配置用法：双击 hwdesk 目录里的 launch-hwdesk-local.vbs，自动拉起本机 AI 代理后全 AI 免 Key（豆包 / 混元必须走代理，浏览器直连必被拦）。";
-    addLog("Agent 对话请求失败：" + err.message.slice(0, 80));
+    finishChat();
+  }).catch(function(err){
+    stopChatWatchdog();
+    qoderFail(chat, err);
   });
 }
-/* 云端通道失败兜底：与直连 catch 同样的收尾 + 人话错误提示 */
-function cloudChatFail(chat, err){
-  _chatBusy = false;
+/* Qoder 通道失败兜底：与旧通道同样的收尾 + 人话错误提示 */
+function qoderFail(chat, err){
   stopChatWatchdog();
-  el("chatSend").disabled = false; el("chatSend").textContent = "发送";
+  resetChatBtn();
   chat = Agent.loadChat(_chatId);
   if(chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant" && !chat.messages[chat.messages.length - 1].content) chat.messages.pop();
   Agent.saveChat(_chatId, chat);
   renderChat(chat);
-  var code = (err && err.error && err.error.code) || "";
+  var msg = (err && err.message) ? err.message : String(err);
   el("chatRisk").style.display = "block";
-  el("chatRisk").textContent = (typeof CloudAI !== "undefined" && CloudAI.errText)
-    ? CloudAI.errText(err)
-    : "云端通道请求失败：" + (err && err.message ? err.message.slice(0, 120) : String(err));
-  if(typeof CloudAI !== "undefined") CloudAI._hcOk = false;   /* 失败后体检缓存作废：下次发送重新预检 */
-  /* 网络层失败别让用户对着一刀切长文案猜：现场重探测 + 打开方式自检，收窄成一句可操作的结论 */
-  if(code === "gateway_network_error" && typeof CloudAI !== "undefined" && typeof CloudAI.diagnose === "function"){
-    CloudAI.diagnose(function(msg){
-      if(_chatId !== null){ el("chatRisk").textContent = msg; }
-    });
-  }
-  addLog("云端通道请求失败：" + ((err && err.error && err.error.code) || (err && err.message) || "").slice(0, 80));
+  el("chatRisk").textContent = "Qoder 通道请求失败：" + msg.slice(0, 200)
+    + "\n排查：① 本机桥是否在跑（hwdesk 目录 python syncserver.py，或用桌面快捷方式启动）；"
+    + "② Qoder CLI 是否已安装（qoderclicn）——可到「设置 → Agent（唯一）：Qoder CLI」点检测。";
+  addLog("Qoder 通道请求失败：" + msg.slice(0, 80));
 }
 function finishChat(){
   _chatBusy = false;
@@ -2128,14 +1833,14 @@ function fmtLabel(fmt, it){
 function submitDeliverable(text, fmt, direct){
   var it = findItem(_chatId);
   if(!it) return;
-  var preset = Agent.PRESETS[Agent.config.preset] || { label: Agent.config.preset };
+  var agentLabel = "Qoder CLI";   /* 唯一 Agent */
   var f = deliverFile(fmt, text, it);
   if(f) downloadDeliver(f);
   var needsReview = !direct && (typeof Laya !== "undefined") ? Laya.analyze(it).review.needed : false;
   if(typeof DB !== "undefined"){
     DB.insert("submissions", {
       itemId: it.id, name: it.name, course: it.course,
-      ai: "Agent对话·" + preset.label,
+      ai: "Agent对话·" + agentLabel,
       status: direct ? "submitted" : "pending",
       stage: direct ? "direct" : (needsReview ? "review" : "dispatched"),
       risk: _chatRiskScore, time: nowStr(),
@@ -2236,138 +1941,58 @@ function closeChat(){
   el("chatPanel").style.display = "none";
   _chatId = null;
 }
-/* 设置页：Agent 对话 API 配置 */
+/* 设置页：Agent（唯一）= Qoder CLI 状态卡。零配置，只做状态检测与展示。 */
 function fillAgentSettings(){
   if(typeof Agent === "undefined") return;
-  if(!el("agPreset")) return;   /* 设置区缺失时静默跳过，不打断初始化 */
-  Agent.load();
-  var sel = el("agPreset"), html = "";
-  Agent.PRESET_ORDER.forEach(function(id){
-    var tag = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(id) : "";
-    html += '<option value="' + id + '">' + esc(Agent.PRESETS[id].label)
-      + (tag ? '（' + esc(tag) + '）' : '') + '</option>';
-  });
-  sel.innerHTML = html;
-  el("agPreset").value = Agent.config.preset;
-  el("agUrl").value = Agent.config.baseUrl;
-  el("agKey").value = Agent.config.apiKey;
-  el("agModel").value = Agent.config.model;
-  updateAgentHint();
+  if(!el("agChannel")) return;   /* 设置区缺失时静默跳过，不打断初始化 */
+  refreshQoderChannel();
 }
-function updateAgentHint(){
-  var p = Agent.PRESETS[Agent.config.preset] || {};
-  var cors = (typeof Agent.corsLabel === "function") ? Agent.corsLabel(Agent.config.preset) : "";
-  var txt = p.hint || "";
-  if(cors) txt += "｜浏览器直连：" + cors;
-  if(p.cors === "proxy" || p.cors === "custom"){
-    txt += "｜若被 CORS 拦截，baseUrl 改填本地代理（例如 http://127.0.0.1:8787/v1）。";
-  }
-  el("agHint").textContent = txt;
-  el("agKeyLink").href = p.keyUrl || "#";
-  el("agKeyLink").style.display = p.keyUrl ? "" : "none";
-  /* keyOptional 预设：Key 输入框改成「令牌可选」，别让用户以为必填（issue #81） */
-  var keyless = (typeof Agent.needsKey === "function") && !Agent.needsKey(Agent.config.preset);
-  el("agKeyLabel").textContent = keyless
-    ? "令牌（可选：仅服务端启用令牌校验时才需要，只写本机）"
-    : "API Key（按预设分开保存，只写本机，不上传）";
-  el("agKey").placeholder = keyless ? "留空即可开聊" : "sk-...";
-  el("agKeyHint").style.display = p.keyUrl ? "" : "none";
-  refreshAgentChannel();
-}
-/* Agent 配置面板内的通道状态（issue #81）：让用户开聊前就知道「无需任何配置」，
- * 复用 Agent.probeLayers 的分层探测（本机代理 → 云端免密钥 → 本机已存 Key） */
-function refreshAgentChannel(){
+/* Qoder 通道状态（设置卡 + AI 对话状态行共用）：本机桥 → Qoder CLI 一次检测 */
+function refreshQoderChannel(){
   var box = el("agChannel");
-  if(!box || typeof Agent === "undefined" || !Agent.probeLayers) return;
+  if(!box || typeof Agent === "undefined" || !Agent.qoderStatus) return;
   box.style.display = "";
-  box.textContent = "⏳ 正在检测可用通道（本机代理 → 云端免密钥）…";
-  Agent.probeLayers(4000).then(function(r){
+  box.textContent = "⏳ 正在检测 Qoder CLI（本机唯一 Agent）…";
+  Agent.qoderStatus(6000).then(function(r){
     if(!box) return;
-    if(r && r.layer === 1){
-      box.textContent = "✅ 已检测到本机 AI 代理（免 Key，当前模型 " + Agent.config.model + "）：无需任何配置，直接开聊";
-    }else if(r && r.layer === 2){
-      box.textContent = "✅ 已连接云端免密钥通道：无需 API Key，直接开聊";
-    }else if(r && r.layer === 3){
-      box.textContent = "✅ 使用已保存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
+    if(r && r.ok){
+      box.style.background = "#f2f8f2"; box.style.color = "#256a2b";
+      box.textContent = "✅ Qoder CLI 就绪（" + (r.model || "Qwen3.8-Flash")
+        + "）：零配置，对话与 AI 代提交直接可用";
     }else{
-      box.textContent = "⚠️ 暂无可用通道：可在本机运行 python syncserver.py 拉起代理，或在下方填自己的 API Key";
+      box.style.background = "#fff4f2"; box.style.color = "#a03020";
+      box.textContent = "⚠️ Qoder CLI 未就绪：" + ((r && r.error) || "原因未知")
+        + "（本机桥 = hwdesk 目录 python syncserver.py）";
     }
+    var st = el("cloudStatus");
+    if(st && r && r.ok) st.textContent = "Agent：Qoder CLI（" + (r.model || "") + "）· 就绪";
   }).catch(function(){ if(box) box.textContent = "⚠️ 通道检测失败，可稍后重试"; });
 }
-/* 本地检测 Agent 凭据：本机桥扫描机器上已装 AI CLI（~/.codex、~/.claude）与
- * 厂商环境变量里的现成 Key，一键采用 —— 免去手工申请/粘贴。
- * 凭据只在本机文件 ↔ 本机桥 ↔ 本机页面之间流转；云端页面会被桥的 local-only
- * Origin 守卫拒绝（该功能仅本地模式可用）。 */
-function agentBridgeRoot(){
-  var base = (typeof Agent !== "undefined" && Agent.currentProxyBase)
-    ? Agent.currentProxyBase() : "http://127.0.0.1:8765/v1";
-  return String(base).replace(/\/v1\/?$/, "");
-}
-function adoptDiscovered(c){
-  if(typeof Agent === "undefined" || !Agent.applyDiscovered) return;
-  var preset = Agent.applyDiscovered(c);
-  fillAgentSettings();
-  addLog("采用本机检测到的 Agent：" + (c.label || c.baseUrl)
-    + "（预设 " + preset + "，Key 已按预设分存）");
-  showToast(preset ? "已采用：" + (c.label || c.baseUrl) + "，保存后即可开聊" : "采用失败（候选缺 baseUrl 或 Key）");
-}
-function onAgentDiscover(){
-  var btn = el("agDiscover"), hint = el("agDiscoverHint"), box = el("agFound");
+/* 手动检测按钮：结果落在 agFound */
+function onQoderCheck(){
+  var btn = el("agQoderCheck"), hint = el("agQoderHint"), box = el("agFound");
   if(!btn || typeof Agent === "undefined") return;
   btn.disabled = true;
-  hint.textContent = "正在扫描本机（~/.codex、~/.claude、环境变量）…";
-  fetch(agentBridgeRoot() + "/agents/discover").then(function(r){ return r.json(); }).then(function(res){
+  if(hint) hint.textContent = "正在检测本机桥与 Qoder CLI…";
+  Agent.qoderStatus(8000).then(function(r){
     btn.disabled = false;
-    var list = (res && res.ok && res.agents) ? res.agents : [];
-    box.style.display = "";
-    if(!list.length){
-      box.innerHTML = "";
-      hint.textContent = (res && res.error)
-        ? "✗ " + res.error
-        : "本机没扫到现成凭据——装过 codex/claude CLI 或配了厂商环境变量后再试";
-      return;
+    if(box) box.style.display = "";
+    var ok = r && r.ok;
+    if(hint) hint.textContent = ok
+      ? "✅ 就绪：" + (r.entry || "qoderclicn") + "（模型 " + (r.model || "Qwen3.8-Flash") + "）"
+      : "✗ 未就绪：" + ((r && r.error) || "原因未知");
+    if(box){
+      box.innerHTML = ok
+        ? '<div style="padding:6px 8px;border:1px solid #d6e9d8;border-radius:8px;color:#256a2b">'
+          + '唯一 Agent：Qoder CLI · 全部作业对话都走这条通道，无需任何 Key</div>'
+        : '<div style="padding:6px 8px;border:1px solid #f0c8c0;border-radius:8px;color:#a03020">'
+          + '修复路径：① 启动本机桥（hwdesk 目录 python syncserver.py 或桌面快捷方式）；'
+          + '② 确认 Qoder CLI 已安装（默认路径 ~/.qoder-cn，或设环境变量 HWDESK_QODER_CLI 指向 CLI）。</div>';
     }
-    hint.textContent = "扫到 " + list.length + " 个本机可用 Agent：";
-    box.innerHTML = list.map(function(c, i){
-      return '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid #e5e6eb;border-radius:8px;margin-bottom:6px">'
-        + '<div style="flex:1;min-width:0"><b>' + esc(c.label) + '</b>'
-        + '<span class="hint" style="display:block;word-break:break-all">' + esc(c.baseUrl || "-")
-        + (c.model ? " · " + esc(c.model) : "") + '（' + esc(c.source) + '）</span></div>'
-        + '<button class="btn sm primary" data-adopt="' + i + '">采用</button></div>';
-    }).join("");
-    box._candidates = list;
-    Array.prototype.forEach.call(box.querySelectorAll("[data-adopt]"), function(b){
-      b.addEventListener("click", function(){
-        var c = (box._candidates || [])[+b.getAttribute("data-adopt")];
-        if(c) adoptDiscovered(c);
-      });
-    });
+    addLog((ok ? "Qoder CLI 检测：就绪（" : "Qoder CLI 检测：未就绪（") + ((r && (r.error || r.entry)) || "") + "）");
   }).catch(function(){
     btn.disabled = false;
-    hint.textContent = "本机桥不可达——该功能需要本地模式（桌面快捷方式启动会自动拉起桥）";
-  });
-}
-/* 启动自动采用：页面打开就静默扫一次本机，把扫到的 Agent 直接用于所有作业对话。
- * 绝不覆盖手动配置（manualLock）与已可用配置（ready）；桥不可达静默跳过，
- * 云端页面 / 云端通道行为完全不变。 */
-function autoDiscoverLocalAgent(){
-  if(typeof Agent === "undefined" || !Agent.autoAdoptLocal) return Promise.resolve(null);
-  var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
-  var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 6000) : null;
-  return fetch(agentBridgeRoot() + "/agents/discover", { signal: ctl ? ctl.signal : undefined })
-  .then(function(r){ return r.json(); })
-  .then(function(res){
-    if(timer) clearTimeout(timer);
-    var preset = Agent.autoAdoptLocal((res && res.agents) || []);
-    if(preset){
-      addLog("已自动采用本机检测到的 Agent（预设 " + preset + "）——所有作业对话即刻生效，无需逐个配置");
-      showToast("已自动采用本机 Agent，所有对话即刻可用");
-      fillAgentSettings();
-    }
-    return preset;
-  }).catch(function(){
-    if(timer) clearTimeout(timer);
-    return null;   /* 桥不可达：静默，维持原有分层降级 */
+    if(hint) hint.textContent = "检测失败：本机桥不可达（需本地模式）";
   });
 }
 /* Laya 一键执行计划：决策 → 分派不同 AI → 自动交付编排（含上下文 + 去AI化） */
@@ -2467,7 +2092,7 @@ function onLogin(){
         showToast("已登录：" + SSO.mask(acc) +
           (ep.kind === "cloud" ? "（云端验证；一键直连需启动本机同步服务）" : ""));
         autoSyncAfterLogin({ verbose: true });   /* 登录即同步（本机桥不在时给出离线指引） */
-        agentProbeLayers();   /* 登录时检测本地 AI 部署：代理在不在、能用哪些模型，自动对应用户免 Key */
+        qoderSelfCheck();   /* 登录时检测 Qoder CLI（本机唯一 Agent）就绪状态 */
         return;
       }
       if(out.kind === "rejected"){
@@ -2881,29 +2506,63 @@ function onRequestChanges(id){
   saveState(); refreshAll();
   showToast("已退回，可重新生成草稿后再提交审批");
 }
-/* AI 对话：发送（组装完整提示词并复制） */
+/* AI 对话：发送（工作台内直接问 Qoder，不再复制跳转）
+ * 组装完整提示词（任务卡+决策+上下文+历史轮次）后作为单条 user 消息
+ * 发往本机桥 /agent/qoder；一轮一出（无流式），按钮实时显示等待秒数，
+ * 回复自动作为 ai 轮写入对话记录，可直接「一键交付」。 */
+var _hubBusy = false;
+var _hubWdTimer = null;
+function stopHubWatchdog(){ if(_hubWdTimer){ clearInterval(_hubWdTimer); _hubWdTimer = null; } }
 function onHubSend(){
   if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  if(typeof Agent === "undefined" || !Agent.askQoder){ showToast("agent.js 未加载，无法直连 Qoder 通道"); return; }
+  if(_hubBusy){ showToast("Qoder 还在思考，稍等…"); return; }
   var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
   if(!it){ showToast("请先选择任务"); return; }
   var agentId = state.chat.agentId;
-  if(!agentId || !AgentHub.REGISTRY[agentId]){ showToast("请先选择 AI"); return; }
+  if(!agentId || !AgentHub.REGISTRY[agentId]){ agentId = AgentHub.getDefault() || "qoder"; }
   var userMsg = el("hubInput").value.trim();
   var hooks = agentHooks();
   var histRec = AgentHub.chat(it.id);
   hooks.history = (histRec && histRec.turns) ? histRec.turns : [];
   var prompt = AgentHub.composePrompt(it, agentId, userMsg, hooks);
   if(!prompt){ showToast("提示词组装失败"); return; }
-  copyText(prompt);
-  /* 一律留在工作台内：只复制完整提示词，不打开任何 AI 网页 */
+  /* 记录我这一轮（含完整提示词，供追溯） */
   AgentHub.addTurn(it, {
     role: "user", agent: agentId, agentLabel: AgentHub.REGISTRY[agentId].label,
     text: userMsg || "（按任务卡与上下文直接执行）", prompt: prompt
   });
   el("hubInput").value = "";
-  addLog("AI 对话：向「" + AgentHub.REGISTRY[agentId].label + "」发送任务 " + it.name);
+  addLog("AI 对话：工作台内直问「" + AgentHub.REGISTRY[agentId].label + "」· 任务 " + it.name);
   saveState(); refreshAll();
-  showToast("提示词已复制，粘到「" + AgentHub.REGISTRY[agentId].label + "」发送；回复粘回输入框点「记录 AI 回复」");
+  _hubBusy = true;
+  var btn = el("btnChatSend");
+  if(btn){ btn.disabled = true; btn.textContent = "思考中…"; }
+  var wdStart = Date.now();
+  stopHubWatchdog();
+  _hubWdTimer = setInterval(function(){
+    if(btn && btn.disabled) btn.textContent = "思考中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
+  }, 1000);
+  Agent.askQoder([{ role: "user", content: prompt }]).then(function(r){
+    stopHubWatchdog();
+    _hubBusy = false;
+    if(btn){ btn.disabled = false; btn.textContent = "发送给所选 AI"; }
+    AgentHub.addTurn(it, {
+      role: "ai", agent: agentId,
+      agentLabel: (AgentHub.REGISTRY[agentId] || { label: "AI" }).label,
+      text: (r && r.output) || "（Qoder 返回了空回复，请重试）"
+    });
+    addLog("AI 对话：收到「" + (AgentHub.REGISTRY[agentId] || { label: "AI" }).label + "」回复（" + it.name + "）");
+    saveState(); refreshAll();
+    showToast("回复已进对话记录，满意就点该气泡上的「一键交付」");
+  }).catch(function(err){
+    stopHubWatchdog();
+    _hubBusy = false;
+    if(btn){ btn.disabled = false; btn.textContent = "发送给所选 AI"; }
+    var msg = (err && err.message) ? err.message : String(err);
+    addLog("Qoder 通道请求失败（AI 对话）：" + msg.slice(0, 80));
+    showToast("Qoder 通道请求失败：" + msg.slice(0, 120) + " —— 检查本机桥是否在跑（hwdesk 目录 python syncserver.py）");
+  });
 }
 /* AI 对话：记录 AI 回复 */
 function onChatReply(){
@@ -3336,50 +2995,14 @@ function bind(){
     if(e.key === "Escape") closeChat();
   });
 
-  /* Agent 选择器（极简：点一行就开聊） */
-  el("agPickList").addEventListener("click", function(e){
-    var row = e.target.closest(".ag-pick-item[data-ag]");
-    if(row) confirmAgPick(row.getAttribute("data-ag"));
-  });
-  el("agPickList").addEventListener("keydown", function(e){
-    if(e.key !== "Enter" && e.key !== " ") return;
-    var row = e.target.closest(".ag-pick-item[data-ag]");
-    if(row){ e.preventDefault(); confirmAgPick(row.getAttribute("data-ag")); }
-  });
-  el("agPickCfg").addEventListener("click", function(){
-    closeAgPick(); switchView("settings"); fillAgentSettings();
-  });
-  el("agPick").addEventListener("click", function(e){
-    if(e.target === el("agPick")) closeAgPick();
-  });
-  document.addEventListener("keydown", function(e){
-    if(e.key === "Escape" && el("agPick").style.display !== "none") closeAgPick();
-  });
+  /* Agent 已收敛为唯一 Qoder CLI：多 Agent 选择器已下线 */
 
-  /* 设置页：Agent 对话 API
-   * agent.js 没加载 / 设置区缺失时整段跳过。以前这里 el("agPreset") 是 null，
-   * 一抛错就把 bind() 剩下的绑定和整个页面初始化全带崩（表现为「按键没反应」） */
-  if(typeof Agent !== "undefined" && el("agPreset") && el("agSave")){
-    el("agPreset").addEventListener("change", function(e){
-      Agent.applyPreset(e.target.value);
-      fillAgentSettings();
-      addLog("Agent 预设切换为：" + Agent.PRESETS[e.target.value].label);
-    });
-    el("agSave").addEventListener("click", function(){
-      Agent.load();
-      Agent.config.preset = el("agPreset").value;
-      Agent.config.manualLock = true;   /* 用户显式选过，开机自动降级不再覆盖（#56） */
-      Agent.config.baseUrl = el("agUrl").value.trim();
-      Agent.setKey(Agent.config.preset, el("agKey").value.trim());
-      Agent.config.model = el("agModel").value.trim();
-      Agent.save();
-      updateAgentHint();   /* 保存后立即刷新通道状态与 Key 标签（issue #81） */
-      addLog("Agent 配置已保存（" + Agent.PRESETS[Agent.config.preset].label + "，已配 Key：" + Agent.usablePresets().length + " 个预设）");
-      showToast(Agent.ready() ? "已保存，作业卡「💬 对话 / AI 代提交」直接可用" : "已保存（暂无免 Key 通道可用，配 Key / 启动本机代理后才能开聊）");
-    });
-    el("agDiscover").addEventListener("click", onAgentDiscover);
+  /* 设置页：Agent（唯一）= Qoder CLI。无配置可存，只绑检测按钮。
+   * agent.js 没加载 / 设置区缺失时整段跳过，不给初始化埋雷 */
+  if(typeof Agent !== "undefined" && el("agQoderCheck")){
+    el("agQoderCheck").addEventListener("click", onQoderCheck);
   }
-  el("filterRow").addEventListener("click", function(e){
+    el("filterRow").addEventListener("click", function(e){
     var c = e.target.closest("[data-f]");
     if(c){ state.filter = c.getAttribute("data-f"); refreshAll(); }
   });
@@ -3388,60 +3011,17 @@ function bind(){
 function safe(name, fn){
   try { fn(); } catch(e){ console.error("[hwdesk] " + name + " failed:", e); }
 }
-/* 云端通道开机自检（issue #54）：打开方式 + 访问参数 + 网关体检。
- * 报错前先把「怎么打开的」讲清楚：file:// / 缺 sharecode 都是用户可自助修复的。 */
-function cloudSelfCheck(){
-  if(typeof CloudAI === "undefined") return;
-  var hints = CloudAI.contextHints();
-  var msg = "";
-  if(hints.isFile){
-    msg = "当前是本地 file:// 打开，没有云端权限——请从发布网址打开本页（或在设置里填自己的 API Key）";
-  } else if(hints.isPublishedHost && !hints.hasSharecode){
-    msg = "当前地址缺少分享参数，云端请求会报「链接不完整」——请改用完整分享链接打开";
-  }
-  if(msg){
-    var banner = el("cloudBanner");
-    if(banner){
-      el("cloudBannerMsg").textContent = msg;
-      var cp = el("cloudBannerCopy");
-      if(hints.fullLink && navigator.clipboard && navigator.clipboard.writeText){
-        cp.style.display = "";
-        cp.onclick = function(){
-          navigator.clipboard.writeText(hints.fullLink).then(function(){ showToast("完整链接已复制"); });
-        };
-      }
-      banner.style.display = "";
-      var close = el("cloudBannerClose");
-      if(close) close.onclick = function(){ banner.style.display = "none"; };
-    }
-  }
-  /* 网关体检：结果落在 AI 对话区状态行，而不是等用户发消息后才报错 */
+/* Qoder 通道开机自检：本机桥/CLI 状态，结果落在 AI 对话区状态行 */
+function qoderSelfCheck(){
+  if(typeof Agent === "undefined" || !Agent.qoderStatus) return;
   var st = el("cloudStatus");
-  if(st) st.textContent = "云端通道检测中…";
-  CloudAI.healthCheck(8000).then(function(r){
+  if(st) st.textContent = "Agent：Qoder CLI 检测中…";
+  Agent.qoderStatus(6000).then(function(r){
     if(!st) return;
     st.textContent = (r && r.ok)
-      ? "云端通道正常"
-      : "云端通道异常（" + ((r && r.code) || "?") + "）· " +
-        CloudAI.errText({ error: { code: (r && r.code) || "" } }).slice(0, 60);
-  }).catch(function(){ if(st) st.textContent = "云端通道异常"; });
-}
-/* 分层自动降级（issue #56）：代理 → CloudAI → 本机已存 key；探测到可用层就自动切换。
- * 登录成功后也会重跑一次（onLogin），保证「登录时检测本地部署」而不是只看开机那一刻。 */
-function agentProbeLayers(){
-  if(typeof Agent === "undefined" || !Agent.probeLayers) return;
-  Agent.probeLayers(4000).then(function(r){
-    var st = el("cloudStatus");
-    if(r && r.layer === 1){
-      var picked = Agent.autoSelect(r);
-      if(picked === "cloudproxy" && typeof fillAgentSettings === "function") fillAgentSettings();
-      if(st) st.textContent = "本机 AI 代理可用（免 Key，自动对应模型 " + Agent.config.model + "）";
-    }else if(r && r.layer === 2){
-      if(st && !Agent.config.manualLock) st.textContent = "云端通道可用（免 Key，发送时自动走云端）";
-    }else if(r && r.layer === 3){
-      if(st) st.textContent = "使用已存 Key 的「" + ((Agent.PRESETS[r.presetId] || {}).label || r.presetId) + "」";
-    }
-  }).catch(function(){ /* 探测失败静默，走 CloudAI/手动层 */ });
+      ? "Agent：Qoder CLI（" + (r.model || "Qwen3.8-Flash") + "）· 就绪"
+      : "Agent：Qoder CLI 未就绪（" + ((r && r.error) || "?").slice(0, 60) + "）";
+  }).catch(function(){ if(st) st.textContent = "Agent：Qoder CLI 检测失败"; });
 }
 document.addEventListener("DOMContentLoaded", function(){
   safe("initAccountSpace", initAccountSpace);   /* #92：先挂载账号数据空间，再读数据 */
@@ -3456,9 +3036,8 @@ document.addEventListener("DOMContentLoaded", function(){
   safe("initLoginGate", initLoginGate);
   safe("refreshAll", refreshAll);
   safe("switchView", function(){ switchView("overview"); });
-  safe("cloudSelfCheck", function(){ if(typeof CloudAI !== "undefined") cloudSelfCheck(); });
-  safe("agentProbeLayers", agentProbeLayers);
-  safe("agentAutoDiscover", function(){ if(typeof Agent !== "undefined" && Agent.autoAdoptLocal) autoDiscoverLocalAgent(); });
+  safe("qoderSelfCheck", function(){ if(typeof Agent !== "undefined") qoderSelfCheck(); });
+  safe("fillAgentSettingsBoot", function(){ if(typeof Agent !== "undefined") fillAgentSettings(); });
   /* 带着有效凭据直接打开（记住到本机 / 仅本次未过期）→ 开机也自动同步一次 */
   safe("autoSyncOnBoot", function(){ setTimeout(function(){ autoSyncAfterLogin({}); }, 600); });
 });

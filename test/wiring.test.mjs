@@ -48,18 +48,14 @@ function pyHas(re, what) {
 
 console.log("wiring | ids: " + ids.size + ", inline script: " + app.length + " chars");
 
-/* ============ #54 云端通道开机自检（横幅 + 状态行 + safe 接线） ============ */
-test("#54 自检横幅与状态行元素齐全", () => {
-  ["cloudBanner", "cloudBannerMsg", "cloudBannerCopy", "cloudBannerClose", "cloudStatus"].forEach((id) => {
-    assert.ok(ids.has(id), "missing id: " + id);
-  });
+/* ============ Qoder 通道开机自检（状态行 + safe 接线） ============ */
+test("Agent 状态行元素齐全（唯一 Agent：Qoder CLI）", () => {
+  assert.ok(ids.has("cloudStatus"), "missing id: cloudStatus");
 });
-test("#54 开机自检已定义、经 safe() 容错接线、用上 contextHints + healthCheck", () => {
-  has(/function cloudSelfCheck\(/, "cloudSelfCheck() defined");
-  has(/safe\("cloudSelfCheck"/, "boot wires cloudSelfCheck via safe()");
-  has(/CloudAI\.contextHints\(/, "cloudSelfCheck reads contextHints");
-  has(/CloudAI\.healthCheck\(8000\)/, "cloudSelfCheck runs healthCheck(8000)");
-  has(/cloudBannerCopy/, "banner has copy-full-link affordance");
+test("开机自检已定义、经 safe() 容错接线（qoderSelfCheck）", () => {
+  has(/function qoderSelfCheck\(\)\{/, "qoderSelfCheck() defined");
+  has(/safe\("qoderSelfCheck"/, "boot wires the self check via safe()");
+  has(/Agent\.qoderStatus\(6000\)/, "qoderSelfCheck pings the bridge status endpoint");
 });
 
 
@@ -104,16 +100,18 @@ test("AI rows are keyboard reachable (Enter / Space)", () => {
   has(/role="button" tabindex="0"/, 'role="button" tabindex="0" on each AI row');
 });
 
-/* ---------- 3. 设置页「Agent 对话 API」区块（回归：markup 丢失 → bind() 抛错） ---------- */
-test("Agent settings block exists (agPreset / agUrl / agKey / agModel / agHint / agKeyLink / agSave)", () => {
-  for (const id of ["agPreset", "agUrl", "agKey", "agModel", "agHint", "agKeyLink", "agSave"]) {
+/* ---------- 3. 设置页「Agent（唯一）：Qoder CLI」状态卡 ---------- */
+test("Agent settings card exists (agChannel / agQoderCheck / agQoderHint / agFound)", () => {
+  for (const id of ["agChannel", "agQoderCheck", "agQoderHint", "agFound"]) {
     assert.ok(ids.has(id), "#" + id + " missing from the settings view");
   }
+  assert.ok(!ids.has("agPreset") && !ids.has("agKey") && !ids.has("agSave"),
+      "preset/key/save controls should be gone (zero-config agent)");
 });
 test("Agent bindings are guarded so a missing block cannot abort bind()", () => {
-  has(/if\(typeof Agent !== "undefined" && el\("agPreset"\) && el\("agSave"\)\)/,
-      "guard around the ag* bindings");
-  has(/function fillAgentSettings\(\)\{[\s\S]{0,200}if\(!el\("agPreset"\)\) return;/,
+  has(/if\(typeof Agent !== "undefined" && el\("agQoderCheck"\)\)\{/,
+      "guard around the agQoderCheck binding");
+  has(/function fillAgentSettings\(\)\{[\s\S]{0,200}if\(!el\("agChannel"\)\) return;/,
       "fillAgentSettings() bails out when the block is absent");
 });
 
@@ -137,12 +135,12 @@ test("AI view hosts chat + risk-check; agent-config blocks live in settings (#73
   for (const id of ["rText", "btnRisk", "chatLog", "chatTask", "agentGrid"]) {
     assert.ok(chatView.includes('id="' + id + '"'), "#" + id + " not inside the AI view");
   }
-  /* Agent 配置与默认执行 AI 收进设置页，AI 视图不再外显 */
+  /* Agent 状态卡与默认执行 AI 收进设置页，AI 视图不再外显 */
   const settingsView = html.slice(settingsStart);
-  for (const id of ["agPreset", "agKey", "agSave", "selDefaultAi"]) {
+  for (const id of ["agQoderCheck", "agFound", "selDefaultAi"]) {
     assert.ok(settingsView.includes('id="' + id + '"'), "#" + id + " not inside the settings view");
   }
-  assert.ok(!chatView.includes('id="agPreset"'), "agPreset still inside the AI view");
+  assert.ok(!chatView.includes('id="agQoderCheck"'), "agQoderCheck still inside the AI view");
 });
 test("workflow view hosts the approval / delivery / review boxes", () => {
   const wfStart = html.indexOf('id="view-workflow"');
@@ -153,24 +151,14 @@ test("workflow view hosts the approval / delivery / review boxes", () => {
   }
 });
 
-/* ---------- 5. 极简 Agent 选择器（AI 代提交：只选 Agent，选完工作台内开聊） ---------- */
-test("agent picker markup exists (agPick / agPickList / agPickFor / agPickCfg)", () => {
-  for (const id of ["agPick", "agPickList", "agPickFor", "agPickCfg"]) {
-    assert.ok(ids.has(id), "#" + id + " missing");
+/* ---------- 5. 多 Agent 选择器已随 AI 收敛下线（唯一 Agent 直开抽屉） ---------- */
+test("multi-agent picker is fully removed (markup + handlers)", () => {
+  for (const gone of ["agPick", "agPickList", "agPickFor", "agPickCfg"]) {
+    assert.ok(!ids.has(gone), "#" + gone + " should be gone");
   }
-});
-test("agent picker rows are keyboard reachable and wired", () => {
-  has(/el\("agPickList"\)\.addEventListener\(\s*"click"/, "agPickList delegated click");
-  has(/closest\(\s*"\.ag-pick-item\[data-ag\]"\s*\)/, 'closest(".ag-pick-item[data-ag]")');
-  has(/confirmAgPick\(row\.getAttribute\("data-ag"\)\)/, "confirmAgPick(<preset>)");
-  has(/el\("agPickList"\)\.addEventListener\(\s*"keydown"/, "agPickList keydown");
-  has(/role="button" tabindex="0"/, 'role="button" tabindex="0"');
-});
-test("agent picker closes via mask click / Escape / 管理配置 button", () => {
-  has(/e\.target === el\("agPick"\)\s*\)\s*closeAgPick\(\)/, "mask click -> closeAgPick()");
-  has(/e\.key === "Escape" && el\("agPick"\)\.style\.display !== "none"/, "Escape closes agPick");
-  has(/el\("agPickCfg"\)\.addEventListener\(\s*"click"/, "agPickCfg wired");
-  has(/closeAgPick\(\); switchView\("settings"\); fillAgentSettings\(\);/, "管理配置 jumps to the settings view");
+  assert.ok(!/function openAgPick\(/.test(app), "openAgPick gone");
+  assert.ok(!/function confirmAgPick\(/.test(app), "confirmAgPick gone");
+  assert.ok(!/function closeAgPick\(/.test(app), "closeAgPick gone");
 });
 
 /* ---------- 6. AI 代提交改走工作台内嵌对话（不再开浏览器） ---------- */
@@ -197,9 +185,11 @@ test("Laya 执行计划 also opens the in-workbench drawer (top task context)", 
   has(/dispatchToAi\(plan\.instruction, "", "Laya 执行计划（" \+ plan\.queue\.length \+ " 项）", plan\.queue\[0\]\.item\.id\)/,
       "onLayaPlan forwards the top task id");
 });
-test("AI 代提交 with multiple usable agents opens the picker; unconfigured nudges to Agent view", () => {
-  has(/openAgPick\(id\); return;/, "multiple usable agents -> openAgPick");
-  has(/switchView\("chat"\); fillAgentSettings\(\); return;/, "not-configured path jumps to the AI view");
+test("AI 代提交直开对话抽屉（唯一 Agent，无选择、无配置劝导）", () => {
+  has(/function onAiChat\(id, auto\)\{[\s\S]{0,300}startAgentChat\(id, auto\);/,
+      "onAiChat goes straight to the drawer");
+  assert.ok(!/openAgPick\(id\)/.test(app), "no picker hop anymore");
+  assert.ok(!/暂无可用通道/.test(app), "no channel-missing nudge (zero-config agent)");
 });
 
 /* ---------- 7. 对话抽屉：提交预览（选择性提交） ---------- */
@@ -229,15 +219,14 @@ test("startup runs each step through safe() so one failure cannot abort init", (
   }
 });
 
-/* ---------- 5. 流式对话的失败恢复与落盘（回归：失败一次按钮永久卡死） ---------- */
-test("streamChat failure path resets _chatBusy and the send button", () => {
-  has(/\.catch\(function\(err\)\{\s*resetChatBtn\(\);/, "catch() -> resetChatBtn() before rendering");
-  has(/function resetChatBtn\(\)\{[\s\S]{0,160}_chatBusy = false;/, "resetChatBtn() clears _chatBusy");
-  has(/function resetChatBtn\(\)\{[\s\S]{0,300}b\.textContent = "发送"/, 'resetChatBtn() restores the "发送" label');
+/* ---------- 5. Qoder 问答（非流式）的失败恢复与落盘 ---------- */
+test("qoderFail resets _chatBusy and the send button on failure", () => {
+  has(/function qoderFail\(chat, err\)\{[\s\S]{0,200}resetChatBtn\(\);/,
+      "qoderFail restores the send button via resetChatBtn()");
 });
-test("streaming persists partial output instead of saving only at the end", () => {
-  has(/Date\.now\(\) - _lastSave > 1000\)\{ _lastSave = Date\.now\(\); Agent\.saveChat\(_chatId, chat\); \}/,
-      "periodic Agent.saveChat() while streaming");
+test("answer is persisted once it lands; closing mid-call flushes the pending state", () => {
+  has(/Agent\.saveChat\(_chatId, chat\);[\s\S]{0,80}renderChat\(chat\);[\s\S]{0,40}finishChat\(\)/,
+      "answer saved on arrival");
   has(/function closeChat\(\)\{[\s\S]{0,200}if\(_chatBusy[\s\S]{0,120}Agent\.saveChat\(_chatId, c\);/,
       "closeChat() flushes a half-finished answer");
 });
@@ -252,10 +241,10 @@ test("needsReview keeps the card and the approval queue in sync", () => {
   has(/it\.status = "submitted"; it\.reviewPending = false;/, "approval clears the flag");
 });
 
-/* ---------- 7. CORS 标注 ---------- */
-test("preset dropdown is annotated with the browser-direct (CORS) status", () => {
-  has(/Agent\.corsLabel\(id\)/, "corsLabel() used when rendering the preset options");
-  has(/浏览器直连：/, "hint line carries the CORS status");
+/* ---------- 7. 零配置语义（预设/Key/CORS 标注已随多通道下线） ---------- */
+test("preset dropdown & CORS annotations are gone (single zero-config agent)", () => {
+  assert.ok(!/Agent\.corsLabel/.test(app), "corsLabel usage gone");
+  assert.ok(!/浏览器直连：/.test(app), "CORS hint copy gone");
 });
 
 /* ---------- 8. 登录门禁真实验证（凭据先过本机桥 → course.hzcu.edu.cn） ---------- */
@@ -485,43 +474,23 @@ test("UI cleanup: long help paragraphs are gone", () => {
   assert.ok(!/点开即聊）。想用你自己的模型服务时才填这里/.test(html), "chat setup long hint removed");
 });
 
-/* ---------- 10. cloudai 体检接线：发送前 healthCheck 拦下失效链接 ---------- */
-test("cloud send probes the gateway with healthCheck before the first chat", () => {
-  has(/CloudAI\.healthCheck\(8000\)/, "streamChat probes the gateway via CloudAI.healthCheck(8000)");
-  has(/if\(CloudAI\._hcOk\)\{ doCloudChat\(\); return; \}\s*CloudAI\.healthCheck\(8000\)\.then/,
-      "the only chat call is gated behind the healthCheck probe");
-  has(/var doCloudChat = function\(\)/, "chat call wrapped in doCloudChat for the probe gate");
-  has(/cloudFail\(\{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
-      "failed probe lands in cloudFail with the real healthCheck code (transient ones retry)");
-  has(/CloudAI\._hcOk = true/, "a passing probe is cached for the session");
+/* ---------- 10. Qoder 通道（原 cloudai 体检接线区）：单通道直发，失败走 qoderFail ---------- */
+test("chat send goes through Agent.askQoder only (no gateway probe chain needed)", () => {
+  has(/Agent\.askQoder\(msgs\)/, "the only chat call is askQoder");
+  assert.ok(!/doCloudChat/.test(app), "cloud chat wrapper gone");
+  assert.ok(!/CloudAI\.healthCheck/.test(app), "gateway health-check chain gone");
+  assert.ok(!/cloudai\.js/.test(html), "cloudai.js no longer loaded");
 });
-test("cloud chat transient failures auto-retry on an escalating plan with machine memory", () => {
-  has(/var cloudFail = function\(err\)/, "chat-stage errors funnel through cloudFail");
-  has(/var plan = \(typeof CloudAI\.retryPlan === "function"\) \? CloudAI\.retryPlan\(\)/,
-      "the retry plan comes from cloudai.js (machine-memory aware, old sdk falls back)");
-  has(/transient && !cloudSent && netRetries < plan\.max/,
-      "transient-only retry before any streamed output (no duplicate content), capped by plan");
-  has(/setTimeout\(startCloud, plan\.delaysMs\[/,
-      "each retry goes back through the healthCheck gate after the plan delay");
-  has(/CloudAI\._hcOk = false/, "the stale health cache is invalidated before retrying");
-  has(/if\(transient && typeof CloudAI\.recordFlap === "function"\) CloudAI\.recordFlap\(\)/,
-      "every transient failure is remembered on this machine");
-  has(/if\(typeof CloudAI\.recordRescue === "function"\) CloudAI\.recordRescue\(\)/,
-      "a rescued send is remembered too (proof retry works here)");
+test("send button shows a thinking state with elapsed seconds for the slow CLI call", () => {
+  has(/textContent = "思考中… " \+ Math\.round\(\(Date\.now\(\) - wdStart\) \/ 1000\) \+ "s"/,
+      "思考中… Ns state while Qoder CLI works (wait is visible, #99 spirit)");
 });
-test("transient probe failures go through the same retry loop; permanent ones do not", () => {
-  has(/if\(hc && hc\.ok\)\{ CloudAI\._hcOk = true; doCloudChat\(\); return; \}\s*cloudFail\(\{ error: \{ code: \(hc && hc\.code\) \|\| "gateway_network_error" \} \}\)/,
-      "probe failure now funnels into cloudFail (transient codes retry, 403/404 don't)");
-  /* 该分支在 cloudFail 声明之前 return，catch 里拿到的 cloudFail 是 undefined（会抛 TypeError
-   * 反而吞掉兜底提示）→ 模型目录拉取失败直接走 cloudChatFail，不进重试环。 */
-  has(/\.catch\(function\(err\)\{ cloudChatFail\(chat, err\); \}\)/,
-      "model-catalog fetch failures fall back directly (cloudFail is not in scope on that branch)");
+test("qoder failure copy is actionable (bridge + CLI detection pointers)", () => {
+  has(/Qoder 通道请求失败/, "failure header names the channel");
+  has(/python syncserver\.py/, "copy points at starting the bridge");
+  has(/「设置 → Agent（唯一）：Qoder CLI」点检测/, "copy points at the settings check");
 });
-test("cloudChatFail refines gateway_network_error with a live diagnosis", () => {
-  has(/if\(typeof CloudAI !== "undefined"\) CloudAI\._hcOk = false/,
-      "final failure also invalidates the cached probe for the next send");
-  has(/CloudAI\.diagnose\(function\(msg\)/, "diagnose() replaces the one-size-fits-all copy");
-});
+
 const vbs = readFileSync(path.join(root, "launch-hwdesk-online.vbs"), "utf8");
 test("启动器守卫默认网关直连：本机回环系统代理（Clash 特征）自动切回直连", () => {
   for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
@@ -638,13 +607,14 @@ test("legacy instruction-flow functions are fully removed from the page script",
 });
 
 
-/* ============ #56 分层自动降级接线 ============ */
-test("#56 开机分层探测已接线（safe 容错）且聊天入口识别 cloudproxy 层", () => {
-  has(/function agentProbeLayers\(/, "agentProbeLayers() defined");
-  has(/safe\("agentProbeLayers"/, "boot wires agentProbeLayers via safe()");
-  has(/Agent\.autoSelect\(/, "probe result feeds autoSelect");
-  has(/Agent\.config\.manualLock = true/, "explicit preset pick sets manualLock");
-  has(/agentUsable/, "chat entry checks the Agent layer before falling back to CloudAI");
+/* ============ 唯一 Agent 开机自检接线（原 #56 分层降级已随多通道下线） ============ */
+test("开机自检走 qoderSelfCheck（safe 容错），分层降级/自动采用已移除", () => {
+  has(/function qoderSelfCheck\(\)\{/, "qoderSelfCheck() defined");
+  has(/safe\("qoderSelfCheck"/, "boot wires the self check via safe()");
+  assert.ok(!/agentProbeLayers/.test(app), "layered probe gone");
+  assert.ok(!/Agent\.autoSelect/.test(app), "autoSelect gone");
+  assert.ok(!/manualLock/.test(app), "manualLock semantics gone");
+  assert.ok(!/safe\("agentAutoDiscover"/.test(app), "boot discovery step gone");
 });
 /* ---------- 11. issue #62：截止日期展示 + 忽略作业（同步不复活） ---------- */
 test("dueText always shows the concrete due date (YYYY年M月D日)", () => {
@@ -774,72 +744,87 @@ test("#70 open.py 不再硬编码用户路径", () => {
   const op = readFileSync(path.join(root, "open.py"), "utf8");
   assert.ok(!op.includes("Users/feng"), "feng hardcode removed");
 });
-test("#70 聊天失败文案指向本地启动器（自助修复闭环）", () => {
-  has(/launch-hwdesk-local\.vbs/, "failure copy mentions the local launcher");
+test("#70 聊天失败文案指向自助修复（本机桥 + Qoder CLI 检测）", () => {
+  has(/python syncserver\.py/, "failure copy mentions starting the bridge");
+  has(/Qoder CLI/, "failure copy names the only agent channel");
 });
 test("#70 syncserver：混元路由 + ark passthrough 标记", () => {
   pyHas(/HWDESK_PROXY_HUNYUAN_KEY/, "hunyuan env key");
   pyHas(/ark-endpoint-id \(passthrough\)/, "ark passthrough marker in models catalog");
 });
 
-/* ---------- 14. 本地检测 Agent 凭据（syncserver /agents/discover + 页面一键采用） ---------- */
-test("syncserver /agents/discover：本机凭据发现；云端页面（非本机 Origin）一律 403", () => {
-  pyHas(/elif self\.path\.startswith\("\/agents\/discover"\)/, "route exists");
+/* ---------- 14. 唯一 Agent：Qoder CLI（syncserver /agent/qoder + 页面直聊） ---------- */
+test("syncserver /agent/qoder：本机 Qoder CLI 问答；云端页面（非本机 Origin）一律 403", () => {
+  pyHas(/if self\.path\.startswith\("\/agent\/qoder"\)/, "ask route exists");
+  pyHas(/self\.path\.startswith\("\/agent\/qoder\/status"\)/, "status route exists");
   pyHas(/origin\.lower\(\) != "null"/, "file:// pages (Origin: null) are allowed");
   pyHas(/"127\.0\.0\.1" not in origin[\s\S]{0,80}"localhost" not in origin/,
-      "non-local origins are rejected (credentials never leave the machine)");
-  pyHas(/def discover_local_agents\(\)/, "scanner exists");
-  pyHas(/\.codex", "auth\.json/, "scans codex auth.json for OPENAI_API_KEY");
-  pyHas(/def _codex_cfg\(cfg_path\)/, "parses codex config.toml (base_url/model)");
-  pyHas(/ANTHROPIC_AUTH_TOKEN/, "scans claude settings.json relay token");
-  pyHas(/for aid, var, label, base, model in DISCOVER_ENV_VARS/, "scans vendor env vars");
+      "non-local origins are rejected (the local CLI never serves the cloud)");
+  pyHas(/def qoder_entry\(\)/, "CLI entry resolution exists");
+  pyHas(/HWDESK_QODER_CLI/, "env override supported");
+  pyHas(/def qoder_ask\(messages\)/, "runner exists");
+  pyHas(/_QODER_LOCK\.acquire\(blocking=False\)/, "single-flight lock (one CLI at a time)");
+  pyHas(/subprocess\.TimeoutExpired/, "timeout is handled");
+  pyHas(/QODER_TIMEOUT = 300/, "timeout is generous (assignment drafting takes tens of seconds)");
+  assert.ok(!py.includes('self.path.startswith("/agents/discover")'), "old discovery route is gone");
 });
-test("页面「检测本机可用 Agent」：一键发现 + 采用（凭据只在本机流转）", () => {
-  assert.ok(/id="agDiscover"/.test(html), "discover button exists in Agent config card");
+test("syncserver qoder_ask：提示词走 stdin（无 argv 引号注入面）+ messages 组段", () => {
+  pyHas(/input=prompt\.encode\("utf-8"\)/, "prompt piped via stdin as bytes");
+  pyHas(/def qoder_compose_prompt\(messages\)/, "messages -> single prompt composer exists");
+  pyHas(/【用户】/, "user turns are role-prefixed");
+  pyHas(/【你上一轮的回复】/, "assistant turns are role-prefixed");
+  pyHas(/QODER_MAX_PROMPT/, "prompt size cap exists");
+});
+test("页面 Agent（唯一）状态卡：Qoder CLI 检测按钮 + 状态行", () => {
+  assert.ok(/id="agQoderCheck"/.test(html), "check button exists in Agent config card");
   assert.ok(/id="agFound"/.test(html), "result box exists");
-  has(/function onAgentDiscover\(\)/, "discover handler exists");
-  has(/agentBridgeRoot\(\) \+ "\/agents\/discover"/, "calls the bridge discovery endpoint");
-  has(/function adoptDiscovered\(/, "adopt flow exists (re-fills settings + logs)");
-  has(/Agent\.applyDiscovered\(/, "adoption goes through agent.js applyDiscovered");
-  has(/\(res && res\.error\)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
+  has(/function onQoderCheck\(\)/, "check handler exists");
+  has(/function refreshQoderChannel\(\)/, "channel status shared by settings + chat view");
+  has(/Agent\.qoderStatus\(/, "page goes through agent.js qoderStatus");
+  assert.ok(!/id="agDiscover"/.test(html), "old discover button is gone");
+  assert.ok(!/id="agPreset"/.test(html), "preset selector is gone");
+  assert.ok(!/id="agKey"/.test(html), "API key input is gone");
+  assert.ok(!/id="cloudBanner"/.test(html), "cloud banner is gone");
 });
-test("agent.js 本地检测采用：matchPreset + applyDiscovered", () => {
+test("agent.js 2.0.0：唯一通道 = 本机桥 /agent/qoder（零配置）", () => {
   const ag = readFileSync(path.join(root, "agent.js"), "utf8");
-  assert.ok(/Agent\.matchPreset = function/.test(ag), "matchPreset exists");
-  assert.ok(/Agent\.applyDiscovered = function/.test(ag), "applyDiscovered exists");
-  assert.ok(/keys\[preset\] = c\.apiKey/.test(ag), "key stored per-preset");
+  assert.ok(/Agent\.askQoder = async function/.test(ag), "askQoder exists");
+  assert.ok(/Agent\.qoderStatus = async function/.test(ag), "qoderStatus exists");
+  assert.ok(/\/agent\/qoder/.test(ag), "hits the bridge qoder endpoint");
+  assert.ok(!/PRESETS/.test(ag), "no presets anymore");
+  assert.ok(!/apiKey/.test(ag), "no api key anywhere");
+  assert.ok(/BODY_BUDGET/.test(ag), "request-body budget trimming carried over from 1.3.2");
 });
-test("启动自动采用：所有作业对话统一走本机 Agent；手动配置（manualLock）与已可用配置绝不覆盖", () => {
-  const ag = readFileSync(path.join(root, "agent.js"), "utf8");
-  assert.ok(/Agent\.pickLocalCandidate = function/.test(ag), "candidate picker exists");
-  assert.ok(/Agent\.autoAdoptLocal = function/.test(ag), "auto-adopt exists");
-  assert.ok(/if \(Agent\.config\.manualLock\) return null;/.test(ag), "manualLock is respected");
-  assert.ok(/var pristine = Agent\.config\.preset === "cloudproxy"/.test(ag),
-      "pristine cloudproxy default counts as unconfigured (ready() is always true on fresh profiles, issue #81)");
-  has(/function autoDiscoverLocalAgent\(\)/, "boot-time discovery step exists");
-  has(/Agent\.autoAdoptLocal\(/, "page adoption goes through the guarded helper");
-  assert.ok(/safe\("agentAutoDiscover"/.test(html), "wired into fault-tolerant init");
+test("对话抽屉：streamChat 直连 askQoder，CloudAI 分支整体下线", () => {
+  has(/function streamChat\(chat\)\{/, "streamChat exists");
+  has(/Agent\.askQoder\(msgs\)/, "streamChat calls askQoder");
+  has(/function qoderFail\(chat, err\)\{/, "failure path is qoder-specific");
+  assert.ok(!/CloudAI/.test(html), "no CloudAI references left in the page");
+  assert.ok(!/cloudai\.js/.test(html), "cloudai.js no longer included");
+});
+test("AI 代提交：不再弹多 Agent 选择器，直开对话抽屉", () => {
+  has(/function onAiChat\(id, auto\)\{[\s\S]{0,300}startAgentChat\(id, auto\);/,
+      "onAiChat goes straight to the drawer");
+  assert.ok(!/function openAgPick\(/.test(app), "agPick selector is gone");
+  assert.ok(!/id="agPick"/.test(html), "agPick overlay markup is gone");
+  assert.ok(!/id="chatSetup"/.test(html), "inline key setup bar is gone");
+  assert.ok(!/function fillChatSetup\(/.test(app), "chat setup filler is gone");
 });
 
-/* ============ 对话体验：卡「生成中」看门狗 + 「插入」按钮 ============ */
-test("对话看门狗：90 秒无增量主动中止，所有收尾路径统一清表", () => {
+/* ============ 对话体验：等待可见（Qoder 单轮无流式）+ 「插入」按钮 ============ */
+test("对话等待计时：所有收尾路径统一清表；askQoder 自带超时兜底，不会永远生成中", () => {
   has(/function stopChatWatchdog/, "watchdog stop helper exists");
-  has(/90 秒没有任何响应，已自动停止/, "watchdog fires with an actionable message");
-  has(/wdAbort = CloudAI\.chat\(/, "cloud path's abort fn is captured for the watchdog");
-  has(/var _ac = \(typeof AbortController !== "undefined"\) \? new AbortController\(\) : null;\s*\n\s*wdAbort = function\(\)\{ if\(_ac\) _ac\.abort\(\); \};/,
-      "direct path is abortable (AbortController wired up)");
-  has(/fetch\(url, \{ method: "POST", headers: _headers, body: body, signal: _ac \? _ac\.signal : undefined \}\)/,
-      "direct fetch honors the abort signal");
+  has(/思考中… " \+ Math\.round\(\(Date\.now\(\) - wdStart\) \/ 1000\) \+ "s"/,
+      "elapsed seconds are visible while waiting");
   has(/function finishChat\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
       "finishChat clears the watchdog");
-  has(/function cloudChatFail\(chat, err\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
-      "cloudChatFail clears the watchdog");
+  has(/function qoderFail\(chat, err\)\{\s*\n\s*stopChatWatchdog\(\)/,
+      "qoderFail clears the watchdog");
   has(/function resetChatBtn\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
       "resetChatBtn clears the watchdog");
-  assert.ok((app.match(/wdBump\(\)/g) || []).length >= 2,
-      "both stream paths feed the watchdog on delta");
-  /* #93 的本机 Agent 发现前端不许被本 PR 波及（v1 曾误删，review 抓到） */
-  has(/agFound|agentBridgeRoot/, "#93 local-agent-discovery frontend stays intact");
+  has(/Agent\.askQoder\(msgs\)/, "the only chat call is askQoder (timeout-bounded)");
+  assert.ok((app.match(/stopChatWatchdog\(\);/g) || []).length >= 3,
+      "every finishing path stops the timer (no leak)");
 });
 test("「插入」按钮：AI 回复可一键插入输入框光标处（像 WorkBuddy）", () => {
   has(/data-ins="' \+ i \+ '" title="把这条回复插入到下方输入框光标处/,
