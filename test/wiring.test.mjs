@@ -341,10 +341,12 @@ test("syncserver /verify only logs in (no collection) and returns ok/error JSON"
 
 /* ---------- 8b. 登录链路对准真实平台：城院 CAS → courses.hzcu.edu.cn（Tronclass） ---------- */
 test("syncserver logs in via the ZUCC unified-auth CAS into the Tronclass LMS", () => {
-  pyHas(/URL_CAS = "https:\/\/ca\.hzcu\.edu\.cn"/, "CAS endpoint of ca.hzcu.edu.cn");
+  pyHas(/URL_CAS = "http:\/\/ca\.hzcu\.edu\.cn"/, "CAS endpoint uses the live HTTP origin");
   pyHas(/URL_LMS = "https:\/\/courses\.hzcu\.edu\.cn"/, "data lives on the Tronclass LMS host");
   pyHas(/def hzcu_login\(account, password\)/, "hzcu_login() submits the CAS form");
   pyHas(/"execution": form_info\["execution"\],\s*"_eventId": "submit"/, "CAS form carries execution/_eventId");
+  pyHas(/def cas_origin\(page_url\)/, "CAS Origin is derived from the live form page");
+  pyHas(/"Origin": cas_origin\(cas_page_url\)/, "CAS POST uses the live form page Origin");
   pyHas(/CAS_AES_KEY = b"c6dda3852e2d4be2"/, "CAS password is AES-128-ECB encrypted with the page key");
   pyHas(/class="\[\^"\]\*errorMsg/, "CAS error page is parsed for a readable reason");
   pyHas(/登录后未能建立课程端会话/, "session probe rejects a logged-out shell");
