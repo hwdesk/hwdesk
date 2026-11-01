@@ -801,7 +801,7 @@ test("页面「检测本机可用 Agent」：一键发现 + 采用（凭据只�
   has(/agentBridgeRoot\(\) \+ "\/agents\/discover"/, "calls the bridge discovery endpoint");
   has(/function adoptDiscovered\(/, "adopt flow exists (re-fills settings + logs)");
   has(/Agent\.applyDiscovered\(/, "adoption goes through agent.js applyDiscovered");
-  has(/(res && res\.error)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
+  has(/\(res && res\.error\)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
 });
 test("agent.js 本地检测采用：matchPreset + applyDiscovered", () => {
   const ag = readFileSync(path.join(root, "agent.js"), "utf8");
@@ -848,6 +848,17 @@ test("「插入」按钮：AI 回复可一键插入输入框光标处（像 Work
       "insert places the caret right after the inserted piece");
   has(/var ins = e\.target\.closest\("\[data-ins\]"\);\s*\n\s*if\(ins\) onChatInsert\(\+ins\.getAttribute\("data-ins"\)\);/,
       "chatMsgs click delegation routes data-ins");
+});
+
+/* ============ #98 同步时间本地时区显示 ============ */
+test("同步时间显示本地时区：不许再直接切 ISO(UTC) 串（差 8 小时）", () => {
+  has(/function fmtLocalIso\(iso, withSec\)/, "local-time formatter exists");
+  has(/renderSyncHint[\s\S]{0,300}fmtLocalIso\(t\)/,
+      "sync hint renders through the local-time formatter");
+  has(/asLast[\s\S]{0,200}fmtLocalIso\(t, true\)/,
+      "auto-sync last-run renders through the local-time formatter");
+  assert.ok(!/\.replace\("T", " "\)\.slice\(0, ?1[69]\)/.test(app),
+      "no raw ISO(UTC) slicing left in the page (the 8-hour-off bug)");
 });
 
 console.log("\n" + passed + " passed");

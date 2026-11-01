@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Node test suites (test/*.test.mjs)
+        run: |
+          set -e
+          failed=0
+          for f in test/*.test.mjs; do
+            echo "=== node $f"
+            if ! node "$f"; then
+              failed=1
+              echo "::error::node $f failed"
+            fi
+          done
+          exit $failed
+
+      - name: syncserver --self-test
+        run: python syncserver.py --self-test
+
+      - name: verifyserver --self-test
+        run: python verifyserver.py --self-test

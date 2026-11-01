@@ -2429,11 +2429,21 @@ function onLogout(){
   if(typeof SSO !== "undefined") SSO.clear();
   location.reload();
 }
+/* ISO(UTC) → 本地时区「YYYY-MM-DD HH:MM[:SS]」；解析失败才退回原串截断。
+ * 此前直接把 ISO 串切到分钟位显示，UTC 时间原样示人（差 8 小时，#93）。 */
+function fmtLocalIso(iso, withSec){
+  var d = new Date(iso);
+  function p(n){ return (n < 10 ? "0" : "") + n; }
+  if(!iso || isNaN(d.getTime())) return iso ? String(iso).replace("T", " ").slice(0, withSec ? 19 : 16) : "";
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " "
+    + p(d.getHours()) + ":" + p(d.getMinutes()) + (withSec ? ":" + p(d.getSeconds()) : "");
+}
+
 /* 上次同步时间（自动同步与手动刷新共用 autosync.js 的时间戳） */
 function renderSyncHint(){
   if(typeof AutoSync === "undefined" || !el("syncHint")) return;
   var t = AutoSync.lastRun();
-  el("syncHint").textContent = "上次同步：" + (t ? t.replace("T", " ").slice(0, 16) : "从未");
+  el("syncHint").textContent = "上次同步：" + (t ? fmtLocalIso(t) : "从未");
 }
 
 /* ---------- 学在城院直连获取（分层端点：本机桥 syncserver.py 优先，云端 verifyserver.py 兜底） ---------- */
@@ -2749,7 +2759,7 @@ function autoSyncAfterLogin(opts){
 function renderAutoSyncHint(){
   if(typeof AutoSync === "undefined" || !el("asLast")) return;
   var t = AutoSync.lastRun();
-  el("asLast").textContent = "上次自动同步：" + (t ? t.replace("T", " ").slice(0, 19) : "从未");
+  el("asLast").textContent = "上次自动同步：" + (t ? fmtLocalIso(t, true) : "从未");
 }
 function onCaptureDelete(id){
   if(typeof DB === "undefined") return;
