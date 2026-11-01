@@ -465,7 +465,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
         <button class="btn sm primary" id="btnChatSend"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>发送给所选 AI</button>
         <button class="btn sm" id="btnChatReply"><span class="bic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></span>记录 AI 回复</button>
       </div>
-      <div class="hint" style="margin-top:8px">复制流程：指令粘到 AI 窗口，回复粘回记录即可。</div>
+      <div class="hint" style="margin-top:8px">工作台内直接对话：发送即由本机 Qoder CLI 执行，回复自动进对话记录（无需跳 PowerShell）；也可把外部回复粘到输入框点「记录 AI 回复」存档。</div>
     </div>
 
     <div class="section-title"><h2>成稿检测</h2></div>
@@ -2447,29 +2447,63 @@ function onRequestChanges(id){
   saveState(); refreshAll();
   showToast("已退回，可重新生成草稿后再提交审批");
 }
-/* AI 对话：发送（组装完整提示词并复制） */
+/* AI 对话：发送（工作台内直接问 Qoder，不再复制跳转）
+ * 组装完整提示词（任务卡+决策+上下文+历史轮次）后作为单条 user 消息
+ * 发往本机桥 /agent/qoder；一轮一出（无流式），按钮实时显示等待秒数，
+ * 回复自动作为 ai 轮写入对话记录，可直接「一键交付」。 */
+var _hubBusy = false;
+var _hubWdTimer = null;
+function stopHubWatchdog(){ if(_hubWdTimer){ clearInterval(_hubWdTimer); _hubWdTimer = null; } }
 function onHubSend(){
   if(typeof AgentHub === "undefined"){ showToast("agents.js 未加载"); return; }
+  if(typeof Agent === "undefined" || !Agent.askQoder){ showToast("agent.js 未加载，无法直连 Qoder 通道"); return; }
+  if(_hubBusy){ showToast("Qoder 还在思考，稍等…"); return; }
   var it = state.chat.taskId ? findItem(state.chat.taskId) : null;
   if(!it){ showToast("请先选择任务"); return; }
   var agentId = state.chat.agentId;
-  if(!agentId || !AgentHub.REGISTRY[agentId]){ showToast("请先选择 AI"); return; }
+  if(!agentId || !AgentHub.REGISTRY[agentId]){ agentId = AgentHub.getDefault() || "qoder"; }
   var userMsg = el("hubInput").value.trim();
   var hooks = agentHooks();
   var histRec = AgentHub.chat(it.id);
   hooks.history = (histRec && histRec.turns) ? histRec.turns : [];
   var prompt = AgentHub.composePrompt(it, agentId, userMsg, hooks);
   if(!prompt){ showToast("提示词组装失败"); return; }
-  copyText(prompt);
-  /* 一律留在工作台内：只复制完整提示词，不打开任何 AI 网页 */
+  /* 记录我这一轮（含完整提示词，供追溯） */
   AgentHub.addTurn(it, {
     role: "user", agent: agentId, agentLabel: AgentHub.REGISTRY[agentId].label,
     text: userMsg || "（按任务卡与上下文直接执行）", prompt: prompt
   });
   el("hubInput").value = "";
-  addLog("AI 对话：向「" + AgentHub.REGISTRY[agentId].label + "」发送任务 " + it.name);
+  addLog("AI 对话：工作台内直问「" + AgentHub.REGISTRY[agentId].label + "」· 任务 " + it.name);
   saveState(); refreshAll();
-  showToast("提示词已复制，粘到「" + AgentHub.REGISTRY[agentId].label + "」发送；回复粘回输入框点「记录 AI 回复」");
+  _hubBusy = true;
+  var btn = el("btnChatSend");
+  if(btn){ btn.disabled = true; btn.textContent = "思考中…"; }
+  var wdStart = Date.now();
+  stopHubWatchdog();
+  _hubWdTimer = setInterval(function(){
+    if(btn && btn.disabled) btn.textContent = "思考中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
+  }, 1000);
+  Agent.askQoder([{ role: "user", content: prompt }]).then(function(r){
+    stopHubWatchdog();
+    _hubBusy = false;
+    if(btn){ btn.disabled = false; btn.textContent = "发送给所选 AI"; }
+    AgentHub.addTurn(it, {
+      role: "ai", agent: agentId,
+      agentLabel: (AgentHub.REGISTRY[agentId] || { label: "AI" }).label,
+      text: (r && r.output) || "（Qoder 返回了空回复，请重试）"
+    });
+    addLog("AI 对话：收到「" + (AgentHub.REGISTRY[agentId] || { label: "AI" }).label + "」回复（" + it.name + "）");
+    saveState(); refreshAll();
+    showToast("回复已进对话记录，满意就点该气泡上的「一键交付」");
+  }).catch(function(err){
+    stopHubWatchdog();
+    _hubBusy = false;
+    if(btn){ btn.disabled = false; btn.textContent = "发送给所选 AI"; }
+    var msg = (err && err.message) ? err.message : String(err);
+    addLog("Qoder 通道请求失败（AI 对话）：" + msg.slice(0, 80));
+    showToast("Qoder 通道请求失败：" + msg.slice(0, 120) + " —— 检查本机桥是否在跑（hwdesk 目录 python syncserver.py）");
+  });
 }
 /* AI 对话：记录 AI 回复 */
 function onChatReply(){
