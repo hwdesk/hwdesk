@@ -257,6 +257,42 @@ test("buildMessages prefixes system and drops invalid entries", () => {
   assert.equal(msgs[2].role, "assistant");
 });
 
+/* ---------- 请求体预算裁剪（云端网关拒绝超大 POST 的根因修复） ---------- */
+test("buildMessages trims oversized course context and keeps the latest user turn", () => {
+  const huge = "材料。".repeat(60000);   /* ≈180K 字符，远超预算 */
+  const out = Agent.buildMessages("你是作业助手。\n【课程上下文】\n" + huge, [
+    { role: "user", content: "q1" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "请直接作答" },
+  ]);
+  const len = JSON.stringify(out).length;
+  assert.ok(len <= Agent.BODY_BUDGET + 500, "组装结果应回到预算内: " + len);
+  assert.ok(out[0].content.includes("已按请求体上限截断"), "system 截断须附说明");
+  assert.equal(out[out.length - 1].content, "请直接作答", "最后一条用户消息必须原样保留");
+});
+
+test("buildMessages drops oldest history first before touching the system prompt", () => {
+  const big = "历史消息内容。".repeat(3000);   /* 每条 ≈21K 字符 */
+  const msgs = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: "user", content: "第" + i + "轮 " + big });
+  const out = Agent.buildMessages("SYS", msgs);
+  assert.ok(JSON.stringify(out).length <= Agent.BODY_BUDGET + 500, "应回到预算内");
+  assert.equal(out[0].content, "SYS", "预算够丢历史时不应截断 system");
+  assert.ok(out.length >= 3, "至少保留最近两轮对话");
+  assert.ok(JSON.stringify(out).includes("第9轮"), "最新一轮必须保留");
+  assert.ok(!JSON.stringify(out).includes("第0轮 "), "最旧的历史先被丢弃");
+});
+
+test("buildMessages leaves normal-sized conversations untouched", () => {
+  const out = Agent.buildMessages("SYS", [
+    { role: "user", content: "你好" },
+    { role: "assistant", content: "你好，开始作业吧" },
+  ]);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].content, "SYS");
+  assert.equal(out[1].content, "你好");
+});
+
 /* ---------- 交付提取 ---------- */
 test("extractDeliverable prefers 【最终交付】 section", () => {
   const msgs = [{ role: "assistant", content: "先给草稿。\n【最终交付】\n答案是 42。" }];

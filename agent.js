@@ -1,8 +1,8 @@
-/*! agent.js 1.3.0 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 1.3.2 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.3.1" };  /* 1.3.1: 启动自动采用本机检测（autoAdoptLocal，所有对话统一）；1.3.0: 本地检测采用（matchPreset/applyDiscovered） */
+  var Agent = { version: "1.3.2" };  /* 1.3.2: buildMessages 请求体预算裁剪（云端网关拒绝超大 POST → gateway_network_error）；1.3.1: 启动自动采用本机检测（autoAdoptLocal，所有对话统一）；1.3.0: 本地检测采用（matchPreset/applyDiscovered） */
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
@@ -325,14 +325,39 @@
     return lines.join("\n");
   };
 
-  /* ---------- 消息组装 ---------- */
+  /* ---------- 消息组装 ----------
+   * 消息体整体作为 chat/completions 的 JSON body 发出。实测云端网关对超大 POST
+   * 会直接拒绝（body ≈600KB → 502/连接被掐，浏览器表现为 gateway_network_error:
+   * "Failed to fetch"，而探活 GET 极小永远通过）——课程材料上下文 + 长对话历史
+   * 越滚越大就会踩线，且表现为「有的作业能聊有的必挂」。这里做请求体预算裁剪：
+   * 先丢最旧的对话历史，还超限再截断 system 里的巨型材料。 */
+  Agent.BODY_BUDGET = 80000;   /* JSON 字符数预算；中文 UTF-8 最坏 ≈240KB，留足安全余量 */
   Agent.buildMessages = function (system, messages) {
-    var out = [{ role: "system", content: system }];
+    var out = [{ role: "system", content: String(system || "") }];
     (messages || []).forEach(function (m) {
       if (m && (m.role === "user" || m.role === "assistant") && m.content) {
-        out.push({ role: m.role, content: m.content });
+        out.push({ role: m.role, content: String(m.content) });
       }
     });
+    var jsonLen = function (arr) { return JSON.stringify(arr).length; };
+    if (jsonLen(out) <= Agent.BODY_BUDGET) return out;
+    /* 1) 从最旧的对话消息丢起，至少保留最近两轮 */
+    while (out.length > 3 && jsonLen(out) > Agent.BODY_BUDGET) {
+      out.splice(1, 1);
+    }
+    /* 2) 还超限 → system 里多半是巨型课程材料：截断并说明 */
+    if (jsonLen(out) > Agent.BODY_BUDGET) {
+      var rest = Agent.BODY_BUDGET - jsonLen(out.slice(1)) - 80;
+      if (rest < 1000) rest = 1000;
+      out[0].content = out[0].content.slice(0, rest)
+        + "\n\n〔系统提示：课程材料过长，已按请求体上限截断；缺失部分请让学生粘贴原文或补充材料。〕";
+    }
+    /* 3) 兜底：单条消息本身就是巨物（如粘贴整篇文档）→ 压到 8000 字符 */
+    if (jsonLen(out) > Agent.BODY_BUDGET) {
+      out.slice(1).forEach(function (m) {
+        if (m.content.length > 8000) m.content = m.content.slice(0, 8000) + "…〔已截断〕";
+      });
+    }
     return out;
   };
 
