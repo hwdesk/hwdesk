@@ -1,8 +1,8 @@
-/*! autosync.js 1.0.0 | hwdesk 登录后自动同步编排（纯计算，DOM 无关） */
+/*! autosync.js 1.1.0 | hwdesk 登录后自动同步编排（纯计算，DOM 无关） */
 (function (global) {
   "use strict";
 
-  var AutoSync = { version: "1.0.0" };
+  var AutoSync = { version: "1.1.0" };
 
   /* ---------- 存储约定 ----------
    * 设置键：任何非 "off" 的值（含不存在）= 开启；显式写 "off" 才算关。
@@ -11,6 +11,17 @@
   AutoSync.LS_ENABLED = "wb_hwdesk_autosync";
   AutoSync.LS_LAST = "wb_hwdesk_lastAutoSync";
   AutoSync.DEFAULT_MIN_MINUTES = 30;   /* 节流窗口：窗口内重复登录不重复拉取 */
+
+  /* 节流时间戳按账号隔离（issue #92）：A 刚同步过不应吞掉 B 登录后的自动同步。
+   * scope 为空 = 旧版全局键（向后兼容）。 */
+  AutoSync._scope = "";
+  AutoSync.setScope = function (account) {
+    AutoSync._scope = String(account || "").trim();
+    return AutoSync._scope;
+  };
+  function lastKey() {
+    return AutoSync._scope ? AutoSync.LS_LAST + "::" + AutoSync._scope : AutoSync.LS_LAST;
+  }
 
   function lsGet(key) {
     try { return global.localStorage ? global.localStorage.getItem(key) : null; }
@@ -25,8 +36,8 @@
     lsSet(AutoSync.LS_ENABLED, on ? "on" : "off");
     return AutoSync.isEnabled();
   };
-  AutoSync.lastRun = function () { return lsGet(AutoSync.LS_LAST) || ""; };
-  AutoSync.markRun = function (iso) { lsSet(AutoSync.LS_LAST, iso || new Date().toISOString()); };
+  AutoSync.lastRun = function () { return lsGet(lastKey()) || ""; };
+  AutoSync.markRun = function (iso) { lsSet(lastKey(), iso || new Date().toISOString()); };
 
   /* 毫秒 → 「X 分钟」/「X 小时 Y 分钟」 */
   AutoSync.humanizeWait = function (ms) {

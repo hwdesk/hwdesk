@@ -318,7 +318,7 @@ test("cloud fallback exists: verifyserver.py is a stateless verify+sync service"
   assert.ok(!/startswith\("\/ingest"\)/.test(vs),
             "verifyserver must not route /ingest (ingest has disk-write semantics)");
   assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
-  assert.ok(/VERSION = "1\.2\.0"/.test(vs), "verifyserver bumped to 1.2.0 (async sync)");
+  assert.ok(/VERSION = "1\.[2-9]\.\d+"/.test(vs), "verifyserver bumped to 1.2.0+ (async sync)");
 });
 test("cloud sync fallback wired: one-click sync walks the same layered endpoints", () => {
   has(/function dataEndpoints\(\)\{[\s\S]{0,200}VerifyNet\.endpoints\(VerifyNet\.loadOverrides\(\)\)/,

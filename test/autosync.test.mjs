@@ -160,3 +160,18 @@ test("offlineHint 指向 syncserver.py", () => {
 });
 
 console.log("\n" + passed + " passed");
+
+/* ---------- 节流键按账号隔离（#92 多账号数据串号） ---------- */
+test("setScope 后 lastRun 读写 ::<account> 后缀键，换账号不被别人的节流吞掉", () => {
+  globalThis.localStorage = makeLS();
+  AutoSync.setScope("");
+  AutoSync.markRun(NOW);                                   // 账号 A 刚同步过
+  AutoSync.setScope("88888888");                           // 账号 B 登录
+  assert.equal(AutoSync.lastRun(), "");                    // B 没有 A 的节流记录
+  const r = AutoSync.shouldRun({ ...BASE, lastRun: AutoSync.lastRun() });
+  assert.equal(r.run, true);
+  AutoSync.markRun(NOW);
+  assert.equal(globalThis.localStorage.getItem("wb_hwdesk_lastAutoSync::88888888"), NOW);
+  AutoSync.setScope("");
+  assert.equal(AutoSync.lastRun(), NOW);                   // A 的记录原样保留
+});

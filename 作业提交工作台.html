@@ -841,7 +841,76 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
 "use strict";
 /* ---------- 数据层 ---------- */
 var LS_KEY = "wb_hwdesk_items", LS_LOG = "wb_hwdesk_logs", LS_SEED = "wb_hwdesk_seeded", LS_MAT = "wb_hwdesk_materials";
+var LS_OWNER = "wb_hwdesk_owner";   /* #92：本机最后登录的学在城院账号（数据空间归属记账） */
 var state = { items: [], logs: [], materials: [], filter: "all", view: "overview", chat: { taskId: null, agentId: null, pendingAgent: null } };
+
+/* ---------- 账号数据空间（issue #92：多账号数据串号） ----------
+ * 核心原则：每个学在城院账号只读写自己的数据。所有用户数据键在登录后
+ * 都加 ::<account> 后缀；scope 为空 = 未登录/旧版全局空间（向后兼容）。
+ * 旧数据一次性迁移：wb_hwdesk_owner 未设置且本机有历史数据时，归属
+ * 升级后首个登录（或本机记住）的账号，此后各账号各用各的空间。 */
+function acctScope(){
+  if(typeof SSO !== "undefined" && SSO.has()) return SSO.get().creds.account;
+  try { return localStorage.getItem(LS_OWNER) || ""; } catch(e){ return ""; }
+}
+function dataKey(base){
+  var s = acctScope();
+  return s ? base + "::" + s : base;
+}
+/* 把升级前无后缀旧键（作业/日志/材料 + db 四库）迁移进当前账号空间；
+ * 返回是否发生了迁移（用于记操作日志提醒核对） */
+function adoptLegacySpace(account){
+  var moved = false;
+  try{
+    [LS_KEY, LS_LOG, LS_MAT].forEach(function(base){
+      var raw = localStorage.getItem(base);
+      if(raw === null || raw === "[]") return;
+      var target = base + "::" + account;
+      var cur = JSON.parse(localStorage.getItem(target) || "[]") || [];
+      var legacy = JSON.parse(raw) || [];
+      if(legacy.length){
+        localStorage.setItem(target, JSON.stringify(legacy.concat(cur)));
+        moved = true;
+      }
+      localStorage.removeItem(base);
+    });
+    if(typeof DB !== "undefined" && DB.adoptLegacy){
+      if(DB.adoptLegacy(account) > 0) moved = true;
+    }
+    localStorage.setItem(LS_OWNER, account);
+  }catch(e){ /* 迁移失败不阻塞登录，按无旧数据处理 */ }
+  return moved;
+}
+/* 开机接线：按当前生效账号（记住的登录 或 上次登录者）挂载对应数据空间 */
+function initAccountSpace(){
+  var scope = acctScope();
+  if(scope && !localStorage.getItem(LS_OWNER)){
+    adoptLegacySpace(scope);   /* 本机记住的账号 = 升级前历史数据的归属者 */
+  }
+  if(typeof DB !== "undefined" && DB.scope) DB.scope(scope);
+  if(typeof AutoSync !== "undefined" && AutoSync.setScope) AutoSync.setScope(scope);
+}
+/* 登录成功后调用：账号变化 → 切换到该账号的独立数据空间。
+ * 旧账号的数据原样留在原空间，换回账号登录时完整可见；新账号从自己的空看板开始。 */
+function switchAccountSpace(account){
+  account = String(account || "").trim();
+  if(!account) return false;
+  var changed = (acctScope() !== account);
+  if(!localStorage.getItem(LS_OWNER)){
+    /* 升级后首次归属：本机历史数据归这个账号（日志提醒，如非本人可在设置清空） */
+    var moved = adoptLegacySpace(account);
+    if(moved) addLog("检测到升级前本机数据，已归属账号 " + (typeof SSO !== "undefined" ? SSO.mask(account) : account) + "；如非本人数据，可在设置→清空");
+  }else{
+    localStorage.setItem(LS_OWNER, account);
+  }
+  if(typeof DB !== "undefined" && DB.scope) DB.scope(account);
+  if(typeof AutoSync !== "undefined" && AutoSync.setScope) AutoSync.setScope(account);
+  if(changed){
+    loadState();   /* 重载：读的是新账号自己的键 */
+    if(typeof refreshAll === "function") refreshAll();
+  }
+  return changed;
+}
 
 /* Agent Hub 钩子：页面把 laya/humanize 能力注入 agents.js（引擎间零依赖） */
 function agentHooks(){
@@ -862,32 +931,26 @@ function agentHooks(){
 
 function loadState(){
   try{
-    state.items = JSON.parse(localStorage.getItem(LS_KEY) || "null") || seedItems();
+    state.items = JSON.parse(localStorage.getItem(dataKey(LS_KEY)) || "null") || seedItems();
   }catch(e){ state.items = seedItems(); }
   /* 数据迁移：旧数据补默认字段，Laya 引擎对缺字段同样有兜底 */
   state.items.forEach(function(it){
     if(!it.difficulty) it.difficulty = "auto";
     if(!it.format) it.format = "文字";
   });
-  try{ state.logs = JSON.parse(localStorage.getItem(LS_LOG) || "[]"); }catch(e){ state.logs = []; }
-  try{ state.materials = JSON.parse(localStorage.getItem(LS_MAT) || "[]") || []; }catch(e){ state.materials = []; }
+  try{ state.logs = JSON.parse(localStorage.getItem(dataKey(LS_LOG)) || "[]"); }catch(e){ state.logs = []; }
+  try{ state.materials = JSON.parse(localStorage.getItem(dataKey(LS_MAT)) || "[]") || []; }catch(e){ state.materials = []; }
 }
 function saveState(){
-  localStorage.setItem(LS_KEY, JSON.stringify(state.items));
-  localStorage.setItem(LS_LOG, JSON.stringify(state.logs));
-  localStorage.setItem(LS_MAT, JSON.stringify(state.materials));
+  localStorage.setItem(dataKey(LS_KEY), JSON.stringify(state.items));
+  localStorage.setItem(dataKey(LS_LOG), JSON.stringify(state.logs));
+  localStorage.setItem(dataKey(LS_MAT), JSON.stringify(state.materials));
 }
 function seedItems(){
-  var today = new Date();
-  function d(offset){ var t=new Date(today); t.setDate(t.getDate()+offset); return t.toISOString().slice(0,10); }
-  var seed = [
-    { id:1, name:"第二章作业（2题）", course:"电气控制与PLC及实验", due:d(-1),  type:"文件上传", note:"", status:"todo", ai:false, difficulty:"auto", format:"Word文档" },
-    { id:2, name:"课后思考3 推导题",  course:"大学物理(Ⅰ)",        due:d(3),   type:"附件+报告", note:"推导题，可让AI先做草稿", status:"todo", ai:true, difficulty:"hard", format:"PDF报告" },
-    { id:3, name:"实验1 Buck电源实验 报告", course:"电力电子技术",   due:d(9),   type:"附件+报告", note:"模板已下载，待写报告", status:"todo", ai:false, difficulty:"medium", format:"Word文档" },
-    { id:4, name:"课堂练习-3 选择填空", course:"电机与拖动",         due:d(-4),  type:"线上作答", note:"", status:"submitted", ai:false, difficulty:"easy", format:"文字" }
-  ];
+  /* #92：不再注入示例作业 —— 新装机/换账号看到的必须是真实待办，不是演示数据
+   * （旧版 4 条 seed 会混进总览被误认成本人待办）。LS_SEED 仍写入以兼容旧逻辑。 */
   localStorage.setItem(LS_SEED, "1");
-  return seed;
+  return [];
 }
 function uid(){ return Date.now() % 100000000 + Math.floor(Math.random()*1000); }
 function fmtDate(s){
@@ -2190,6 +2253,7 @@ function onLogin(){
       if(out.kind === "ok"){
         btn.disabled = false; btn.textContent = "登录进入工作台";
         SSO.set(acc, pw, mode);
+        switchAccountSpace(acc);   /* #92：先切到该账号的独立数据空间，再做任何记录/同步 */
         el("lgPassword").value = "";
         el("loginGate").style.display = "none";
         refreshSsoStatus();
@@ -2351,13 +2415,29 @@ function syncViaCloud(ep, body, onProgress){
       });
   }
 }
+var _syncRunning = false;   /* 防重入：同步进行中再点按钮只提示，不并发第二路采集 */
 function runDirectSync(opts){
   opts = opts || {};
   var auto = !!opts.auto;
   if(typeof PlatformKit === "undefined"){ showToast("platform.js 未加载"); return; }
   if(typeof VerifyNet === "undefined"){ showToast("verifynet.js 未加载"); return; }
+  /* 即时反馈：按钮进加载态（禁用 + 文案），同步结束/失败/超时一律恢复 */
+  var btn = el("btnDirectSync");
+  var btnHTML = btn ? btn.innerHTML : "";
+  _syncRunning = true;
+  if(btn){ btn.disabled = true; btn.textContent = "同步中…"; }
+  var t0 = Date.now();
   var out = directOut();
-  out.textContent = "正在登录学在城院并拉取数据…（首次约需几秒）";
+  var baseMsg = "正在登录学在城院并拉取数据…";   /* 各阶段更新 baseMsg，节拍器统一补等待秒数 */
+  out.textContent = baseMsg + "（已等待 0 秒）";
+  var tick = setInterval(function(){
+    out.textContent = baseMsg + "（已等待 " + Math.round((Date.now() - t0) / 1000) + " 秒）";
+  }, 1000);
+  function finish(){
+    _syncRunning = false;
+    clearInterval(tick);
+    if(btn){ btn.disabled = false; btn.innerHTML = btnHTML; }
+  }
   var body = {};
   if(typeof SSO !== "undefined" && SSO.has()){
     var st = SSO.get();
@@ -2367,6 +2447,7 @@ function runDirectSync(opts){
   var eps = dataEndpoints(), i = 0, reasons = [];
   function next(){
     if(i >= eps.length){
+      finish();
       out.innerHTML = directHelp(eps, reasons).replace(/python syncserver\.py/, "<b>python syncserver.py</b>");
       showToast(auto ? "自动同步跳过：同步服务不可用" : "同步服务不可用");
       if(auto){
@@ -2378,16 +2459,17 @@ function runDirectSync(opts){
     }
     var ep = eps[i++];
     var useCloudAsync = (ep.kind === "cloud");   /* 云端走 start+poll，防网关掐长请求 */
-    out.textContent = "正在" + ep.label + "拉取学在城院数据…";
-    (useCloudAsync ? syncViaCloud(ep, body, function(ms){
-      out.textContent = "正在" + ep.label + "拉取学在城院数据…（云端采集进行中，已等待 " + Math.round(ms / 1000) + " 秒）";
-    }) : syncOnce(ep, body)).then(function(w){
+    baseMsg = "正在" + ep.label + "拉取学在城院数据…";
+    out.textContent = baseMsg;
+    (useCloudAsync ? syncViaCloud(ep, body) : syncOnce(ep, body)).then(function(w){
       var res = w.res;
       if(w.kind === "ok" && res && res.ok && res.payload){
         applyPlatformPayload(res.payload, auto, opts.course);
+        finish();
         return;
       }
       if(w.kind === "rejected"){
+        finish();
         out.textContent = "✗ " + ((res && res.error) || "获取失败") + ((res && res.hint) ? "\n" + res.hint : "");
         showToast("获取失败：" + ((res && res.error) || "").slice(0, 40));
         if(auto){
@@ -2404,6 +2486,7 @@ function runDirectSync(opts){
   next();
 }
 function onDirectSync(){
+  if(_syncRunning){ showToast("同步正在进行中，请等它结束（按钮恢复后可再点）"); return; }
   var course = el("capCourse") ? el("capCourse").value : "全部课程";
   renderSyncHint();
   runDirectSync({ auto: false, course: course === "全部课程" ? "" : course });
@@ -2411,6 +2494,23 @@ function onDirectSync(){
 function applyPlatformPayload(payload, auto, course){
   if(typeof DB === "undefined"){ showToast("db.js 未加载"); return false; }
   auto = !!auto;
+  /* #92 属主校验：同步返回的数据必须属于当前登录账号才允许入库。
+   * 旧版同步服务不回 account 字段时保持兼容放行；带了但对不上 = 别人的数据，
+   * 绝不合并 —— 多为本机残留他人凭据（wb_local.json）或旧版全局缓存所致。 */
+  if(payload && payload.account && typeof SSO !== "undefined" && SSO.has()){
+    var mine = SSO.get().creds.account;
+    if(String(payload.account) !== String(mine)){
+      var outBad = directOut();
+      outBad.textContent = "✗ 已拦截：本次同步返回的是账号 " + SSO.mask(payload.account)
+        + " 的数据，与当前登录账号 " + SSO.mask(mine) + " 不一致，未写入任何数据。\n"
+        + "常见原因：本机残留他人凭据。删除项目目录下 wb_local.json 与 wb_platform_cache.json，"
+        + "重启 python syncserver.py 后重试。";
+      addLog("同步拦截：数据属主(" + SSO.mask(payload.account) + ") ≠ 登录账号(" + SSO.mask(mine) + ")");
+      saveState();
+      showToast("同步被拦截：数据属于其他账号");
+      return false;
+    }
+  }
   /* 单课程精拉：选择器选了某一门课时，只合并该课程的数据（自动同步始终全量） */
   var filtered = (typeof PlatformKit.filterCourse === "function")
     ? PlatformKit.filterCourse(payload, course || "") : PlatformKit.normalize(payload);
@@ -3108,8 +3208,9 @@ function agentProbeLayers(){
   }).catch(function(){ /* 探测失败静默，走 CloudAI/手动层 */ });
 }
 document.addEventListener("DOMContentLoaded", function(){
+  safe("initAccountSpace", initAccountSpace);   /* #92：先挂载账号数据空间，再读数据 */
   loadState();
-  if(!localStorage.getItem(LS_KEY)) saveState();   // 首次：写入示例数据
+  if(!localStorage.getItem(dataKey(LS_KEY))) saveState();   // 首次：写入空看板（不再注入示例数据）
   if(state.items.length >= 30){
     setTimeout(function(){ showToast("数据已积累 30 条，建议导出备份"); }, 800);
   }
