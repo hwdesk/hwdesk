@@ -821,4 +821,15 @@ test("启动自动采用：所有作业对话统一走本机 Agent；手动配�
   assert.ok(/safe\("agentAutoDiscover"/.test(html), "wired into fault-tolerant init");
 });
 
+/* ============ #93 同步时间本地时区显示 ============ */
+test("同步时间显示本地时区：不许再直接切 ISO(UTC) 串（差 8 小时）", () => {
+  has(/function fmtLocalIso\(iso, withSec\)/, "local-time formatter exists");
+  has(/renderSyncHint[\s\S]{0,300}fmtLocalIso\(t\)/,
+      "sync hint renders through the local-time formatter");
+  has(/asLast[\s\S]{0,200}fmtLocalIso\(t, true\)/,
+      "auto-sync last-run renders through the local-time formatter");
+  assert.ok(!/\.replace\("T", " "\)\.slice\(0, ?1[69]\)/.test(app),
+      "no raw ISO(UTC) slicing left in the page (the 8-hour-off bug)");
+});
+
 console.log("\n" + passed + " passed");
