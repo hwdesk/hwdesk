@@ -108,3 +108,36 @@ test("other stores keep the 200-record cap", () => {
 });
 
 console.log(passed + " passed, " + (process.exitCode ? "FAILED" : "0 failed"));
+
+/* ---------- 账号命名空间（#92 多账号数据串号） ---------- */
+test("scope(account) 后读写落到 ::<account> 后缀键，与默认空间互不可见", () => {
+  DB.clear("captures");
+  DB.insert("captures", { title: "A的课件", course: "C", kind: "课件", note: "" });
+  DB.scope("32402235");
+  assert.deepEqual(DB.list("captures"), []);                     // 别人的空间是空的
+  const a = DB.insert("captures", { title: "A的课件2", course: "C", kind: "课件", note: "" });
+  assert.equal(localStorage.getItem("wb_hwdesk_captures::32402235") !== null, true);
+  DB.scope("8888");
+  assert.deepEqual(DB.list("captures"), []);                     // 第二个账号也看不到
+  DB.scope("32402235");
+  assert.equal(DB.list("captures")[0].title, "A的课件2");
+  DB.update("captures", a.id, { note: "x" });
+  assert.equal(JSON.parse(localStorage.getItem("wb_hwdesk_captures::32402235"))[0].note, "x");
+  DB.remove("captures", a.id);
+  assert.deepEqual(DB.list("captures"), []);
+  DB.scope("");
+  DB.clear("captures");
+});
+test("adoptLegacy 把无后缀旧库迁移进账号空间并清空旧键", () => {
+  localStorage.setItem("wb_hwdesk_captures", JSON.stringify([{ id: 7, title: "旧课件" }]));
+  localStorage.setItem("wb_hwdesk_chats", JSON.stringify([{ id: 8 }]));
+  DB.scope("");
+  assert.equal(DB.adoptLegacy("32402235") >= 2, true);
+  assert.deepEqual(JSON.parse(localStorage.getItem("wb_hwdesk_captures")), []);
+  DB.scope("32402235");
+  assert.equal(DB.list("captures")[0].title, "旧课件");
+  assert.equal(DB.list("chats")[0].id, 8);
+  DB.clear("captures"); DB.clear("chats");
+  DB.scope("");
+  localStorage.removeItem("wb_hwdesk_captures"); localStorage.removeItem("wb_hwdesk_chats");
+});

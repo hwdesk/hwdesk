@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""verifyserver.py 1.2.0 | hwdesk 云端验证 + 同步服务（无状态）
+"""verifyserver.py 1.3.0 | hwdesk 云端验证 + 同步服务（无状态）
 
 解决什么问题：
   登录门禁与一键同步原本都只认本机桥（syncserver.py，127.0.0.1:8765）——每个
@@ -56,7 +56,7 @@ if HERE not in sys.path:
 # 复用 syncserver 的城院 CAS 登录与 Tronclass 采集（302 链 + AES 表单提交 + 会话确认）
 from syncserver import SyncError, hzcu_login, hzcu_collect, self_test as sync_self_test  # noqa: E402
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"   # 1.3.0: payload 增加属主标记 account（#92 多账号串号）
 
 # 平台部署注入 PORT 时监听 0.0.0.0；本地试跑默认回环
 _BIND_ALL = bool(os.environ.get("PORT"))
@@ -110,6 +110,7 @@ def _run_job(token, account, password):
         try:
             s = hzcu_login(account, password)
             payload = hzcu_collect(s)
+            payload["account"] = account   # #92 属主标记：页面据此拒绝别人的数据
             with JOBS_LOCK:
                 JOBS[token] = {"status": "done", "payload": payload, "ts": time.time()}
         except SyncError as e:
@@ -254,6 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 s = hzcu_login(account, password)
                 payload = hzcu_collect(s)
+                payload["account"] = account   # #92 属主标记
                 self._json(200, {"ok": True, "cached": False, "via": "cloud", "payload": payload})
         except SyncError as e:
             self._json(200, {"ok": False, "error": str(e)})
