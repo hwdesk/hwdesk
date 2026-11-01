@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""syncserver.py 2.0.0 | hwdesk 学在城院本机直连桥（纯标准库，零第三方依赖）
+"""syncserver.py 2.6.0 | hwdesk 学在城院本机直连桥（纯标准库，零第三方依赖）
 
 为什么需要它：
   作业提交工作台是 file:// 单文件页面，浏览器同源策略决定它无法直接请求
@@ -51,12 +51,14 @@ import threading
 import datetime
 import http.cookiejar
 import html as html_lib
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.4.0"  # 2.4.0: PNA 预检头（云端 https 页 fetch 本机桥被 Chrome 掐断的修复）；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "2.7.0"  # 2.7.0: /agents/discover 本机 Agent 凭据发现（codex/claude CLI + 厂商环境变量）；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -76,6 +78,10 @@ CAS_AES_KEY = b"c6dda3852e2d4be2"
 
 # Tronclass 待办类型 → 中文（与学在浙大一致）
 TYPE_CN = {"homework": "作业", "exam": "考试", "quiz": "测验", "survey": "问卷"}
+
+# 逐课并行采集线程数（2.6.0）：每门课 2+ 个上游请求 × 课程数，串行是同步慢的主因。
+# 4 路并发对校园平台是浏览器正常水位（网页端本身就并发拉课程数据），不宜再高。
+COLLECT_WORKERS = 4
 
 
 class SyncError(Exception):
@@ -265,6 +271,18 @@ class Session:
 def _resp_text(resp, body):
     status = getattr(resp, "status", None) or getattr(resp, "code", 0)
     return status, body.decode("utf-8", "replace")
+
+
+def clone_session(s):
+    """并行采集用：克隆会话 —— 共享同一 CookieJar（登录态一致），opener 各自独立。
+    http.cookiejar.CookieJar 内部自带线程锁，多线程共用是安全的；
+    urllib opener 本身无每请求共享状态，逐线程各建一个即可。"""
+    t = Session()
+    t.jar = getattr(s, "jar", t.jar)   # 自检桩（object()）没有 jar 时退回空 jar，桩下 api_json 本就被替换
+    t.opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPCookieProcessor(t.jar))
+    return t
 
 
 # ---------------------------------------------------------------- 登录
@@ -613,24 +631,49 @@ def hzcu_collect(s):
     except SyncError as e:
         errors.append("待办列表：%s" % e)
 
-    for c in courses:
+    # 逐课作业 + 课件：线程池并行采集（2.6.0）。
+    # 原串行逐课是同步慢的主因：每门课 2+ 个上游请求 × 课程数，排队几十秒起步。
+    # 每线程用克隆会话（共享 CookieJar）；单项失败不阻断整体，逐条记入 errors；
+    # 结果在主线程按课程顺序合并，保持与串行版完全一致的输出顺序。
+    def collect_one_course(c):
         cid = str(c.get("id") or "").strip()
         cname = str(c.get("name") or "").strip() or str(c.get("course_code") or "").strip() \
             or ("课程 " + cid)
         if not cid:
-            continue
+            return cname, [], [], []
+        ts = clone_session(s)
+        local_errors = []
+        hws = []
         try:
-            hws = paged(s, "/api/courses/%s/homework-activities" % cid, "homework_activities")
-            for hw in hws:
-                if isinstance(hw, dict):
-                    put(hw_to_assignment(hw, cname))
+            hws = paged(ts, "/api/courses/%s/homework-activities" % cid, "homework_activities")
         except SessionLost:
             raise
         except SyncError as e:
-            errors.append("%s：%s" % (cname, e))
+            local_errors.append("%s：%s" % (cname, e))
         # 课件（资料目录）：与作业采集相互独立，任一失败只记 errors（#57）
-        materials.extend(collect_course_materials(s, cid, cname, errors))
+        mats = collect_course_materials(ts, cid, cname, local_errors)
+        return cname, hws, mats, local_errors
 
+    if courses:
+        workers = max(1, min(COLLECT_WORKERS, len(courses)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(collect_one_course, c) for c in courses]
+        # with 块退出即等全部线程收尾；SessionLost 在主线程统一重新抛出，
+        # 让上层（collect_payload）走「重登再拉」的既有路径。
+        lost = False
+        for f in futures:
+            try:
+                cname, hws, mats, local_errors = f.result()
+            except SessionLost:
+                lost = True
+                continue
+            errors.extend(local_errors)
+            materials.extend(mats)
+            for hw in hws:
+                if isinstance(hw, dict):
+                    put(hw_to_assignment(hw, cname))
+        if lost:
+            raise SessionLost("登录态已失效")
     # 已提交作业补详情：要求原文 / 成绩 / 老师批语 → note（#58）
     failed_courses = set()
     for a in by_key.values():
@@ -659,7 +702,9 @@ def load_cfg_creds():
     return None, None
 
 
-_STATE = {"last": None, "lock": threading.Lock()}
+_STATE = {"by_account": {}, "lock": threading.Lock()}
+# #92：缓存按账号分桶（by_account[account] = payload）。旧版单份 _STATE["last"]
+# 会让 GET /data 把上一个同步账号的数据端给任何人 —— 多账号串号的根因之一。
 
 
 def save_creds(account, password):
@@ -681,15 +726,17 @@ def add_log_local(msg):
 
 
 def collect_payload(creds=None, force=True):
-    """入口：优先用请求携带的凭据（仅内存），否则用 wb_local.json。带缓存。"""
+    """入口：优先用请求携带的凭据（仅内存），否则用 wb_local.json。带缓存（按账号分桶，#92）。
+    返回的 payload 带属主标记 account = 本次登录的学在城院账号，页面据此校验数据归属。"""
     with _STATE["lock"]:
-        if not force and _STATE["last"]:
-            return _STATE["last"], True
         account, password = None, None
         if creds and creds.get("account") and creds.get("password"):
             account, password = str(creds["account"]), str(creds["password"])
         else:
             account, password = load_cfg_creds()
+        cached = _STATE["by_account"].get(account or "")
+        if not force and cached is not None:
+            return cached, True
         s = hzcu_login(account, password)
         try:
             payload = hzcu_collect(s)
@@ -697,16 +744,110 @@ def collect_payload(creds=None, force=True):
             # 采集中途登录态失效：重登一次再拉
             s = hzcu_login(account, password)
             payload = hzcu_collect(s)
+        payload["account"] = account or ""   # #92 属主标记：这份数据是谁的
         try:
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=1)
         except OSError:
             pass
-        _STATE["last"] = payload
+        _STATE["by_account"][account or ""] = payload
         return payload, False
 
 
 # ---------------------------------------------------------------- HTTP 服务
+# ---- 本地 Agent 凭据发现（页面「检测本机可用 Agent」，只读本机、只回本机） ----
+DISCOVER_ENV_VARS = [
+    ("ark", "ARK_API_KEY", "豆包（火山方舟）",
+     "https://ark.cn-beijing.volces.com/api/v3", ""),
+    ("deepseek", "DEEPSEEK_API_KEY", "DeepSeek",
+     "https://api.deepseek.com/v1", "deepseek-chat"),
+    ("moonshot", "MOONSHOT_API_KEY", "Kimi（月之暗面）",
+     "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+    ("dashscope", "DASHSCOPE_API_KEY", "通义千问",
+     "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+    ("zhipu", "ZHIPUAI_API_KEY", "智谱 GLM",
+     "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+    ("openai", "OPENAI_API_KEY", "OpenAI",
+     "https://api.openai.com/v1", "gpt-4o-mini"),
+]
+
+
+def _read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _codex_cfg(cfg_path):
+    """codex config.toml → (base_url, model)：tomllib 优先，坏文件回空串（不抛）"""
+    base, model = "", ""
+    try:
+        import tomllib
+        with open(cfg_path, "rb") as f:
+            data = tomllib.load(f)
+        model = data.get("model") or ""
+        provs = data.get("model_providers") or {}
+        cur = data.get("model_provider") or ""
+        if cur and isinstance(provs.get(cur), dict):
+            base = provs[cur].get("base_url") or ""
+        if not base:
+            for v in provs.values():
+                if isinstance(v, dict) and v.get("base_url"):
+                    base = v["base_url"]
+                    break
+    except Exception:
+        pass
+    return base, model
+
+
+def discover_local_agents():
+    """扫描本机已装 AI CLI 与环境变量里的现成凭据（绝不写日志、绝不回给非本机来源）。"""
+    home = os.path.expanduser("~")
+    out = []
+    # 1) Codex CLI：auth.json 的 key + config.toml 的 base_url/model（OpenAI 兼容）
+    try:
+        auth = _read_json_file(os.path.join(home, ".codex", "auth.json")) or {}
+        key = auth.get("OPENAI_API_KEY") or ""
+        cfg = os.path.join(home, ".codex", "config.toml")
+        base, model = _codex_cfg(cfg) if os.path.isfile(cfg) else ("", "")
+        if key:
+            out.append({"id": "codex", "label": "Codex CLI（OpenAI 兼容）",
+                        "source": "~/.codex",
+                        "baseUrl": base or "https://api.openai.com/v1",
+                        "model": model, "apiKey": key, "protocol": "openai",
+                        "note": "来自 ~/.codex（auth.json + config.toml）"})
+    except Exception:
+        pass
+    # 2) Claude CLI：settings.json env 里的中转站令牌（第三方中转一般也开 OpenAI 兼容端点）
+    try:
+        st = _read_json_file(os.path.join(home, ".claude", "settings.json")) or {}
+        envc = st.get("env") or {}
+        tok = envc.get("ANTHROPIC_AUTH_TOKEN") or envc.get("ANTHROPIC_API_KEY") or ""
+        base = envc.get("ANTHROPIC_BASE_URL") or ""
+        if tok and base:
+            out.append({"id": "claude", "label": "Claude CLI（中转站）",
+                        "source": "~/.claude/settings.json",
+                        "baseUrl": base, "model": "", "apiKey": tok,
+                        "protocol": "relay",
+                        "note": "Anthropic 中转令牌；中转站通常同时提供 OpenAI 兼容 /v1——采用后按需在 baseUrl 末尾补 /v1 并填模型"})
+    except Exception:
+        pass
+    # 3) 厂商环境变量
+    try:
+        for aid, var, label, base, model in DISCOVER_ENV_VARS:
+            v = os.environ.get(var) or ""
+            if v:
+                out.append({"id": aid, "label": label + "（环境变量）",
+                            "source": "env:" + var, "baseUrl": base,
+                            "model": model, "apiKey": v,
+                            "protocol": "openai", "note": "来自环境变量 " + var})
+    except Exception:
+        pass
+    return out
+
+
 PAGE_FILE = "作业提交工作台.html"
 STATIC_MIME = {
     ".html": "text/html; charset=utf-8",
@@ -785,6 +926,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._json(200, {"ok": True, "version": VERSION, "service": "hwdesk-syncserver",
                              "platform": "学在城院 courses.hzcu.edu.cn (Tronclass)"})
+        elif self.path.startswith("/agents/discover"):
+            # 本机凭据发现：只回本机页面。file:// 页（本地模式回退）的 fetch 会带
+            # Origin: null —— 同样放行；真正的威胁是云端 https 页（公网站点），
+            # 其 Origin 含真实域名，一律 403，凭据不出本机。
+            origin = (self.headers.get("Origin") or "").strip()
+            bad_origin = (origin and origin.lower() != "null"
+                          and ("127.0.0.1" not in origin) and ("localhost" not in origin))
+            if bad_origin:
+                self._json(403, {"ok": False,
+                                 "error": "local-only: 凭据发现只对本机页面开放"})
+                return
+            self._json(200, {"ok": True, "agents": discover_local_agents()})
         elif self.path.startswith("/v1/models"):
             ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
                                                  self.headers.get("Origin"))
@@ -795,7 +948,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"object": "list",
                                  "data": [{"id": m, "object": "model"} for m in proxy_available_models()]})
         elif self.path.startswith("/data"):
-            payload, cached = _STATE["last"], bool(_STATE["last"])
+            # #92：无凭据 GET 只返回 wb_local.json 属主账号的缓存，绝不端出别人账号的数据
+            cfg_account, _ = load_cfg_creds()
+            payload = _STATE["by_account"].get(cfg_account or "")
+            cached = payload is not None
             if payload is None:
                 try:
                     payload, cached = collect_payload()
@@ -929,7 +1085,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload.setdefault("errors", [])
                 with open(CACHE_FILE, "w", encoding="utf-8") as f:
                     json.dump(payload, f, ensure_ascii=False, indent=1)
-                _STATE["last"] = payload
+                _STATE["by_account"]["__ingest__"] = payload   # #92：外投结果单独存，绝不进任何账号的 GET /data 缓存
                 self._json(200, {"ok": True, "cached": True, "payload": payload})
             except (ValueError, OSError) as e:
                 self._json(200, {"ok": False, "error": "ingest 失败：%s" % e})
@@ -1318,6 +1474,37 @@ def self_test():
         globals()["api_json"] = real_api
     print(("ok  - _materials_page tolerates dict/list/garbage responses" if good
            else "FAIL - _materials_page fallback"))
+    ok &= good
+
+    # 11) 数据属主（#92）：payload 带 account 标记 + 缓存按账号分桶互不串号
+    real_login, real_collect, real_cache = hzcu_login, hzcu_collect, CACHE_FILE
+    fd, tmp_cache = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        globals()["hzcu_login"] = lambda a, p: object()
+        globals()["hzcu_collect"] = lambda s: {"fetchedAt": "t", "source": "hzcu-xzc",
+                                               "courses": [], "assignments": [],
+                                               "materials": [], "errors": []}
+        globals()["CACHE_FILE"] = tmp_cache
+        _STATE["by_account"].clear()
+        p1, c1 = collect_payload({"account": "a1", "password": "x"})
+        p2, c2 = collect_payload({"account": "a2", "password": "x"})
+        good = (not c1) and (not c2) and p1.get("account") == "a1" and p2.get("account") == "a2"
+        q1, h1 = collect_payload({"account": "a1", "password": "x"}, force=False)
+        q2, h2 = collect_payload({"account": "a2", "password": "x"}, force=False)
+        good &= h1 and h2 and q1.get("account") == "a1" and q2.get("account") == "a2"
+        q3, h3 = collect_payload({"account": "a3", "password": "x"}, force=False)
+        good &= (not h3) and q3.get("account") == "a3"   # 新账号绝不命中别人的缓存
+    finally:
+        globals()["hzcu_login"], globals()["hzcu_collect"] = real_login, real_collect
+        globals()["CACHE_FILE"] = real_cache
+        _STATE["by_account"].clear()
+        try:
+            os.unlink(tmp_cache)
+        except OSError:
+            pass
+    print(("ok  - collect_payload stamps owner account & caches per-account (#92)" if good
+           else "FAIL - collect_payload per-account: %r %r %r" % (p1, p2, q3)))
     ok &= good
 
     ok &= self_test_proxy()

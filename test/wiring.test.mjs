@@ -318,7 +318,7 @@ test("cloud fallback exists: verifyserver.py is a stateless verify+sync service"
   assert.ok(!/startswith\("\/ingest"\)/.test(vs),
             "verifyserver must not route /ingest (ingest has disk-write semantics)");
   assert.ok(!/open\(/.test(vs), "verifyserver never opens files (stateless, credentials discarded)");
-  assert.ok(/VERSION = "1\.2\.0"/.test(vs), "verifyserver bumped to 1.2.0 (async sync)");
+  assert.ok(/VERSION = "1\.[2-9]\.\d+"/.test(vs), "verifyserver bumped to 1.2.0+ (async sync)");
 });
 test("cloud sync fallback wired: one-click sync walks the same layered endpoints", () => {
   has(/function dataEndpoints\(\)\{[\s\S]{0,200}VerifyNet\.endpoints\(VerifyNet\.loadOverrides\(\)\)/,
@@ -780,6 +780,85 @@ test("#70 聊天失败文案指向本地启动器（自助修复闭环）", () =
 test("#70 syncserver：混元路由 + ark passthrough 标记", () => {
   pyHas(/HWDESK_PROXY_HUNYUAN_KEY/, "hunyuan env key");
   pyHas(/ark-endpoint-id \(passthrough\)/, "ark passthrough marker in models catalog");
+});
+
+/* ---------- 14. 本地检测 Agent 凭据（syncserver /agents/discover + 页面一键采用） ---------- */
+test("syncserver /agents/discover：本机凭据发现；云端页面（非本机 Origin）一律 403", () => {
+  pyHas(/elif self\.path\.startswith\("\/agents\/discover"\)/, "route exists");
+  pyHas(/origin\.lower\(\) != "null"/, "file:// pages (Origin: null) are allowed");
+  pyHas(/"127\.0\.0\.1" not in origin[\s\S]{0,80}"localhost" not in origin/,
+      "non-local origins are rejected (credentials never leave the machine)");
+  pyHas(/def discover_local_agents\(\)/, "scanner exists");
+  pyHas(/\.codex", "auth\.json/, "scans codex auth.json for OPENAI_API_KEY");
+  pyHas(/def _codex_cfg\(cfg_path\)/, "parses codex config.toml (base_url/model)");
+  pyHas(/ANTHROPIC_AUTH_TOKEN/, "scans claude settings.json relay token");
+  pyHas(/for aid, var, label, base, model in DISCOVER_ENV_VARS/, "scans vendor env vars");
+});
+test("页面「检测本机可用 Agent」：一键发现 + 采用（凭据只在本机流转）", () => {
+  assert.ok(/id="agDiscover"/.test(html), "discover button exists in Agent config card");
+  assert.ok(/id="agFound"/.test(html), "result box exists");
+  has(/function onAgentDiscover\(\)/, "discover handler exists");
+  has(/agentBridgeRoot\(\) \+ "\/agents\/discover"/, "calls the bridge discovery endpoint");
+  has(/function adoptDiscovered\(/, "adopt flow exists (re-fills settings + logs)");
+  has(/Agent\.applyDiscovered\(/, "adoption goes through agent.js applyDiscovered");
+  has(/\(res && res\.error\)\s*\?\s*"✗ " \+ res\.error/, "page shows the endpoint's error (403 vs nothing-found distinct)");
+});
+test("agent.js 本地检测采用：matchPreset + applyDiscovered", () => {
+  const ag = readFileSync(path.join(root, "agent.js"), "utf8");
+  assert.ok(/Agent\.matchPreset = function/.test(ag), "matchPreset exists");
+  assert.ok(/Agent\.applyDiscovered = function/.test(ag), "applyDiscovered exists");
+  assert.ok(/keys\[preset\] = c\.apiKey/.test(ag), "key stored per-preset");
+});
+test("启动自动采用：所有作业对话统一走本机 Agent；手动配置（manualLock）与已可用配置绝不覆盖", () => {
+  const ag = readFileSync(path.join(root, "agent.js"), "utf8");
+  assert.ok(/Agent\.pickLocalCandidate = function/.test(ag), "candidate picker exists");
+  assert.ok(/Agent\.autoAdoptLocal = function/.test(ag), "auto-adopt exists");
+  assert.ok(/if \(Agent\.config\.manualLock\) return null;/.test(ag), "manualLock is respected");
+  assert.ok(/var pristine = Agent\.config\.preset === "cloudproxy"/.test(ag),
+      "pristine cloudproxy default counts as unconfigured (ready() is always true on fresh profiles, issue #81)");
+  has(/function autoDiscoverLocalAgent\(\)/, "boot-time discovery step exists");
+  has(/Agent\.autoAdoptLocal\(/, "page adoption goes through the guarded helper");
+  assert.ok(/safe\("agentAutoDiscover"/.test(html), "wired into fault-tolerant init");
+});
+
+/* ============ 对话体验：卡「生成中」看门狗 + 「插入」按钮 ============ */
+test("对话看门狗：90 秒无增量主动中止，所有收尾路径统一清表", () => {
+  has(/function stopChatWatchdog/, "watchdog stop helper exists");
+  has(/90 秒没有任何响应，已自动停止/, "watchdog fires with an actionable message");
+  has(/wdAbort = CloudAI\.chat\(/, "cloud path's abort fn is captured for the watchdog");
+  has(/var _ac = \(typeof AbortController !== "undefined"\) \? new AbortController\(\) : null;\s*\n\s*wdAbort = function\(\)\{ if\(_ac\) _ac\.abort\(\); \};/,
+      "direct path is abortable (AbortController wired up)");
+  has(/fetch\(url, \{ method: "POST", headers: _headers, body: body, signal: _ac \? _ac\.signal : undefined \}\)/,
+      "direct fetch honors the abort signal");
+  has(/function finishChat\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "finishChat clears the watchdog");
+  has(/function cloudChatFail\(chat, err\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "cloudChatFail clears the watchdog");
+  has(/function resetChatBtn\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
+      "resetChatBtn clears the watchdog");
+  assert.ok((app.match(/wdBump\(\)/g) || []).length >= 2,
+      "both stream paths feed the watchdog on delta");
+  /* #93 的本机 Agent 发现前端不许被本 PR 波及（v1 曾误删，review 抓到） */
+  has(/agFound|agentBridgeRoot/, "#93 local-agent-discovery frontend stays intact");
+});
+test("「插入」按钮：AI 回复可一键插入输入框光标处（像 WorkBuddy）", () => {
+  has(/data-ins="' \+ i \+ '" title="把这条回复插入到下方输入框光标处/,
+      "every assistant reply carries an insert button");
+  has(/function onChatInsert\(i\)\{[\s\S]{0,1200}setSelectionRange/,
+      "insert places the caret right after the inserted piece");
+  has(/var ins = e\.target\.closest\("\[data-ins\]"\);\s*\n\s*if\(ins\) onChatInsert\(\+ins\.getAttribute\("data-ins"\)\);/,
+      "chatMsgs click delegation routes data-ins");
+});
+
+/* ============ #98 同步时间本地时区显示 ============ */
+test("同步时间显示本地时区：不许再直接切 ISO(UTC) 串（差 8 小时）", () => {
+  has(/function fmtLocalIso\(iso, withSec\)/, "local-time formatter exists");
+  has(/renderSyncHint[\s\S]{0,300}fmtLocalIso\(t\)/,
+      "sync hint renders through the local-time formatter");
+  has(/asLast[\s\S]{0,200}fmtLocalIso\(t, true\)/,
+      "auto-sync last-run renders through the local-time formatter");
+  assert.ok(!/\.replace\("T", " "\)\.slice\(0, ?1[69]\)/.test(app),
+      "no raw ISO(UTC) slicing left in the page (the 8-hour-off bug)");
 });
 
 console.log("\n" + passed + " passed");

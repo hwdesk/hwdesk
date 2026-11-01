@@ -17,14 +17,44 @@
   "use strict";
 
   var DB = {};
-  DB.VERSION = "1.2.0";
+  DB.VERSION = "1.3.0";
 
-  /* 库注册表：key → localStorage 键名 */
+  /* 库注册表：key → localStorage 键名（基准名；账号隔离后实际键名加 ::<account> 后缀） */
   DB.STORES = {
     captures: "wb_hwdesk_captures",
     submissions: "wb_hwdesk_submissions",
     reviews: "wb_hwdesk_reviews",
     chats: "wb_hwdesk_chats"
+  };
+
+  /* ---------- 账号命名空间（issue #92：多账号数据串号） ----------
+   * DB.scope("32402235") 后所有库的读写都落到 `wb_hwdesk_<store>::32402235`，
+   * 不同账号的数据互不可见；scope 为空 = 旧版全局空间（向后兼容）。
+   * DB.adoptLegacy(scope) 把无后缀旧库的一次性迁移进指定账号空间。 */
+  DB._scope = "";
+  DB.scope = function (account) {
+    DB._scope = String(account || "").trim();
+    return DB._scope;
+  };
+  function skey(store) {
+    var base = DB.STORES[store] || store;
+    return DB._scope ? base + "::" + DB._scope : base;
+  }
+  DB.adoptLegacy = function (scope) {
+    var prev = DB._scope;
+    DB._scope = "";
+    var moved = 0;
+    Object.keys(DB.STORES).forEach(function (name) {
+      var base = DB.STORES[name];
+      var legacy = read(base);
+      if (legacy.length) {
+        write(base + "::" + scope, legacy.concat(read(base + "::" + scope)));
+        write(base, []);
+        moved += legacy.length;
+      }
+    });
+    DB._scope = prev;
+    return moved;
   };
 
   /* 每库上限（#59）：captures 是课程记忆库——全部课程的课件 + 历史作业 +
@@ -45,8 +75,8 @@
     localStorage.setItem(key, JSON.stringify(arr));
   }
 
-  /* ---------- 通用 CRUD ---------- */
-  DB.list = function (store) { return read(DB.STORES[store] || store); };
+  /* ---------- 通用 CRUD（键名经 skey() 加账号后缀） ---------- */
+  DB.list = function (store) { return read(skey(store)); };
 
   DB.insert = function (store, record) {
     var arr = DB.list(store);
@@ -54,7 +84,7 @@
     arr.unshift(record);
     var cap = DB.CAPS[store] || 200;                  // 按库上限（#59）
     if (arr.length > cap) arr.length = cap;
-    write(DB.STORES[store] || store, arr);
+    write(skey(store), arr);
     return record;
   };
 
@@ -69,7 +99,7 @@
     for (var i = 0; i < arr.length; i++) {
       if (arr[i].id === id) {
         Object.keys(patch).forEach(function (k) { arr[i][k] = patch[k]; });
-        write(DB.STORES[store] || store, arr);
+        write(skey(store), arr);
         return arr[i];
       }
     }
@@ -77,13 +107,13 @@
   };
 
   DB.remove = function (store, id) {
-    var key = DB.STORES[store] || store;
+    var key = skey(store);
     var arr = read(key).filter(function (r) { return r.id !== id; });
     write(key, arr);
     return arr;
   };
 
-  DB.clear = function (store) { write(DB.STORES[store] || store, []); };
+  DB.clear = function (store) { write(skey(store), []); };
 
   /* ---------- 交付状态机（纯函数，供审批流使用） ----------
    * 交付记录生命周期：pending（待审）→ submitted（已交付）/ changes（退回修改）

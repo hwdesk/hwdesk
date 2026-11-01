@@ -117,6 +117,96 @@ test("use() applies a known preset and rejects unknown ones", () => {
   Agent.applyPreset("deepseek");
 });
 
+/* ---------- 本地检测采用（matchPreset / applyDiscovered） ---------- */
+test("matchPreset maps a known baseUrl to its preset (trailing slash tolerated), unknown to custom", () => {
+  assert.equal(Agent.matchPreset("https://api.deepseek.com/v1"), "deepseek");
+  assert.equal(Agent.matchPreset("https://api.deepseek.com/v1/"), "deepseek");
+  assert.equal(Agent.matchPreset("https://www.onetopai.com/v1"), "custom");
+  assert.equal(Agent.matchPreset(""), "custom");
+});
+test("applyDiscovered adopts a local candidate: preset by baseUrl, key per-preset, model/baseUrl overridden", () => {
+  store.clear();
+  const preset = Agent.applyDiscovered({
+    baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-test-1",
+    model: "gpt-6-astra", label: "Codex CLI"
+  });
+  assert.equal(preset, "custom");
+  assert.equal(Agent.config.preset, "custom");
+  assert.equal(Agent.config.baseUrl, "https://www.onetopai.com/v1");
+  assert.equal(Agent.config.model, "gpt-6-astra");
+  assert.equal(Agent.config.apiKey, "sk-test-1");
+  assert.equal(Agent.config.keys.custom, "sk-test-1");
+  assert.ok(Agent.ready(), "ready() right after adoption (baseUrl+model+key)");
+});
+test("applyDiscovered picks the matching preset when the baseUrl belongs to one", () => {
+  store.clear();
+  const preset = Agent.applyDiscovered({
+    baseUrl: "https://api.moonshot.cn/v1", apiKey: "sk-kimi", model: "moonshot-v1-8k"
+  });
+  assert.equal(preset, "kimi");
+  assert.equal(Agent.config.preset, "kimi");
+  assert.equal(Agent.config.keys.kimi, "sk-kimi");
+  assert.equal(Agent.config.model, "moonshot-v1-8k");
+});
+test("applyDiscovered returns null for incomplete candidates", () => {
+  assert.equal(Agent.applyDiscovered({ baseUrl: "https://x/v1" }), null);
+  assert.equal(Agent.applyDiscovered({ apiKey: "sk-x" }), null);
+  assert.equal(Agent.applyDiscovered(null), null);
+});
+
+/* ---------- 启动自动采用（所有对话统一走本机 Agent） ---------- */
+test("pickLocalCandidate prefers openai+model over relay, and skips incomplete entries", () => {
+  const best = Agent.pickLocalCandidate([
+    { baseUrl: "https://relay/x", apiKey: "k1", protocol: "relay" },
+    { baseUrl: "https://www.onetopai.com/v1", apiKey: "k2", protocol: "openai", model: "gpt-6-astra" },
+    { baseUrl: "", apiKey: "k3" },
+    null
+  ]);
+  assert.equal(best.apiKey, "k2");
+  assert.equal(Agent.pickLocalCandidate([]), null);
+  assert.equal(Agent.pickLocalCandidate(null), null);
+});
+test("autoAdoptLocal adopts the best candidate when config is not ready", () => {
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {}, manualLock: false };
+  const p = Agent.autoAdoptLocal([
+    { baseUrl: "https://timesniper.club", apiKey: "k-relay", protocol: "relay" },
+    { baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }
+  ]);
+  assert.equal(p, "custom");
+  assert.equal(Agent.config.apiKey, "sk-auto");
+  assert.equal(Agent.config.model, "gpt-6-astra");
+});
+test("autoAdoptLocal adopts on a pristine default profile (cloudproxy keyOptional is ready()==true but counts as unconfigured, issue #81)", () => {
+  store.clear();
+  Agent.config = { preset: "cloudproxy", baseUrl: Agent.PRESETS.cloudproxy.baseUrl, apiKey: "", model: Agent.PRESETS.cloudproxy.model, temperature: 0.7, keys: {}, manualLock: false };
+  const p = Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }]);
+  assert.equal(p, "custom");
+  assert.equal(Agent.config.apiKey, "sk-auto");
+});
+test("autoAdoptLocal never overrides a ready config or a manualLock one", () => {
+  // ready（已采用/已手动配置）→ 不动
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "sk-d", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: { deepseek: "sk-d" }, manualLock: false };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.preset, "deepseek");
+  assert.equal(Agent.config.apiKey, "sk-d");
+  // 已通过采用按钮配好（custom + key，未手动保存）→ 不动
+  store.clear();
+  Agent.config = { preset: "custom", baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-prev", model: "gpt-6-astra", temperature: 0.7, keys: { custom: "sk-prev" }, manualLock: false };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-new", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.apiKey, "sk-prev");
+  // manualLock → 绝不覆盖
+  store.clear();
+  Agent.config = { preset: "deepseek", baseUrl: Agent.PRESETS.deepseek.baseUrl, apiKey: "", model: Agent.PRESETS.deepseek.model, temperature: 0.7, keys: {}, manualLock: true };
+  assert.equal(Agent.autoAdoptLocal([{ baseUrl: "https://www.onetopai.com/v1", apiKey: "sk-auto2", model: "gpt-6-astra", protocol: "openai" }]), null);
+  assert.equal(Agent.config.apiKey, "");
+  // 空候选 → null
+  Agent.config.manualLock = false;
+  assert.equal(Agent.autoAdoptLocal([]), null);
+  assert.equal(Agent.autoAdoptLocal(null), null);
+});
+
 /* ---------- 聊天历史 ---------- */
 test("loadChat returns empty structure for unknown item", () => {
   store.delete("wb_hwdesk_chats");
@@ -165,6 +255,42 @@ test("buildMessages prefixes system and drops invalid entries", () => {
   assert.equal(msgs[0].role, "system");
   assert.equal(msgs[1].content, "q1");
   assert.equal(msgs[2].role, "assistant");
+});
+
+/* ---------- 请求体预算裁剪（云端网关拒绝超大 POST 的根因修复） ---------- */
+test("buildMessages trims oversized course context and keeps the latest user turn", () => {
+  const huge = "材料。".repeat(60000);   /* ≈180K 字符，远超预算 */
+  const out = Agent.buildMessages("你是作业助手。\n【课程上下文】\n" + huge, [
+    { role: "user", content: "q1" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "请直接作答" },
+  ]);
+  const len = JSON.stringify(out).length;
+  assert.ok(len <= Agent.BODY_BUDGET + 500, "组装结果应回到预算内: " + len);
+  assert.ok(out[0].content.includes("已按请求体上限截断"), "system 截断须附说明");
+  assert.equal(out[out.length - 1].content, "请直接作答", "最后一条用户消息必须原样保留");
+});
+
+test("buildMessages drops oldest history first before touching the system prompt", () => {
+  const big = "历史消息内容。".repeat(3000);   /* 每条 ≈21K 字符 */
+  const msgs = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: "user", content: "第" + i + "轮 " + big });
+  const out = Agent.buildMessages("SYS", msgs);
+  assert.ok(JSON.stringify(out).length <= Agent.BODY_BUDGET + 500, "应回到预算内");
+  assert.equal(out[0].content, "SYS", "预算够丢历史时不应截断 system");
+  assert.ok(out.length >= 3, "至少保留最近两轮对话");
+  assert.ok(JSON.stringify(out).includes("第9轮"), "最新一轮必须保留");
+  assert.ok(!JSON.stringify(out).includes("第0轮 "), "最旧的历史先被丢弃");
+});
+
+test("buildMessages leaves normal-sized conversations untouched", () => {
+  const out = Agent.buildMessages("SYS", [
+    { role: "user", content: "你好" },
+    { role: "assistant", content: "你好，开始作业吧" },
+  ]);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].content, "SYS");
+  assert.equal(out[1].content, "你好");
 });
 
 /* ---------- 交付提取 ---------- */

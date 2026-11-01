@@ -1,8 +1,8 @@
-/*! agent.js 1.2.1 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
+/*! agent.js 1.3.2 | hwdesk 作业内嵌 Agent 对话（OpenAI 兼容 API 直连） */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "1.2.1" };  /* 1.2.1: keyOptional 免 Key 预设 + ready()/needsKey() 统一口径（issue #81） */
+  var Agent = { version: "1.3.2" };  /* 1.3.2: buildMessages 请求体预算裁剪（云端网关拒绝超大 POST → gateway_network_error）；1.3.1: 启动自动采用本机检测（autoAdoptLocal，所有对话统一）；1.3.0: 本地检测采用（matchPreset/applyDiscovered） */
 
   /* ---------- API 预设（OpenAI 兼容 chat/completions） ----------
    * key 只存本机 localStorage，不进仓库、不进页面源码（与仓库隐私原则一致）。
@@ -214,6 +214,65 @@
     return !(p && p.keyOptional);
   };
 
+  /* ---------- 本地检测采用（配 syncserver /agents/discover） ----------
+   * 本机桥扫描机器上已装 AI CLI（codex/claude 等）与环境变量里的现成凭据，
+   * 页面一键采用 —— 不用再手工申请/粘贴 Key。凭据只在本机文件 ↔ 本机桥 ↔
+   * 本机页面之间流转，不经过任何第三方。 */
+  Agent.matchPreset = function (baseUrl) {
+    var u = String(baseUrl || "").replace(/\/+$/, "");
+    if (!u) return "custom";
+    for (var i = 0; i < Agent.PRESET_ORDER.length; i++) {
+      var id = Agent.PRESET_ORDER[i];
+      var b = Agent.PRESETS[id].baseUrl;
+      if (b && b.replace(/\/+$/, "") === u) return id;
+    }
+    return "custom";
+  };
+  /* 一键采用检测到的候选：{baseUrl, apiKey, model?, label?}。
+   * 预设按 baseUrl 匹配（绝大多数是 custom），Key 按预设分存；成功返回预设 id。 */
+  Agent.applyDiscovered = function (c) {
+    if (!c || !c.baseUrl || !c.apiKey) return null;
+    Agent.load();
+    var preset = Agent.matchPreset(c.baseUrl);
+    Agent.applyPreset(preset);
+    Agent.config.baseUrl = String(c.baseUrl).replace(/\/+$/, "");
+    if (c.model) Agent.config.model = c.model;
+    Agent.config.keys[preset] = c.apiKey;
+    Agent.config.apiKey = c.apiKey;
+    Agent.save();
+    return preset;
+  };
+
+  /* ---------- 启动自动采用（所有对话统一走本机已可用 Agent） ----------
+   * 页面启动时把 /agents/discover 的候选交给这里：
+   * - 用户手动保存过配置（manualLock）→ 绝不覆盖；
+   * - 当前配置已可用（ready）→ 不动（已有的对话配置就是最优先）；
+   * - 否则自动采用最优候选：OpenAI 协议且有模型 > OpenAI 无模型 > 中转。 */
+  Agent.pickLocalCandidate = function (agents) {
+    var list = (agents || []).filter(function (c) { return c && c.baseUrl && c.apiKey; });
+    var score = function (c) {
+      return (c.protocol === "openai" ? 2 : 0) + (c.model ? 1 : 0);
+    };
+    var best = null;
+    for (var i = 0; i < list.length; i++) {
+      if (!best || score(list[i]) > score(best)) best = list[i];
+    }
+    return best;
+  };
+  Agent.autoAdoptLocal = function (agents) {
+    Agent.load();
+    if (Agent.config.manualLock) return null;
+    /* ready() 在全新环境里也恒真（cloudproxy 免 Key 预设，issue #81）——
+     * 只有「出厂默认 cloudproxy 且一个 Key 都没存过」才视为未配置，可自动采用；
+     * 其余 ready 情形（用户手动选过 / 早已采用过）一律不覆盖。 */
+    var pristine = Agent.config.preset === "cloudproxy" && !Agent.config.apiKey
+      && (!Agent.config.keys || Object.keys(Agent.config.keys).length === 0);
+    if (Agent.ready() && !pristine) return null;
+    var best = Agent.pickLocalCandidate(agents);
+    if (!best) return null;
+    return Agent.applyDiscovered(best);
+  };
+
   Agent.ready = function () {
     Agent.load();
     /* keyOptional 预设（cloudproxy）：本机信任模式无需 Key，baseUrl+model 即就绪（issue #81） */
@@ -266,14 +325,39 @@
     return lines.join("\n");
   };
 
-  /* ---------- 消息组装 ---------- */
+  /* ---------- 消息组装 ----------
+   * 消息体整体作为 chat/completions 的 JSON body 发出。实测云端网关对超大 POST
+   * 会直接拒绝（body ≈600KB → 502/连接被掐，浏览器表现为 gateway_network_error:
+   * "Failed to fetch"，而探活 GET 极小永远通过）——课程材料上下文 + 长对话历史
+   * 越滚越大就会踩线，且表现为「有的作业能聊有的必挂」。这里做请求体预算裁剪：
+   * 先丢最旧的对话历史，还超限再截断 system 里的巨型材料。 */
+  Agent.BODY_BUDGET = 80000;   /* JSON 字符数预算；中文 UTF-8 最坏 ≈240KB，留足安全余量 */
   Agent.buildMessages = function (system, messages) {
-    var out = [{ role: "system", content: system }];
+    var out = [{ role: "system", content: String(system || "") }];
     (messages || []).forEach(function (m) {
       if (m && (m.role === "user" || m.role === "assistant") && m.content) {
-        out.push({ role: m.role, content: m.content });
+        out.push({ role: m.role, content: String(m.content) });
       }
     });
+    var jsonLen = function (arr) { return JSON.stringify(arr).length; };
+    if (jsonLen(out) <= Agent.BODY_BUDGET) return out;
+    /* 1) 从最旧的对话消息丢起，至少保留最近两轮 */
+    while (out.length > 3 && jsonLen(out) > Agent.BODY_BUDGET) {
+      out.splice(1, 1);
+    }
+    /* 2) 还超限 → system 里多半是巨型课程材料：截断并说明 */
+    if (jsonLen(out) > Agent.BODY_BUDGET) {
+      var rest = Agent.BODY_BUDGET - jsonLen(out.slice(1)) - 80;
+      if (rest < 1000) rest = 1000;
+      out[0].content = out[0].content.slice(0, rest)
+        + "\n\n〔系统提示：课程材料过长，已按请求体上限截断；缺失部分请让学生粘贴原文或补充材料。〕";
+    }
+    /* 3) 兜底：单条消息本身就是巨物（如粘贴整篇文档）→ 压到 8000 字符 */
+    if (jsonLen(out) > Agent.BODY_BUDGET) {
+      out.slice(1).forEach(function (m) {
+        if (m.content.length > 8000) m.content = m.content.slice(0, 8000) + "…〔已截断〕";
+      });
+    }
     return out;
   };
 
