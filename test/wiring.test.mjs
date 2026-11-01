@@ -535,6 +535,22 @@ test("启动器守卫默认网关直连：本机回环系统代理（Clash 特�
     assert.ok(!/netsh/.test(vbs) && !/taskkill/.test(vbs), name + ": no process/service killing");
   }
 });
+test("启动器 Python 探测覆盖非 PATH 位置（WorkBuddy 管理运行时 / 每用户 Python / Anaconda）", () => {
+  for (const name of ["launch-hwdesk-local.vbs", "launch-hwdesk-online.vbs"]) {
+    const vbs = readFileSync(path.join(root, name), "utf8");
+    assert.ok(/Function BestPy\(/.test(vbs) && /Function VerKey\(/.test(vbs),
+        name + ": version-picking probe helpers exist");
+    assert.ok(/%LOCALAPPDATA%\\Programs\\Python/.test(vbs), name + ": probes per-user Python");
+    assert.ok(/%USERPROFILE%\\\.workbuddy\\binaries\\python\\versions/.test(vbs),
+        name + ": probes app-managed runtime dir");
+    assert.ok(/anaconda3\\pythonw\.exe|miniconda3\\pythonw\.exe|%ProgramData%\\Anaconda3/.test(vbs),
+        name + ": probes Anaconda/Miniconda locations");
+    assert.ok(/BestPy\([^\n]*"pythonw\.exe"\)/.test(vbs), name + ": prefers windowless pythonw");
+    /* 版本选择：取数字最大的子目录（BestPy 内 VerKey 比较） */
+    assert.ok(/If k > bestKey Then/.test(vbs), name + ": highest version wins");
+    assert.ok(!/[^\x00-\x7F]/.test(vbs), name + ": vbs stays ASCII-only");
+  }
+});
 test("online launcher has no machine-specific hardcoding", () => {
   assert.ok(/GetParentFolderName\(WScript\.ScriptFullName\)/.test(vbs), "repo path auto-detected from the script location");
   assert.ok(!/F:\\hwdesk/.test(vbs), "no hardcoded F:\\hwdesk repo path");
