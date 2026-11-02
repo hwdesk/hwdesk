@@ -46,6 +46,7 @@ import base64
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import threading
@@ -59,7 +60,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "3.0.0"  # 3.0.0: 工作台 AI 收敛为唯一 Agent —— /agent/qoder（本机 Qoder CLI，提示词走 stdin）+ /agent/qoder/status，移除 /agents/discover；2.7.0: /agents/discover 本机 Agent 凭据发现；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "3.0.1"  # 3.0.1: TLS 信任根兜底 —— 默认信任库为空的解释器（msys2/mingw pythonw）也能验 https，报错不再误指学校站点；3.0.0: 工作台 AI 收敛为唯一 Agent —— /agent/qoder（本机 Qoder CLI，提示词走 stdin）+ /agent/qoder/status，移除 /agents/discover；2.7.0: /agents/discover 本机 Agent 凭据发现；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -253,6 +254,80 @@ def parse_cas_error(html_text):
     return raw
 
 
+# ---------------------------------------------------------------- TLS 信任根
+_TLS_CTX = None
+
+
+def ca_bundle_candidates():
+    """本机可能的 CA bundle，按可信度排序（certifi 装在哪都算，用户目录也一样正常）。"""
+    paths = []
+    try:
+        import certifi
+        paths.append(certifi.where())
+    except Exception:
+        pass
+    paths += [
+        r"C:\Program Files\Common Files\SSL\cert.pem",
+        r"C:\msys64\usr\ssl\certs\ca-bundle.crt",
+        r"C:\msys64\mingw64\etc\ssl\certs\ca-bundle.crt",
+        os.path.join(sys.prefix, "ssl", "cert.pem"),
+        os.path.join(sys.prefix, "etc", "ssl", "certs", "ca-bundle.crt"),
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/cert.pem",
+    ]
+    return [p for p in paths if p and os.path.isfile(p)]
+
+
+def tls_anchor_count(ctx):
+    """已加载的可信根证书数量（0 = 这个上下文任何 https 都验不过）。"""
+    stats = ctx.cert_store_stats()
+    return stats.get("x509_ca", 0) or stats.get("x509", 0)
+
+
+def fill_trust_anchors(ctx, bundles=None):
+    """ctx 一个可信根都没有时，逐个试外部 bundle 灌进去。
+    成功返回用到的路径；全部失败返回 None —— 绝不抛异常（没网/没装证书也要能起服务）。"""
+    if tls_anchor_count(ctx) > 0:
+        return None
+    for path in (ca_bundle_candidates() if bundles is None else bundles):
+        try:
+            ctx.load_verify_locations(cafile=path)
+        except Exception:
+            continue
+        if tls_anchor_count(ctx) > 0:
+            return path
+    return None
+
+
+def tls_context():
+    """带可信根的 SSL 上下文，进程内建一次即复用。
+    某些 Python 发行版（msys2/mingw 的 pythonw 就是典型）默认信任库是空的，
+    于是本机所有 https 都被拒成「unable to get local issuer certificate」，
+    看起来像学校站点挂了，其实是解释器不认任何证书。这里补外部 bundle 兜底。"""
+    global _TLS_CTX
+    if _TLS_CTX is None:
+        ctx = ssl.create_default_context()
+        fill_trust_anchors(ctx)
+        _TLS_CTX = ctx
+    return _TLS_CTX
+
+
+def https_handler():
+    return urllib.request.HTTPSHandler(context=tls_context())
+
+
+def net_error_text(reason):
+    """底层网络异常 → 人话。TLS 信任库缺失是本机解释器的事，不能赖学校站点。"""
+    raw = str(reason)
+    if "CERTIFICATE_VERIFY_FAILED" in raw or "certificate verify failed" in raw:
+        return ("本机 Python（%s）没有可用的 TLS 信任库，任何 https 都会被拒成"
+                "「unable to get local issuer certificate」，这与学校站点无关 —— "
+                "执行 pip install certifi 或换用 python.org 官方安装的 Python 即可解决。"
+                ) % (sys.executable or "python")
+    return "%s（请检查本机能否访问 courses.hzcu.edu.cn）" % raw
+
+
 # ---------------------------------------------------------------- HTTP 会话
 class Session:
     """带 CookieJar 的 urllib 会话（跨 courses/identity/ca 三个域自动带 cookie）。
@@ -262,6 +337,7 @@ class Session:
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
+            https_handler(),
             urllib.request.HTTPCookieProcessor(self.jar))
 
     def open(self, url, data=None, headers=None, timeout=25):
@@ -274,7 +350,7 @@ class Session:
         except urllib.error.HTTPError as e:
             return e, e.read()
         except urllib.error.URLError as e:
-            raise SyncError("网络请求失败：%s（请检查本机能否访问 courses.hzcu.edu.cn）" % e.reason)
+            raise SyncError("网络请求失败：%s" % net_error_text(e.reason))
 
 
 def _resp_text(resp, body):
@@ -290,6 +366,7 @@ def clone_session(s):
     t.jar = getattr(s, "jar", t.jar)   # 自检桩（object()）没有 jar 时退回空 jar，桩下 api_json 本就被替换
     t.opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
+        https_handler(),
         urllib.request.HTTPCookieProcessor(t.jar))
     return t
 
@@ -1258,8 +1335,77 @@ def proxy_available_models():
 
 
 def _proxy_opener():
-    """强制直连上游（同 Session：系统代理 Clash 会把国内厂商请求带进 502）"""
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    """强制直连上游（同 Session：系统代理 Clash 会把国内厂商请求带进 502），
+    并且共用 tls_context()，否则没信任库的 python 连厂商 https 也会一起挂。"""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), https_handler())
+
+
+def self_test_tls():
+    ok = True
+
+    # T1) 当前解释器必须拿得出可信根，否则一切 https 都是「certificate verify failed」
+    ctx = tls_context()
+    anchors = tls_anchor_count(ctx)
+    good = anchors > 0
+    print(("ok  - tls_context has %d trust anchors" % anchors if good
+           else "FAIL - tls_context has no trust anchors (x509_ca=0)，本机 python 无信任库且找不到 CA bundle"))
+    ok &= good
+
+    # T2) 进程内复用，别每次请求重建
+    good = tls_context() is ctx
+    print(("ok  - tls_context cached per process" if good else "FAIL - tls_context rebuilt each call"))
+    ok &= good
+
+    # T3) 三个出口（Session / clone_session / _proxy_opener）都挂上了这个上下文
+    def opener_ctx(opener):
+        for h in opener.handlers:
+            c = getattr(h, "_context", None)
+            if c is not None:
+                return c
+        return None
+
+    s = Session()
+    c1 = opener_ctx(s.opener) is ctx
+    c2 = opener_ctx(clone_session(s).opener) is ctx
+    c3 = opener_ctx(_proxy_opener()) is ctx
+    good = c1 and c2 and c3
+    print(("ok  - Session / clone_session / _proxy_opener share tls_context" if good
+           else "FAIL - https context not wired: session=%r clone=%r proxy=%r" % (c1, c2, c3)))
+    ok &= good
+
+    # T4) 兜底真的能灌进锚点；坏路径静默跳过、不抛异常
+    bogus = fill_trust_anchors(ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), ["C:\\nope\\missing-ca.pem"])
+    bare = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    bundles = ca_bundle_candidates()
+    if bundles:
+        used = fill_trust_anchors(bare, bundles)
+        good = (bogus is None and used in bundles and tls_anchor_count(bare) > 0)
+        detail = "used=%r anchors=%d" % (used, tls_anchor_count(bare))
+    else:   # 干净机器上没有外部 bundle，只核对「不抛 + 不假装成功」
+        good = bogus is None and tls_anchor_count(bare) == 0
+        detail = "no external bundle on this host"
+    print(("ok  - fill_trust_anchors fills an empty store, ignores bad paths (%s)" % detail if good
+           else "FAIL - fill_trust_anchors: bogus=%r %s" % (bogus, detail)))
+    ok &= good
+
+    # T5) CA bundle 候选列表只含真实存在的文件
+    good = all(os.path.isfile(p) for p in ca_bundle_candidates())
+    print(("ok  - ca_bundle_candidates lists only existing files" if good
+           else "FAIL - ca_bundle_candidates: %r" % (ca_bundle_candidates(),)))
+    ok &= good
+
+    # T6) 报错文案：信任库问题说成本机 python 的事，其它网络错误才让查站点
+    ssl_reason = ssl.SSLError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                                 "unable to get local issuer certificate (_ssl.c:1010)")
+    t_ssl = net_error_text(ssl_reason)
+    t_net = net_error_text(OSError(10061, "Connection refused"))
+    good = ("本机 Python" in t_ssl and "certifi" in t_ssl and "courses.hzcu.edu.cn" not in t_ssl
+            and "courses.hzcu.edu.cn" in t_net)
+    print(("ok  - net_error_text separates TLS-trust failures from site failures" if good
+           else "FAIL - net_error_text: %r / %r" % (t_ssl, t_net)))
+    ok &= good
+
+    return ok
 
 
 def self_test_proxy():
@@ -1547,6 +1693,7 @@ def self_test():
            else "FAIL - collect_payload per-account: %r %r %r" % (p1, p2, q3)))
     ok &= good
 
+    ok &= self_test_tls()
     ok &= self_test_proxy()
 
     print("SELF-TEST " + ("PASS" if ok else "FAIL"))
