@@ -2483,10 +2483,15 @@ def self_test_agent():
               "QODER_PERSONAL_ACCESS_TOKEN" not in clean)
         check("A8 CLI 自己的登录态目录照常转（零 Key 靠它，剥了就变成未登录）",
               clean.get("QODER_CONFIG_DIR") == os.environ.get("QODER_CONFIG_DIR"))
+        # POSIX 上临时目录由 /tmp 兜底（CI 里根本不设 TEMP/TMPDIR），不算缺失；
+        # Windows 上 CLI 落临时文件依赖 TEMP，必须真的转过去。
+        tmp_ok = (os.name != "nt" and os.path.isdir("/tmp"))
+        have = {"PATH": bool(clean.get("PATH") or clean.get("Path")),
+                "HOME": bool(clean.get("HOME") or clean.get("USERPROFILE") or clean.get("home")),
+                "TMP": bool(clean.get("TEMP") or clean.get("Temp") or clean.get("TMP")
+                            or clean.get("TMPDIR") or tmp_ok)}
         check("A8 子进程仍拿得到 PATH / 家目录 / 临时目录",
-              bool(clean.get("PATH") or clean.get("Path"))
-              and bool(clean.get("HOME") or clean.get("USERPROFILE") or clean.get("home"))
-              and bool(clean.get("TEMP") or clean.get("Temp") or clean.get("TMPDIR")))
+              all(have.values()), "缺失：" + ",".join(k for k, v in have.items() if not v))
 
         # A9) 档位解析：跟随默认不下传；目录没探到/档位不存在一律回默认并说明
         cat_ok = {"status": "ok", "models": ["Qwen3.8-Flash"], "error": ""}
