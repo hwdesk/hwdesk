@@ -477,8 +477,12 @@ test("UI cleanup: long help paragraphs are gone", () => {
 });
 
 /* ---------- 10. Qoder 通道（原 cloudai 体检接线区）：单通道直发，失败走 qoderFail ---------- */
-test("chat send goes through Agent.askQoder only (no gateway probe chain needed)", () => {
-  has(/Agent\.askQoder\(msgs\)/, "the only chat call is askQoder");
+test("chat send goes through the local Qoder channel only (no gateway probe chain needed)", () => {
+  has(/Agent\.askQoderStream\(msgs,/, "chat drawer streams over the local Qoder channel");
+  has(/Agent\.askQoder\(\[\{ role: "user", content: prompt \}\]\)/,
+      "the one-shot submit path is askQoder (local CLI)");
+  assert.equal((app.match(/Agent\.ask[A-Za-z]*\(/g) || []).length, 2,
+      "no third AI call site crept in");
   assert.ok(!/doCloudChat/.test(app), "cloud chat wrapper gone");
   assert.ok(!/CloudAI\.healthCheck/.test(app), "gateway health-check chain gone");
   assert.ok(!/cloudai\.js/.test(html), "cloudai.js no longer loaded");
@@ -762,20 +766,46 @@ test("syncserver /agent/qoder：本机 Qoder CLI 问答；云端页面（非本�
   pyHas(/origin\.lower\(\) != "null"/, "file:// pages (Origin: null) are allowed");
   pyHas(/"127\.0\.0\.1" not in origin[\s\S]{0,80}"localhost" not in origin/,
       "non-local origins are rejected (the local CLI never serves the cloud)");
-  pyHas(/def qoder_entry\(\)/, "CLI entry resolution exists");
+  pyHas(/def qoder_entry\(cfg=None\)/, "CLI entry resolution exists (config-driven)");
+  pyHas(/def qoder_entry_detail\(/, "resolution reports where the entry came from and why it failed");
+  pyHas(/envFailClosed/, "own env var fails closed instead of silently falling back");
   pyHas(/HWDESK_QODER_CLI/, "env override supported");
-  pyHas(/def qoder_ask\(messages\)/, "runner exists");
+  pyHas(/def qoder_ask\(messages, model=None\)/, "runner exists");
   pyHas(/_QODER_LOCK\.acquire\(blocking=False\)/, "single-flight lock (one CLI at a time)");
   pyHas(/subprocess\.TimeoutExpired/, "timeout is handled");
-  pyHas(/QODER_TIMEOUT = 300/, "timeout is generous (assignment drafting takes tens of seconds)");
+  pyHas(/cfg\["budget"\]\["perTask"\]\["timeoutSeconds"\]/,
+      "timeout comes from the config budget (assignment drafting takes tens of seconds)");
   assert.ok(!py.includes('self.path.startswith("/agents/discover")'), "old discovery route is gone");
 });
 test("syncserver qoder_ask：提示词走 stdin（无 argv 引号注入面）+ messages 组段", () => {
-  pyHas(/input=prompt\.encode\("utf-8"\)/, "prompt piped via stdin as bytes");
-  pyHas(/def qoder_compose_prompt\(messages\)/, "messages -> single prompt composer exists");
+  pyHas(/proc\.stdin\.write\(prompt\.encode\("utf-8"\)\)/, "prompt piped via stdin as bytes");
+  pyHas(/def qoder_compose_prompt\(messages, cfg=None\)/, "messages -> single prompt composer exists");
   pyHas(/【用户】/, "user turns are role-prefixed");
   pyHas(/【你上一轮的回复】/, "assistant turns are role-prefixed");
-  pyHas(/QODER_MAX_PROMPT/, "prompt size cap exists");
+  pyHas(/maxPromptChars/, "prompt size cap exists");
+  pyHas(/maxPromptChars.*\n[\s\S]{0,200}提示词过长|提示词过长[\s\S]{0,120}maxPromptChars/,
+      "over-long prompts are refused before the CLI starts");
+});
+test("syncserver agent.config.json：RoleWeave 语义的配置层（缺文件回退、坏配置收敛）", () => {
+  pyHas(/AGENT_CONFIG_FILE = os\.path\.join\(HERE, "agent\.config\.json"\)/, "config file location");
+  pyHas(/def load_agent_config\(/, "config loader exists");
+  pyHas(/def _sanitize_config\(/, "hostile configs are converged, not trusted");
+  pyHas(/def _deep_merge\(/, "shipped file only needs the diff, defaults fill the rest");
+  pyHas(/已回退内置默认值/, "broken JSON falls back to built-in defaults with a visible error");
+  pyHas(/AGENT_CONFIG_DEFAULTS/, "built-in defaults mirror the shipped file");
+  /* 权限：deny + 白名单、危险 permission-mode 一律拉回 */
+  pyHas(/FORBIDDEN_PERMISSION_MODES\s*=\s*\([^)]*bypass_permissions/, "bypass/dont-ask/auto modes are rejected");
+  pyHas(/defaultEffect.*deny|"deny"/, "permissions default to deny");
+  pyHas(/--disallowed-tools/, "deny list is actually handed to the CLI");
+  pyHas(/--strict-mcp-config/, "MCP is not read from anywhere but our empty config");
+  /* 模型：只在账号真实目录里的档位才下传，否则跟随账号默认 */
+  pyHas(/def resolve_qoder_model\(/, "model gating exists");
+  pyHas(/def qoder_catalog\(/, "per-account model catalog exists");
+  pyHas(/--list-models/, "catalog is read from the CLI itself, not guessed");
+  pyHas(/已跟随账号默认/, "unavailable tiers degrade to the account default and say so");
+  /* 环境隔离：白名单 + 无条件剔除 SDK 鉴权泄漏变量 */
+  pyHas(/def _qoder_clean_env\(/, "turn env is allowlisted");
+  pyHas(/_QODER_ENV_DROP/, "auth-payload leak vars are always dropped");
 });
 test("页面 Agent（唯一）状态卡：Qoder CLI 检测按钮 + 状态行", () => {
   assert.ok(/id="agQoderCheck"/.test(html), "check button exists in Agent config card");
@@ -783,23 +813,43 @@ test("页面 Agent（唯一）状态卡：Qoder CLI 检测按钮 + 状态行", (
   has(/function onQoderCheck\(\)/, "check handler exists");
   has(/function refreshQoderChannel\(\)/, "channel status shared by settings + chat view");
   has(/Agent\.qoderStatus\(/, "page goes through agent.js qoderStatus");
+  /* RoleWeave 式配置面板：档位下拉 + 生效配置展示，且都过 HTML 转义 */
+  assert.ok(/id="agModelSel"/.test(html), "model tier selector exists");
+  assert.ok(/id="agPolicy"/.test(html), "effective-config panel exists");
+  has(/function populateAgentModels\(status\)/, "tier list is filled from the bridge, not hardcoded");
+  has(/function renderAgentPolicy\(r\)/, "the panel renders permissions / budget / config source");
+  has(/function onQoderCheck\(\)\{[\s\S]{0,900}Agent\.qoderStatus\(12000\)/,
+      "manual check uses a bounded timeout");
+  has(/Agent\.setModel\(/, "picking a tier persists it");
+  assert.ok(!/Qwen3\.8-Flash/.test(html), "no hardcoded model name in the page");
   assert.ok(!/id="agDiscover"/.test(html), "old discover button is gone");
   assert.ok(!/id="agPreset"/.test(html), "preset selector is gone");
   assert.ok(!/id="agKey"/.test(html), "API key input is gone");
   assert.ok(!/id="cloudBanner"/.test(html), "cloud banner is gone");
 });
-test("agent.js 2.0.0：唯一通道 = 本机桥 /agent/qoder（零配置）", () => {
+test("agent.js 2.2.0：唯一通道 = 本机桥 /agent/qoder（零配置，模型只是档位）", () => {
   const ag = readFileSync(path.join(root, "agent.js"), "utf8");
   assert.ok(/Agent\.askQoder = async function/.test(ag), "askQoder exists");
+  assert.ok(/Agent\.askQoderStream = async function/.test(ag), "streaming ask exists");
   assert.ok(/Agent\.qoderStatus = async function/.test(ag), "qoderStatus exists");
   assert.ok(/\/agent\/qoder/.test(ag), "hits the bridge qoder endpoint");
   assert.ok(!/PRESETS/.test(ag), "no presets anymore");
   assert.ok(!/apiKey/.test(ag), "no api key anywhere");
+  assert.ok(!/https?:\/\/(?!127\.0\.0\.1|localhost)/.test(ag.replace(/^[ \t]*(\/\*|\*|\/\/).*$/gm, "")),
+      "agent.js talks to nothing but the local bridge");
   assert.ok(/BODY_BUDGET/.test(ag), "request-body budget trimming carried over from 1.3.2");
+  /* 模型：本地只存一个档位 id，随请求体下传，由服务端核对账号目录 */
+  assert.ok(/LS_MODEL/.test(ag), "selected model tier is persisted locally");
+  assert.ok(/Agent\.getModel = function/.test(ag) && /Agent\.setModel = function/.test(ag),
+      "model tier getter/setter exist");
+  assert.ok(/model: opts\.model \|\| Agent\.getModel\(\)/.test(ag),
+      "every turn carries the chosen tier (empty = account default)");
+  assert.ok(/Agent\.modelOptions = function/.test(ag),
+      "tier list is built from what the bridge actually reports");
 });
-test("对话抽屉：streamChat 直连 askQoder，CloudAI 分支整体下线", () => {
+test("对话抽屉：streamChat 直连本机 Qoder 通道，CloudAI 分支整体下线", () => {
   has(/function streamChat\(chat\)\{/, "streamChat exists");
-  has(/Agent\.askQoder\(msgs\)/, "streamChat calls askQoder");
+  has(/Agent\.askQoderStream\(msgs,/, "streamChat calls the streaming local channel");
   has(/function qoderFail\(chat, err\)\{/, "failure path is qoder-specific");
   assert.ok(!/CloudAI/.test(html), "no CloudAI references left in the page");
   assert.ok(!/cloudai\.js/.test(html), "cloudai.js no longer included");
@@ -824,7 +874,8 @@ test("对话等待计时：所有收尾路径统一清表；askQoder 自带超�
       "qoderFail clears the watchdog");
   has(/function resetChatBtn\(\)\{\s*\n\s*_chatBusy = false;\s*\n\s*stopChatWatchdog\(\)/,
       "resetChatBtn clears the watchdog");
-  has(/Agent\.askQoder\(msgs\)/, "the only chat call is askQoder (timeout-bounded)");
+  has(/Agent\.askQoderStream\(msgs,[\s\S]{0,400}signal: _chatAbort \? _chatAbort\.signal : undefined/,
+      "the chat call is the timeout-bounded local channel (abortable, never forever 生成中)");
   assert.ok((app.match(/stopChatWatchdog\(\);/g) || []).length >= 3,
       "every finishing path stops the timer (no leak)");
 });
