@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "hwdesk-agent.v1",
+  "_doc": "hwdesk 工作台唯一 Agent（本机 Qoder CLI）的配置。语义对齐 RoleWeave 数字员工工作台的岗位包配置：引擎绑定锁定 → CLI 解析顺序（显式环境变量优先、非法即失败不回落）→ 模型跟随账号默认 + 档位只在账号目录里出现才可选 → 权限 defaultEffect=deny + 只读白名单 → MCP 默认拒绝 → 逐任务/逐日预算 → 环境变量白名单隔离。改这个文件不用改代码；文件缺失或 JSON 坏了，桥自动回退到内置的同款默认值并在 status 里回报 configError。",
+
+  "engine": {
+    "schemaVersion": "roleweave-agent-binding.v1",
+    "name": "qoder",
+    "locked": true,
+    "_doc": "对齐 RoleWeave 的 agent-binding.v1 {engine, locked}。locked=true 时页面不能把对话通道切到别的引擎——本机只有这一条免密钥通道，Key 永远不出现在工作台里。"
+  },
+
+  "cli": {
+    "_doc": "对齐 RoleWeave server/src/qoder-binary.js 的解析顺序：1) 按 envOrder 逐个取第一个非空的显式值；2) PATH 里按 pathNames 逐个找（Windows 走 PATHEXT）；3) 每用户安装路径 userCandidates（~ 会展开）。每个候选都要过 realpath + 常规文件 + 可执行校验，绝不扫整个家目录。",
+    "_docFailClosed": "失败语义分两档：envFailClosed 里的变量（hwdesk 自己的 HWDESK_QODER_CLI）值非法＝直接判未就绪，绝不转头去跑别的可执行文件；其余是 RoleWeave 适配器的内部变量，本机桥常被 RoleWeave/Qoder 会话拉起、这些值会随环境泄漏进来（实测泄漏过 /home/feng/.local/bin/qoderclicn 这种 POSIX 路径），外来值非法时只是不采纳它并在 status.entryWarnings 里留一条说明，不把学生的工作台判成「没装 CLI」。想让 hwdesk 完全不理 RoleWeave 的变量，就把它们从 envOrder 删掉。",
+    "envOrder": [
+      "HWDESK_QODER_CLI",
+      "ORG_WORKBENCH_QODER_BIN",
+      "DIGITAL_EMPLOYEE_QODER_COMMAND"
+    ],
+    "envFailClosed": ["HWDESK_QODER_CLI"],
+    "pathNames": ["qodercli", "qoderclicn", "qoder"],
+    "userCandidates": [
+      "~/.qoder-cn/bin/qoderclicn/qoderclicn.exe",
+      "~/.qoder-cn/bin/qoderclicn/qoderclicn",
+      "~/.qoder-cn/bin/qodercli/qodercli.exe",
+      "~/.qoder-cn/bin/qodercli/qodercli",
+      "~/.qoder-cn/entry/qodercn.cmd",
+      "~/.qoder-cn/entry/qoder"
+    ],
+    "probeTimeoutMs": 6000,
+    "_docProbe": "实测本机 --list-models 冷启动要 1.7~2.0 秒，3 秒上限会被偶发抖动打成 unavailable 并把档位锁住（探测失败只缓存 30 秒，成功缓存 catalogCacheSeconds）。",
+    "catalogCacheSeconds": 600
+  },
+
+  "model": {
+    "_doc": "对齐 RoleWeave server/src/model-selection.js 的 qoder 分支：followLocalDefault 为真时 recommended 就是 provider-default（注释原话——即使本地没有明文模型设置，CLI 也可能有账号级加密的 Custom 选择，绝不能用 efficient 覆盖它）。本机实测：qoderclicn --list-models 只列 Qwen3.8-Flash；传 -m efficient/auto/performance/ultimate 会被 CLI 静默降级（stderr 提示 not available，退出码仍是 0）。所以档位只有在 --list-models 目录里真实出现才下传，否则一律跟随账号默认；页面显示的是 CLI init 事件回报的真实模型，不猜、不编。",
+    "policy": "follow-account-default",
+    "default": "provider-default",
+    "catalogArgs": ["--list-models"],
+    "allowCustom": true,
+    "customModelFormat": "qoder",
+    "tiers": [
+      { "id": "provider-default", "name": "跟随账号默认", "tier": "default", "model": null, "group": "default" },
+      { "id": "auto", "name": "Auto · Qoder", "tier": "auto", "model": "auto", "billing": "qoder", "group": "tiers" },
+      { "id": "efficient", "name": "Efficient", "tier": "economy", "model": "efficient", "billing": "qoder", "group": "tiers" },
+      { "id": "performance", "name": "Performance", "tier": "balanced", "model": "performance", "billing": "qoder", "group": "tiers" },
+      { "id": "ultimate", "name": "Ultimate", "tier": "powerful", "model": "ultimate", "billing": "qoder", "group": "tiers" }
+    ]
+  },
+
+  "permissions": {
+    "schemaVersion": "workbench-permissions.v1",
+    "defaultEffect": "deny",
+    "allow": ["Read", "Grep", "Glob"],
+    "deny": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Shell", "WebFetch", "WebSearch", "Task", "ImageGen"],
+    "permissionMode": "default",
+    "workspace": "app",
+    "_doc": "对齐 RoleWeave 岗位包的 workbench-permissions.v1（defaultEffect=deny + 工具白名单；28 个岗位里只读型给的就是 Read,Grep,Glob）。落到 Qoder CLI：--tools 只列 allow（实测 init 事件回报 tools:[Glob,Grep,Read]，deny 打底真实生效），--disallowed-tools 兜住写/命令/联网作第二道闸，--permission-mode 固定 default——绝不使用 bypass_permissions / --dangerously-skip-permissions。workspace=app 表示 -w 落到 hwdesk 目录，检索范围只限本目录而不是整个家目录。allow 置空（[]）即回到纯对话：工具全关（--tools \"\"）。",
+    "_docAllow": "把 \"allow\" 改成 [\"Read\",\"Write\",\"Edit\",\"Grep\",\"Glob\"] 就等价于 RoleWeave 里岗位用的可写档位；改完重启本机桥生效，无需改代码。"
+  },
+
+  "mcp": {
+    "schemaVersion": "workbench-mcp.v1",
+    "defaultEffect": "deny",
+    "servers": [],
+    "_doc": "对齐 RoleWeave 岗位包里的 mcp.json（defaultEffect=deny、servers 为空）。落到 CLI：--strict-mcp-config --mcp-config {\"mcpServers\":{}}，页面和模型都别想悄悄挂上外部 MCP。servers 非空时才允许写 --allowed-mcp-server-names。"
+  },
+
+  "isolation": {
+    "cleanEnv": true,
+    "envAllow": [
+      "PATH", "HOME", "USER", "USERPROFILE", "USERNAME", "LOGNAME", "SHELL",
+      "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+      "PATHEXT", "COMSPEC", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR",
+      "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+      "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+      "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+      "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
+      "QODER_CONFIG_DIR"
+    ],
+    "_docEnvAllow": "QODER_CONFIG_DIR 要放（CLI 靠它找到 ~/.qoder-cn 里的登录态，本机账号默认登录 = 零 Key）。任何凭据类变量（PAT / API Key / session token）都不放：这条通道的鉴权只来自 CLI 自己的登录态，绝不借用拉起本机桥那个会话的凭据。",
+    "envDropAlways": [
+      "QODER_SDK_AUTH_PAYLOAD_FILE", "QODER_AGENT_SDK_ENTRYPOINT",
+      "QODER_AGENT_SDK_DAEMON", "QODER_AGENT_SDK_VERSION",
+      "QODER_API_KEY", "QODER_PERSONAL_ACCESS_TOKEN", "QODER_SESSION_ACCESS_TOKEN"
+    ],
+    "settingSources": "",
+    "noSessionPersistence": true,
+    "_doc": "对齐 RoleWeave engine/driver-cli.js 的回合环境白名单（PATH/HOME/代理/证书/NODE_EXTRA_CA_CERTS/SSL_CERT_* 等只在这些里）。本机桥常被桌面应用或无头 agent 的会话拉起，子进程会继承会话级 SDK 鉴权变量并指向一个已清理的临时凭据文件 → CLI 秒退（退出码 41），所以 envDropAlways 无条件再剥一遍。settingSources=\"\" 表示不加载用户/项目 settings；noSessionPersistence=true 时加 --no-session-persistence，对话不落本机会话文件。",
+    "_docObserved": "实测记录：即使 --setting-sources \"\"，Qoder CLI 仍会加载用户级插件的 SessionStart hook（qoder-context / Qoder Security）。这些是 type:\"system\" 事件，桥只映射 thinking/answer/done/error，不会进对话框，但每回合多约 1~5 秒。要彻底关掉得改 CLI 侧，本配置不假装能关掉它。"
+  },
+
+  "budget": {
+    "_doc": "对齐 RoleWeave 岗位包的 budget.json（perTask/perDay 的 tokens + iterations）。Qoder CLI 的 usage 在本账号回报的是全 0 token，只有 credits 有值，所以 token 上限只在 CLI 真实回报 token 时才参与熔断，熔断主指标用回合数/时长/提示词长度/输出上限——不假装统计了 token。",
+    "perTask": {
+      "timeoutSeconds": 300,
+      "maxPromptChars": 150000,
+      "maxOutputTokens": 8000,
+      "iterations": 8
+    },
+    "perDay": {
+      "turns": 200,
+      "tokens": 200000
+    }
+  },
+
+  "transport": {
+    "outputFormat": "stream-json",
+    "singleFlight": true,
+    "killWindow": true,
+    "_doc": "singleFlight=true 保持本机同一时刻只跑一个 CLI 进程（页面可 /agent/qoder/stop 杀进程树）；killWindow=true 在 Windows 上加 CREATE_NO_WINDOW，不再弹黑窗。"
+  }
+}

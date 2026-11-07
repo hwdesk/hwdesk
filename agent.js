@@ -1,12 +1,17 @@
-/*! agent.js 2.0.0 | hwdesk 作业内嵌 Agent 对话（唯一 Agent：本机 Qoder CLI）
+/*! agent.js 2.2.0 | hwdesk 作业内嵌 Agent 对话（唯一 Agent：本机 Qoder CLI）
+ * 2.2.0：档位对齐 agent.config.json（RoleWeave 语义）——getModel/setModel 持久化
+ * 选择（默认 provider-default＝跟随账号默认），modelOptions(status) 按桥的账号目录
+ * 标注可选档位，目录里没有的档位由桥拒绝下传；问答/流式都带 model 字段并回读 CLI
+ * 真实生效的 model 与 modelNote。
+ * 2.1.0：askQoderStream 流式问答（NDJSON thinking/answer/done 事件实时进对话框，
+ * 旧桥 404 自动降级一轮一出）。
  * 2.0.0：工作台 AI 全部收敛为 Qoder CLI —— 删除 API 预设 / 分层降级 / 云端
  * 免密钥通道 / 本机凭据发现采用；对话改为本机桥 /agent/qoder（syncserver
- * 调 Qoder CLI -p，提示词走 stdin，不出本机）。零配置：无 Key、无 baseUrl、
- * 无模型选择。 */
+ * 调 Qoder CLI -p，提示词走 stdin，不出本机）。零配置：无 Key、无 baseUrl。 */
 (function (global) {
   "use strict";
 
-  var Agent = { version: "2.0.0" };  /* 2.0.0: 收敛为唯一 Agent Qoder CLI（删预设/分层/发现采用），移植 1.3.2 的 buildMessages 请求体预算裁剪 */
+  var Agent = { version: "2.2.0" };  /* 2.2.0: 档位（跟随账号默认 + tier）与生效模型回读；2.1.0: askQoderStream 流式（思考过程实时进对话框，旧桥降级）；2.0.0: 收敛为唯一 Agent Qoder CLI（删预设/分层/发现采用），移植 1.3.2 的 buildMessages 请求体预算裁剪 */
 
   /* ---------- 本机桥定位 ----------
    * 页面被本机桥同源托管（syncserver GET /，见 PR #91）时直接用同源；
@@ -46,9 +51,44 @@
     }
   };
 
+  /* ---------- 档位选择（agent.config.json 的 model.tiers） ----------
+   * 默认 provider-default＝跟随账号默认。桥会用 --list-models 的账号目录校验档位，
+   * 目录里没有的档位不下传（实测硬塞会被 CLI 静默降级，页面显示的模型就成了假的）。 */
+  var LS_MODEL = "hwdesk.agentModel";
+  Agent.getModel = function () {
+    var g = typeof global !== "undefined" ? global : globalThis;
+    try { return (g.localStorage.getItem(LS_MODEL) || "provider-default") || "provider-default"; }
+    catch (e) { return "provider-default"; }
+  };
+  Agent.setModel = function (id) {
+    var g = typeof global !== "undefined" ? global : globalThis;
+    try { g.localStorage.setItem(LS_MODEL, String(id || "provider-default")); } catch (e) { /* noop */ }
+    return Agent.getModel();
+  };
+  /* status → 可选项：档位 + 账号目录里额外列出的模型（bridge 已标好 available） */
+  Agent.modelOptions = function (status) {
+    var tiers = (status && status.tiers) || [];
+    var out = [], seen = {};
+    tiers.forEach(function (t) {
+      if (!t || !t.id || seen[t.id]) return;
+      seen[t.id] = 1;
+      out.push({ id: t.id, name: t.name || t.id, available: t.available !== false,
+                 note: t.note || "", group: t.group || "tiers" });
+    });
+    ((status && status.catalog) || []).forEach(function (m) {
+      if (seen[m]) return;
+      seen[m] = 1;
+      out.push({ id: m, name: m + "（账号目录）", available: true, note: "", group: "catalog" });
+    });
+    if (!out.length) out.push({ id: "provider-default", name: "跟随账号默认", available: true,
+                                note: "", group: "default" });
+    return out;
+  };
+
   /* ---------- 问答（POST /agent/qoder）----------
    * messages = Agent.buildMessages 的产物；CLI 一轮一出（无流式），耗时
-   * 数十秒属正常。成功 resolve {output, model}，失败 reject {code, message}。 */
+   * 数十秒属正常。opts.model 为档位 id（默认跟随账号默认）。成功 resolve
+   * {output, model, modelNote}，失败 reject {code, message}。 */
   Agent.askQoder = async function (messages, opts) {
     opts = opts || {};
     var g = typeof global !== "undefined" ? global : globalThis;
@@ -61,16 +101,93 @@
       var res = await g.fetch(Agent.bridgeRoot() + "/agent/qoder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages || [] }),
+        body: JSON.stringify({ messages: messages || [], model: opts.model || Agent.getModel() }),
         signal: ctl ? ctl.signal : undefined
       });
       var j = null;
       try { j = await res.json(); } catch (e) { j = null; }
-      if (res.ok && j && j.ok) return { output: j.output || "", model: j.model || "" };
+      if (res.ok && j && j.ok) {
+        return { output: j.output || "", model: j.model || "", modelNote: j.modelNote || "",
+                 tools: j.tools || null };
+      }
       var msg = (j && (j.error || j.message)) || ("HTTP " + res.status);
       throw { code: res.status === 403 ? "forbidden" : "qoder_error", message: String(msg) };
     } catch (e) {
       if (e && e.code) throw e;                       /* 已是结构化错误 */
+      throw { code: "network", message: "本机桥连不上（127.0.0.1:8765）——请先运行 python syncserver.py" };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  /* ---------- 流式问答（POST /agent/qoder/stream）----------
+   * NDJSON 逐行事件：{type:"thinking"|"answer",text} 过程实时回调 onEvent，
+   * {type:"done",text} 收尾 resolve {output}，{type:"error",message} reject。
+   * 旧桥（<3.1.0）无此端点回 404 → 自动降级走一轮一出的 /agent/qoder。 */
+  Agent.askQoderStream = async function (messages, onEvent, opts) {
+    opts = opts || {};
+    var g = typeof global !== "undefined" ? global : globalThis;
+    if (typeof g.fetch !== "function" || !g.ReadableStream) {
+      var r = await Agent.askQoder(messages, opts);   /* 环境不支持流 → 旧通道 */
+      if (onEvent) onEvent({ type: "answer", text: r.output });
+      return r;
+    }
+    var ctl = g.AbortController ? new g.AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, opts.timeoutMs || 330000) : null;
+    if (ctl && opts.signal && opts.signal.addEventListener) {
+      opts.signal.addEventListener("abort", function () { try { ctl.abort(); } catch (e) { /* noop */ } });
+    }
+    try {
+      var res = await g.fetch(Agent.bridgeRoot() + "/agent/qoder/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages || [], model: opts.model || Agent.getModel() }),
+        signal: ctl ? ctl.signal : undefined
+      });
+      if (res.status === 404) {                       /* 旧桥：降级一轮一出 */
+        var legacy = await Agent.askQoder(messages, opts);
+        if (onEvent) onEvent({ type: "answer", text: legacy.output });
+        return legacy;
+      }
+      if (!res.ok) {
+        var j = null;
+        try { j = await res.json(); } catch (e) { j = null; }
+        var msg = (j && (j.error || j.message)) || ("HTTP " + res.status);
+        throw { code: res.status === 403 ? "forbidden" : "qoder_error", message: String(msg) };
+      }
+      var reader = res.body.getReader(), decoder = new TextDecoder("utf-8");
+      var buf = "", done = null, errMsg = null;
+      function consume(line){
+        if (!line || line.charAt(0) !== "{") return;
+        var ev;
+        try { ev = JSON.parse(line); } catch (e) { return; }
+        if (ev.type === "thinking" || ev.type === "answer") { if (onEvent) onEvent(ev); }
+        else if (ev.type === "done") done = ev;
+        else if (ev.type === "error") errMsg = ev.message || "Qoder CLI 出错";
+      }
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        var nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          consume(buf.slice(0, nl));
+          buf = buf.slice(nl + 1);
+        }
+      }
+      consume(buf);
+      if (done && !done.is_error) {
+        return { output: done.text || "", model: done.model || "",
+                 modelNote: done.modelNote || "", tools: done.tools || null };
+      }
+      if (done) throw { code: "qoder_error", message: done.text || "Qoder CLI 返回了错误" };
+      throw { code: "qoder_error", message: errMsg || "本机桥流式响应异常中断，请重试" };
+    } catch (e) {
+      if (e && e.code) throw e;
+      if (e && (e.name === "AbortError" || e.code === 20)) {
+        if (opts.signal && opts.signal.aborted) throw { code: "aborted", message: "已中断" };
+        throw { code: "timeout", message: "Qoder 响应超时，请重试或精简任务" };
+      }
       throw { code: "network", message: "本机桥连不上（127.0.0.1:8765）——请先运行 python syncserver.py" };
     } finally {
       if (timer) clearTimeout(timer);
@@ -127,7 +244,7 @@
    * 请求体预算裁剪（自 1.3.2 移植）：课程材料上下文 + 长对话历史越滚越大，
    * 会超出 CLI/桥的处理预算 —— 先丢最旧的对话历史，还超限再截断 system 里
    * 的巨型材料。 */
-  Agent.BODY_BUDGET = 80000;   /* JSON 字符数预算；中文 UTF-8 最坏 ≈240KB，留足安全余量 */
+  Agent.BODY_BUDGET = 140000;  /* 与桥侧 QODER_MAX_PROMPT=150000 同步放大：课件上下文 + 长对话不再被裁 */
   Agent.buildMessages = function (system, messages) {
     var out = [{ role: "system", content: String(system || "") }];
     (messages || []).forEach(function (m) {

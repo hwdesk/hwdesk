@@ -509,10 +509,16 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
           <div id="agChannel" class="hint" style="display:none;padding:8px 10px;border-radius:8px;background:#f2f8f2;color:#256a2b"></div>
           <div><label class="f">本机检测</label>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="btn sm" id="agQoderCheck">🔍 检测 Qoder CLI</button>
+              <button class="btn sm" id="agQoderCheck">🔍 检测本机 Agent</button>
               <span class="hint" id="agQoderHint" style="margin:0">检测本机桥与 Qoder CLI 是否就绪（对话也走这条通道）</span>
             </div>
             <div id="agFound" style="margin-top:8px;display:none"></div></div>
+          <div style="margin-top:10px"><label class="f">模型档位</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="agModelSel" style="min-width:200px"></select>
+              <span class="hint" id="agModelHint" style="margin:0">默认「跟随账号默认」：档位是否可用由本机账号的模型目录（--list-models）决定，不硬塞</span>
+            </div></div>
+          <div id="agPolicy" class="hint" style="margin-top:10px;line-height:1.7"></div>
         </div>
       </details>
     </div>
@@ -632,6 +638,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
         <button class="btn sm primary" id="chatQuick" title="选用版成稿 → 按格式落文件 → 进审批队列">一键提交</button>
         <button class="btn sm primary" id="chatSubmit">用最终结果提交</button>
         <button class="btn sm" id="chatSend">发送</button>
+        <button class="btn sm" id="chatStop" style="display:none" title="中断当前生成，立刻可以发下一条">■ 停止</button>
       </div>
     </div>
   </div>
@@ -648,6 +655,13 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2c3346}
   .chat-b .b-ops{margin-top:8px;display:flex;justify-content:flex-end}
   .chat-b .b-ops .btn{font-size:12px;padding:4px 10px}
   .chat-b.assistant.thinking{color:#98a0b3}
+  .chat-b .chat-think{margin:0 0 8px;border:1px solid #e2e6f0;border-radius:9px;background:rgba(47,107,255,.05);font-size:12px}
+  .chat-b .chat-think summary{cursor:pointer;padding:5px 10px;color:#8a93a8;user-select:none;list-style:none}
+  .chat-b .chat-think summary::before{content:"▸ "}
+  .chat-b .chat-think[open] summary::before{content:"▾ "}
+  .chat-b .chat-think .tk-body{padding:0 10px 8px;color:#8a93a8;white-space:pre-wrap;line-height:1.6}
+  html[data-theme="dark"] .chat-b .chat-think{background:rgba(255,255,255,.04);border-color:var(--line)}
+  html[data-theme="dark"] .chat-b .chat-think summary,html[data-theme="dark"] .chat-b .chat-think .tk-body{color:var(--sub,#9aa3b5)}
   .chat-foot{border-top:1px solid #eef0f4;padding:12px 16px;background:#fff}
   .chat-foot textarea{width:100%;min-height:70px;resize:vertical}
   .chat-risk{margin:0 16px;padding:8px 12px;background:#fff8ec;border:1px solid #f2dfb6;border-radius:8px;font-size:12.5px;white-space:pre-wrap}
@@ -1620,7 +1634,7 @@ function refreshDefaultAiSelect(){
   sel.value = Bridge.prefs.defaultAi || "";
 }
 /* ---------- 作业 Agent 对话（agent.js + OpenAI 兼容 API） ---------- */
-var _chatId = null, _chatBusy = false, _chatRiskScore = null;
+var _chatId = null, _chatBusy = false, _chatRiskScore = null, _chatAbort = null;
 function buildAgentCtx(it){
   var ctx = {};
   if(typeof Laya !== "undefined") ctx.decision = Laya.analyze(it);
@@ -1670,8 +1684,13 @@ function renderChat(chat){
         + (picked ? "✓ 已选用此版 · 再点取消" : "选用此版") + '</button>'
         + '<button class="btn sm" data-ins="' + i + '" title="把这条回复插入到下方输入框光标处，改一改就能接着发">插入</button></div>'
       : "";
+    /* 思考过程：流式期间默认展开（实时可见），落库后收成一行可点开 */
+    var think = (m.role === "assistant" && m.thinking)
+      ? '<details class="chat-think"' + (last && _chatBusy ? " open" : "") + '><summary>💭 思考过程</summary>'
+        + '<div class="tk-body">' + esc(m.thinking) + '</div></details>'
+      : "";
     html += '<div class="chat-b ' + m.role + (picked ? " picked" : "") + (last ? '" id="chatLast' : '') + '">'
-      + esc(m.content || (last ? "思考中…" : "")) + ops + '</div>';
+      + think + esc(m.content || (last ? (m.thinking ? "生成中…" : "思考中…") : "")) + ops + '</div>';
   });
   box.innerHTML = html;
   box.scrollTop = box.scrollHeight;
@@ -1702,17 +1721,23 @@ function resetChatBtn(){
   stopChatWatchdog();
   var b = el("chatSend");
   if(b){ b.disabled = false; b.textContent = "发送"; }
+  var s = el("chatStop");
+  if(s) s.style.display = "none";
 }
 /* 看门狗计时器（streamChat 专用）：所有收尾路径统一到这里清表，防泄漏 */
 var _chatWdTimer = null;
 function stopChatWatchdog(){ if(_chatWdTimer){ clearInterval(_chatWdTimer); _chatWdTimer = null; } }
-/* 唯一 Agent（Qoder CLI）问答：本机桥 /agent/qoder，CLI 一轮一出（无流式）。
- * 等待计时（继承 #99 看门狗的「等待看得见」）：CLI 单轮看不到增量 → 按钮实时
- * 显示已等待秒数；总时长由前端 askQoder 超时 + 桥侧 QODER_TIMEOUT 双保险兜底，
- * 到点必有报错收尾，不会「永远生成中」。 */
+/* 唯一 Agent（Qoder CLI）问答：本机桥 /agent/qoder/stream 流式 —— 思考过程、
+ * 回答逐段实时进对话框（旧桥自动降级一轮一出）。
+ * 等待计时（继承 #99 看门狗的「等待看得见」）：按钮实时显示已等待秒数；
+ * 总时长由前端超时 + 桥侧 QODER_TIMEOUT 双保险兜底，到点必有报错收尾，
+ * 不会「永远生成中」。 */
 function streamChat(chat){
   _chatBusy = true;
   el("chatSend").disabled = true; el("chatSend").textContent = "思考中…";
+  var stopBtn = el("chatStop");
+  if(stopBtn) stopBtn.style.display = "";
+  _chatAbort = (typeof AbortController !== "undefined") ? new AbortController() : null;
   var msgs = Agent.buildMessages(chat.system, chat.messages.slice(0, -1));
   var wdStart = Date.now();
   stopChatWatchdog();
@@ -1720,17 +1745,53 @@ function streamChat(chat){
     var b = el("chatSend");
     if(b && b.disabled) b.textContent = "思考中… " + Math.round((Date.now() - wdStart) / 1000) + "s";
   }, 1000);
-  Agent.askQoder(msgs).then(function(r){
+  var cur = chat.messages[chat.messages.length - 1];
+  Agent.askQoderStream(msgs, function(ev){
+    if(_chatId === null) return;
+    if(ev.type === "thinking"){
+      cur.thinking = (cur.thinking ? cur.thinking + "\n\n" : "") + ev.text;
+    } else if(ev.type === "answer"){
+      cur.content = ev.text;
+    }
+    renderChat(chat);
+  }, { signal: _chatAbort ? _chatAbort.signal : undefined }).then(function(r){
     stopChatWatchdog();
+    _chatAbort = null;
+    if(stopBtn) stopBtn.style.display = "none";
     if(_chatId === null){ return; }   /* 抽屉已关：内容已随消息对象落库 */
-    chat.messages[chat.messages.length - 1].content = (r && r.output) || "（Qoder 返回了空回复，请重试）";
+    if(r && r.modelNote) addLog("档位说明：" + r.modelNote);   /* 档位被桥拒掉时必须让学生看见 */
+    chat.messages[chat.messages.length - 1].content = (r && r.output) || cur.content || "（Qoder 返回了空回复，请重试）";
     Agent.saveChat(_chatId, chat);
     renderChat(chat);
     finishChat();
   }).catch(function(err){
     stopChatWatchdog();
+    _chatAbort = null;
+    if(stopBtn) stopBtn.style.display = "none";
+    if(err && err.code === "aborted"){
+      /* 用户主动停止：保留已生成的部分（含思考过程），补一句「已中断」，
+       * 单飞锁由桥侧 /agent/qoder/stop 杀进程释放，可立刻发下一条 */
+      var c2 = Agent.loadChat(_chatId);
+      var l2 = c2.messages[c2.messages.length - 1];
+      if(l2 && l2.role === "assistant" && !l2.content) l2.content = "（已中断）";
+      Agent.saveChat(_chatId, c2);
+      renderChat(c2);
+      resetChatBtn();
+      addLog("已中断 Qoder 生成");
+      return;
+    }
     qoderFail(chat, err);
   });
+}
+/* 停止生成：先通知桥杀 CLI（放锁），再掐本侧 fetch（走 aborted 收尾）。
+ * 顺序反了也行不通——只掐 fetch 的话桥会等 HTTP/1.0 写完才发现断开，锁不放。 */
+function onChatStop(){
+  if(!_chatBusy) return;
+  try{
+    fetch(Agent.bridgeRoot() + "/agent/qoder/stop", { method: "POST" })
+      .catch(function(){ /* 桥不在/断开：本地收尾照做 */ });
+  }catch(e){ /* 无 fetch 环境忽略 */ }
+  try{ if(_chatAbort) _chatAbort.abort(); }catch(e){ /* noop */ }
 }
 /* Qoder 通道失败兜底：与旧通道同样的收尾 + 人话错误提示 */
 function qoderFail(chat, err){
@@ -1957,6 +2018,16 @@ function fillAgentSettings(){
   refreshQoderChannel();
 }
 /* Qoder 通道状态（设置卡 + AI 对话状态行共用）：本机桥 → Qoder CLI 一次检测 */
+/* 状态行的模型标注只说真生效的那个：没选到可用档位就是「跟随账号默认」，
+   绝不写死某个模型名（账号不同、CLI 版本不同，目录就不同，写死即撒谎）。 */
+function agentChannelModelLabel(r){
+  if(!r) return "跟随账号默认";
+  var want = (typeof Agent !== "undefined" && Agent.getModel) ? Agent.getModel() : "";
+  var hit = null;
+  (r.tiers || []).forEach(function(t){ if(t && t.id === want) hit = t; });
+  if(hit && hit.available && hit.model) return hit.name + "（" + hit.model + "）";
+  return "跟随账号默认";
+}
 function refreshQoderChannel(){
   var box = el("agChannel");
   if(!box || typeof Agent === "undefined" || !Agent.qoderStatus) return;
@@ -1966,7 +2037,7 @@ function refreshQoderChannel(){
     if(!box) return;
     if(r && r.ok){
       box.style.background = "#f2f8f2"; box.style.color = "#256a2b";
-      box.textContent = "✅ Qoder CLI 就绪（" + (r.model || "Qwen3.8-Flash")
+      box.textContent = "✅ Qoder CLI 就绪（模型：" + agentChannelModelLabel(r)
         + "）：零配置，对话与 AI 代提交直接可用";
     }else{
       box.style.background = "#fff4f2"; box.style.color = "#a03020";
@@ -1974,31 +2045,105 @@ function refreshQoderChannel(){
         + "（本机桥 = hwdesk 目录 python syncserver.py）";
     }
     var st = el("cloudStatus");
-    if(st && r && r.ok) st.textContent = "Agent：Qoder CLI（" + (r.model || "") + "）· 就绪";
+    if(st && r && r.ok) st.textContent = "Agent：Qoder CLI（" + agentChannelModelLabel(r) + "）· 就绪";
   }).catch(function(){ if(box) box.textContent = "⚠️ 通道检测失败，可稍后重试"; });
 }
-/* 手动检测按钮：结果落在 agFound */
+/* Agent 面板：档位下拉 + 生效权限/预算摘要（全部来自桥的 /agent/qoder/status，
+ * 也就是 agent.config.json 收敛后的真值，页面不另存一份会漂移的副本） */
+function populateAgentModels(status){
+  var sel = el("agModelSel");
+  if(!sel) return;
+  var opts = (typeof Agent !== "undefined" && Agent.modelOptions)
+    ? Agent.modelOptions(status) : [{ id: "provider-default", name: "跟随账号默认", available: true }];
+  var cur = (typeof Agent !== "undefined" && Agent.getModel) ? Agent.getModel() : "provider-default";
+  sel.innerHTML = "";
+  opts.forEach(function(o){
+    var node = document.createElement("option");
+    node.value = o.id;
+    node.textContent = o.available ? o.name : (o.name + "（本机账号不可用）");
+    node.disabled = !o.available && o.id !== cur;
+    sel.appendChild(node);
+  });
+  sel.value = cur;
+  if(sel.value !== cur){ sel.value = "provider-default"; }
+  var hint = el("agModelHint");
+  var chosen = null;
+  for(var i = 0; i < opts.length; i++){ if(opts[i].id === sel.value){ chosen = opts[i]; break; } }
+  if(hint){
+    if(status && status.catalogStatus && status.catalogStatus !== "ok" && sel.value !== "provider-default"){
+      hint.textContent = "账号模型目录没取到（" + status.catalogStatus +
+        "），本轮会跟随账号默认——重新检测可再试";
+    } else {
+      hint.textContent = chosen && chosen.note ? chosen.note
+        : (sel.value === "provider-default"
+          ? "跟随本机 Qoder 账号的默认模型（账号目录里读到 "
+            + ((status && status.catalog && status.catalog.length) || 0) + " 个可选档位），不硬编档位"
+          : "只在账号目录里出现过的档位才会真正下传，其余一律跟随账号默认");
+    }
+  }
+}
+function renderAgentPolicy(r){
+  var box = el("agPolicy");
+  if(!box) return;
+  if(!r || (!r.ok && !r.permissions)){ box.innerHTML = ""; return; }
+  var p = r.permissions || {}, m = r.mcp || {}, b = (r.budget || {}).perTask || {};
+  var d = (r.budget || {}).perDay || {};
+  var eng = r.engine || {};
+  var esc = function(v){ return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+  var tools = (p.allow && p.allow.length) ? esc(p.allow.join("、")) : "无（纯对话）";
+  var spent = r.spentToday || {};
+  var lines = [];
+  lines.push("引擎绑定：<b>" + esc(eng.name || "qoder") + (eng.locked ? "（锁定，页面不可切换）" : "") + "</b>");
+  lines.push("模型策略：" + (r.modelPolicy === "follow-account-default"
+    ? "跟随本机 Qoder 账号默认；档位（" + ((r.tiers || []).length) + " 个）只有在 <b>--list-models</b> 的账号目录里出现才会真正下传，否则一律回落到账号默认"
+    : esc(r.modelPolicy || "跟随账号默认"))
+    + (r.allowCustomModel ? " · 允许手工指定模型 id" : ""));
+  lines.push("工具权限：默认 <b>" + esc(p.defaultEffect || "deny") + "</b> · 白名单 " + tools
+    + " · permission-mode " + esc(p.permissionMode || "default")
+    + " · 检索范围 " + esc(p.turnDir || ""));
+  lines.push("MCP：默认 <b>" + esc(m.defaultEffect || "deny") + "</b>"
+    + ((m.servers && m.servers.length) ? " · 已允许 " + esc(m.servers.join("、")) : " · 未挂任何外部服务"));
+  lines.push("预算：单回合 " + esc(b.timeoutSeconds || "-") + "s / 输出上限 "
+    + esc(b.maxOutputTokens || "-") + " tokens / 提示词上限 " + esc(b.maxPromptChars || "-")
+    + " 字符；今日 " + esc(spent.turns || 0) + " / " + esc(spent.limitTurns || "-") + " 回合");
+  lines.push("配置来源：" + (r.configSource === "file" ? "<b>agent.config.json</b>" : "内置默认值（配置文件缺失或未生效）")
+    + (r.configError ? '<span style="color:#a03020"> · ' + esc(r.configError) + "</span>" : "")
+    + (r.configWarnings && r.configWarnings.length
+      ? '<span style="color:#a06020"> · 已收敛 ' + r.configWarnings.length + " 项："
+        + esc(r.configWarnings.join("；")) + "</span>" : ""));
+  if(r.entryWarnings && r.entryWarnings.length){
+    lines.push('<span style="color:#a06020">CLI 定位提示：' + esc(r.entryWarnings.join("；")) + "</span>");
+  }
+  box.innerHTML = lines.map(function(t){ return '<div>· ' + t + "</div>"; }).join("");
+}
+/* 手动检测按钮：结果落在 agFound + 档位下拉 + agPolicy */
 function onQoderCheck(){
   var btn = el("agQoderCheck"), hint = el("agQoderHint"), box = el("agFound");
   if(!btn || typeof Agent === "undefined") return;
   btn.disabled = true;
   if(hint) hint.textContent = "正在检测本机桥与 Qoder CLI…";
-  Agent.qoderStatus(8000).then(function(r){
+  Agent.qoderStatus(12000).then(function(r){
     btn.disabled = false;
     if(box) box.style.display = "";
     var ok = r && r.ok;
+    var toolsOn = r && r.permissions && r.permissions.allow && r.permissions.allow.length;
     if(hint) hint.textContent = ok
-      ? "✅ 就绪：" + (r.entry || "qoderclicn") + "（模型 " + (r.model || "Qwen3.8-Flash") + "）"
-      : "✗ 未就绪：" + ((r && r.error) || "原因未知");
+      ? "✅ 就绪：" + (r.entry || "qoderclicn") + "（" + (r.entrySource || "") + "｜生效模型 "
+        + agentChannelModelLabel(r) + "｜工具 " + (toolsOn ? r.permissions.allow.join("/") : "全禁") + "）"
+      : "✗ 未就绪：" + ((r && (r.error || (r.entryWarnings || []).join("；"))) || "本机未找到可用的 Qoder CLI");
     if(box){
       box.innerHTML = ok
         ? '<div style="padding:6px 8px;border:1px solid #d6e9d8;border-radius:8px;color:#256a2b">'
-          + '唯一 Agent：Qoder CLI · 全部作业对话都走这条通道，无需任何 Key</div>'
+          + '唯一 Agent：Qoder CLI · 全部作业对话都走这条通道，无需任何 Key。'
+          + '档位 / 工具白名单 / MCP / 预算都读同目录 <b>agent.config.json</b>，改完重启本机桥生效。</div>'
         : '<div style="padding:6px 8px;border:1px solid #f0c8c0;border-radius:8px;color:#a03020">'
           + '修复路径：① 启动本机桥（hwdesk 目录 python syncserver.py 或桌面快捷方式）；'
-          + '② 确认 Qoder CLI 已安装（默认路径 ~/.qoder-cn，或设环境变量 HWDESK_QODER_CLI 指向 CLI）。</div>';
+          + '② 确认 Qoder CLI 已安装（默认 ~/.qoder-cn/bin/qoderclicn，或设环境变量 HWDESK_QODER_CLI 指向 CLI）。</div>';
     }
-    addLog((ok ? "Qoder CLI 检测：就绪（" : "Qoder CLI 检测：未就绪（") + ((r && (r.error || r.entry)) || "") + "）");
+    populateAgentModels(r);
+    renderAgentPolicy(r);
+    addLog((ok ? "本机 Agent 检测：就绪（模型" + agentChannelModelLabel(r) + "）"
+               : "本机 Agent 检测：未就绪（" + ((r && r.error) || "原因未知") + "）"));
   }).catch(function(){
     btn.disabled = false;
     if(hint) hint.textContent = "检测失败：本机桥不可达（需本地模式）";
@@ -2977,6 +3122,7 @@ function bind(){
   el("chatClose").addEventListener("click", closeChat);
   el("chatClear").addEventListener("click", onChatClear);
   el("chatSend").addEventListener("click", onChatSend);
+  el("chatStop").addEventListener("click", onChatStop);
   el("chatSubmit").addEventListener("click", onChatSubmitOpen);
   el("chatQuick").addEventListener("click", onChatQuickSubmit);
   el("chatMsgs").addEventListener("click", function(e){
@@ -3006,10 +3152,17 @@ function bind(){
 
   /* Agent 已收敛为唯一 Qoder CLI：多 Agent 选择器已下线 */
 
-  /* 设置页：Agent（唯一）= Qoder CLI。无配置可存，只绑检测按钮。
-   * agent.js 没加载 / 设置区缺失时整段跳过，不给初始化埋雷 */
+  /* 设置页：Agent（唯一）= Qoder CLI。档位选择存本机（agent.js getModel/setModel），
+   * 其余生效值一律来自桥的 agent.config.json。agent.js 没加载 / 设置区缺失时整段跳过 */
   if(typeof Agent !== "undefined" && el("agQoderCheck")){
     el("agQoderCheck").addEventListener("click", onQoderCheck);
+  }
+  if(typeof Agent !== "undefined" && el("agModelSel")){
+    el("agModelSel").addEventListener("change", function(){
+      var id = Agent.setModel(this.value);
+      addLog("对话档位已设为：" + id + (id === "provider-default" ? "（跟随账号默认）" : ""));
+      if(typeof onQoderCheck === "function") onQoderCheck();
+    });
   }
     el("filterRow").addEventListener("click", function(e){
     var c = e.target.closest("[data-f]");
@@ -3025,11 +3178,14 @@ function qoderSelfCheck(){
   if(typeof Agent === "undefined" || !Agent.qoderStatus) return;
   var st = el("cloudStatus");
   if(st) st.textContent = "Agent：Qoder CLI 检测中…";
-  Agent.qoderStatus(6000).then(function(r){
+  Agent.qoderStatus(12000).then(function(r){
+    if(el("agModelSel")) populateAgentModels(r);
+    if(el("agPolicy")) renderAgentPolicy(r);
     if(!st) return;
+    var why = (r && (r.error || (r.entryWarnings || []).join("；"))) || "";
     st.textContent = (r && r.ok)
-      ? "Agent：Qoder CLI（" + (r.model || "Qwen3.8-Flash") + "）· 就绪"
-      : "Agent：Qoder CLI 未就绪（" + ((r && r.error) || "?").slice(0, 60) + "）";
+      ? "Agent：Qoder CLI（" + agentChannelModelLabel(r) + "）· 就绪"
+      : "Agent：Qoder CLI 未就绪（" + String(why || "?").slice(0, 60) + "）";
   }).catch(function(){ if(st) st.textContent = "Agent：Qoder CLI 检测失败"; });
 }
 document.addEventListener("DOMContentLoaded", function(){

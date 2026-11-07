@@ -9,7 +9,7 @@
 | **总览** | 统计卡片（逾期 / 7 天内截止 / 需自查 / 已提交）、今天要处理（按 Laya 优先级排序）、作业看板 |
 | **数据** | ① **学在城院同步**——登录门禁（sso.js）验证账号密码后自动同步；页面上只有一个**课程选择器**（全部课程 / 单课程精拉，走 `PlatformKit.filterCourse`）和**一个「🔄 同步」刷新键**，保证工作台与学在城院实时一致；② **资料库**——平台自动采集的课件 / 历史作业 + 手工登记的材料，统一进入任务上下文简报 |
 | **工作流** | Laya 决策中心（优先级排序、AI 路由、需自查标记、一键执行计划）+ **审批**（草稿队列：通过并交付 / 退回修改）+ **交付记录与审批留痕**（原「审批」「行动」区块并入） |
-| **AI** | 多 Agent 对话（选任务 → 选任意 AI（⭐ Laya 推荐 / 📌 默认）→ 逐轮对话 → 一键交付，对话记录入对话库）+ **成稿检测**（原「洞察」的去AI化风险自查）+ **Agent 配置**（预设 / Base URL / Key / 模型、默认执行 AI，原独立「Agent」区块并入） |
+| **AI** | 多 Agent 对话（选任务 → 选任意 AI（⭐ Laya 推荐 / 📌 默认）→ 逐轮对话 → 一键交付，对话记录入对话库）+ **成稿检测**（原「洞察」的去AI化风险自查）+ **Agent 配置**（本机 Qoder CLI 检测 + 模型档位 + 生效策略一览，原独立「Agent」区块并入） |
 | **设置** | 登录后自动同步开关、JSON 导出 / 导入（含全部库）、清空、**操作日志**（原「洞察」区块并入）、Laya 决策参数速览 |
 
 ## 库管理（db.js）
@@ -101,19 +101,24 @@ API：`Laya.analyze(item)` 单条决策 / `Laya.rank(items)` 优先级排序 / `
 运行测试（零依赖，Node ≥ 16）：
 
 ```
-node test/db.test.mjs         # 库管理 + 交付状态机：10 项
-node test/laya.test.mjs       # 决策引擎：22 项
-node test/humanize.test.mjs   # 去AI化 + 上下文：22 项
-node test/bridge.test.mjs     # AI 直连桥：14 项
-node test/agent.test.mjs      # 作业 Agent 对话：23 项
-node test/sso.test.mjs        # 学在城院登录凭据：12 项
-node test/wiring.test.mjs     # 页面接线回归（el() 引用 + 五板块导航 + 数据页收敛 + 选用此版/格式/一键提交 + 初始化容错）：55 项
-node test/agents.test.mjs     # 多 AI Agent 对话 + 一键交付：66 项
-node test/sync.test.mjs       # 平台一键同步（指令/解析/增量合并）：34 项
-node test/autosync.test.mjs   # 登录后自动同步（节流/设置持久化/摘要）：16 项
-node test/platform.test.mjs   # 学在城院数据进工作台（normalize/去重/已提交保护/单课程过滤）：18 项
-node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 + healthCheck + 403/404 文案）：21 项
+node test/db.test.mjs           # 库管理 + 交付状态机：14 项
+node test/laya.test.mjs         # 决策引擎：22 项
+node test/humanize.test.mjs     # 去AI化 + 上下文：25 项
+node test/bridge.test.mjs       # AI 直连桥：12 项
+node test/agent.test.mjs        # 作业 Agent 对话（含档位/流式协议）：19 项
+node test/agentconfig.test.mjs  # agent.config.json 安全不变量 + 与桥/页面同源：13 项
+node test/sso.test.mjs          # 学在城院登录凭据：12 项
+node test/wiring.test.mjs       # 页面接线回归（el() 引用 + 五板块导航 + Qoder 单通道 + 配置面板 + 一键提交 + 初始化容错）：91 项
+node test/agents.test.mjs       # 多 AI Agent 对话 + 一键交付：45 项
+node test/sync.test.mjs         # 平台一键同步（指令/解析/增量合并）：34 项
+node test/autosync.test.mjs     # 登录后自动同步（节流/设置持久化/摘要）：18 项
+node test/platform.test.mjs     # 学在城院数据进工作台（normalize/去重/已提交保护/单课程过滤）：22 项
+node test/verifynet.test.mjs    # 校验服务的网络与 TLS 信任链：20 项
+python syncserver.py --self-test  # 同步桥 + Agent 配置层（A1~A13）+ TLS 信任库
+python verifyserver.py --self-test
 ```
+
+GitHub Actions（`.github/workflows/ci.yml`）自动跑 `test/*.test.mjs` 全部套件与两个 `--self-test`，新增套件无需改工作流。
 
 `wiring.test.mjs` 静态解析 `作业提交工作台.html`，守住两类只在运行时才暴露的问题：
 `el("id")` 引用了页面里不存在的元素（会让 `bind()` 抛错、初始化半途而废），
@@ -137,15 +142,33 @@ node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 
 
 每个作业自带一个 **内嵌 Agent 对话抽屉**（作业卡上的「💬 对话」）：学生与 Agent 在工作台内交互成稿，点「📤 用最终结果提交」**直接通过工作台交付**——写入交付库并走交付状态机（需自查的进审批队列），全程不必离开页面。
 
-- 后端为任意 **OpenAI 兼容 `/chat/completions`** 服务，内置预设：DeepSeek / Kimi（月之暗面）/ 通义千问 / 豆包（火山方舟，需自己的接入点）/ 自定义网关；配置存 `wb_hwdesk_agent` 键，**Key 只存本机 localStorage**
-- 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求；Agent 被约定以 `【最终交付】` 输出定稿
-- 流式输出（SSE），成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
+- 唯一后端 = **本机 Qoder CLI**（`syncserver.py` 的 `/agent/qoder`、`/agent/qoder/stream`）：无 API Key、无 Base URL、无云端兜底，提示词走 stdin 且只在本机流转，页面在非本机 Origin 一律拿不到这条通道
+- 系统提示词自动组装：作业字段 + Laya 决策（路由类别 / 是否需自查）+ ContextKit 课程上下文 + Humanize 去AI化要求，再加一条**与真实 `--tools` 一致的运行模式横幅**（工具全禁时讲「纯对话」，开了只读白名单时讲清「能读什么、不能干什么」）；Agent 被约定以 `【最终交付】` 输出定稿
+- 思考过程与正文按 NDJSON 事件实时进对话框（`thinking` / `answer` / `done`），旧桥不支持流式时自动降级为一轮一出；成稿后自动跑 `Humanize.risk()` 检测风险提示；对话历史按作业 ID 存 `wb_hwdesk_chats`
+- 模型档位下拉（设置 → Agent 配置）默认 `跟随账号默认`；策略与生效范围见下方「Agent 配置（agent.config.json）」
+
+## Agent 配置（agent.config.json，对齐 RoleWeave）
+
+`agent.config.json`（与 `syncserver.py` 同目录，随仓库发布、不含任何密钥）决定 Agent 通道的全部策略，语义抄自 RoleWeave 岗位包：**引擎绑定 / CLI 解析顺序 / 模型档位 / 工具权限 / MCP / 预算 / 回合环境隔离**。改完重启本机桥生效；页面「🔍 检测本机 Agent」会把**真正生效的值**（含被收敛掉的项）显示出来，不做「配置写一套、实际跑另一套」。
+
+| 段 | 作用 | 随包默认 |
+| --- | --- | --- |
+| `engine` | 引擎绑定，`roleweave-agent-binding.v1` | `qoder` 且 `locked: true`，页面切不了别的 |
+| `cli` | CLI 定位顺序与失败语义 | 依次试 `HWDESK_QODER_CLI` → `ORG_WORKBENCH_QODER_BIN` → `DIGITAL_EMPLOYEE_QODER_COMMAND` → PATH(`qodercli`/`qoderclicn`/`qoder`) → `~/.qoder-cn` 每用户候选；**只有 hwdesk 自己的变量**指向坏值时判未就绪（不静默回落到别的可执行文件），RoleWeave 的变量坏了只告警并继续找 |
+| `model` | 模型策略 | `follow-account-default`：不下传 `-m` 就是账号默认；档位（auto/efficient/performance/ultimate）**只有在 `--list-models` 的账号目录里出现才真正下传**，否则回落账号默认并把原因回给页面（绝不谎称用了某个模型） |
+| `permissions` | 工具权限，`workbench-permissions.v1` | `defaultEffect: deny` + 只读白名单 `Read/Grep/Glob`；`Write/Edit/Bash/WebFetch/WebSearch/Task` 等显式 deny；`permission-mode` 只允许 `default`/`accept_edits`，`bypass_permissions`/`dont_ask`/`auto` 一律被收敛回 `default` |
+| `mcp` | 外部工具服务，`workbench-mcp.v1` | deny 且 `servers: []`；下发时恒带 `--strict-mcp-config --mcp-config {"mcpServers":{}}` |
+| `budget` | 单回合 + 当日熔断 | 单回合 300s / 提示词 15 万字符 / 输出 8000 tokens / 8 次迭代；当日 200 回合。本账号 CLI 的 usage 回报全 0 token，所以熔断主指标用**回合数**，不假装统计了 token |
+| `isolation` | 回合子进程环境 | `cleanEnv` 白名单（PATH/HOME/证书/代理/`QODER_CONFIG_DIR`…）；无条件剔除 SDK 鉴权泄漏变量与任何凭据类变量（PAT / API Key / session token）——辅导对话只用本机账号自己的登录态，绝不借用拉起桥的那个会话的凭据；`--setting-sources ""` + `--no-session-persistence` |
+
+安全性由 `_sanitize_config()` 兜底：配置被人改成放开写、绕过权限确认、MCP 全开、或塞进非法工具名/环境变量/预算数字时，一律收敛回安全形状并逐条留告警显示在页面上；文件缺失或 JSON 坏了则回退内置默认值（`AGENT_CONFIG_DEFAULTS`）并回报 `configError`。行为断言见 `python syncserver.py --self-test` 的 A1~A13 与 `node test/agentconfig.test.mjs`。
+
 
 ## AI 直连（bridge.js + agent.js 内嵌对话）
 
 点「AI 代提交」不再强制经过 WorkBuddy：`bridge.js` 维护直连 AI 注册表（**豆包 / 腾讯元宝 / DeepSeek / Kimi / 通义千问 / WorkBuddy 本地代理**）。
 
-- **支持浏览器直连 API 的 AI（DeepSeek / Kimi / 通义 / 豆包）**：在选择器点选后**不再跳转网页**——自动切换到该 Agent 并打开工作台**内嵌对话抽屉**（`agent.js`，OpenAI 兼容 API 流式直连），Agent 直接在后台生成，聊出成稿后点「用最终结果提交」进审批队列交付
+- **API 直连类 AI（DeepSeek / Kimi / 通义 / 豆包）**：在选择器点选后**不再跳转网页**——自动切换到该 Agent 并打开工作台**内嵌对话抽屉**（`agent.js`，一律走本机 Qoder CLI 通道，风格指令由该 Agent 的能力原型注入），Agent 直接在后台生成，聊出成稿后点「用最终结果提交」进审批队列交付
 - **元宝 / WorkBuddy**：无 API 预设（元宝）或走平台代理（WorkBuddy），保留旧流程 = 复制指令 + 打开对应网页 / 纯复制
 - 目标挑选优先级：按 Laya 路由类别的单独指定 > 设置页的「默认执行 AI」> 注册表自动匹配；两者都未设时弹出选择器
 - 选择器操作：点一行 = 本次用它执行（API 直连 AI 转内嵌对话）；点「设为默认」= 记住选择并执行；**Esc 或点弹窗外空白处 = 取消**（也支持 Enter / Space 选中聚焦行）
@@ -199,7 +222,7 @@ node test/cloudai.test.mjs    # 云端通道（errText 全分支 + 按机覆盖 
 
 ## 桌面安装（Windows）
 
-1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js`、`agent.js`、`agents.js`、`sso.js`、`sync.js` 放到同一稳定目录（如 `C://Users//<你>//hwdesk//`）
+1. 把 `作业提交工作台.html`、`laya.js`、`humanize.js`、`db.js`、`bridge.js`、`agent.js`、`agents.js`、`sso.js`、`sync.js`、`agent.config.json`、`syncserver.py` 放到同一稳定目录（如 `C://Users//<你>//hwdesk//`；`agent.config.json` 缺失时桥按内置默认值跑）
 2. 生成应用图标：仓库内 `hwdesk.ico` 可直接使用
 3. 生成桌面快捷方式（Chrome 应用模式）：
 
@@ -243,15 +266,9 @@ curl "https://<新域名>/.cloud/llm/models" \
 
 **按机覆盖（换站点不等新版）**：任一机器可在控制台执行 `CloudAI.applyConfig({ endpoint: "https://<新域名>", publishableKey: "wbpk_…" })`——合法覆盖合并进配置、存入本机 `localStorage["hwdesk.cloudai.overrides"]` 并立即重建客户端；非法输入（非 https、key 不以 `wbpk_` 开头、未知键）**整单拒绝、零改动**。`init()` 每次启动都先读本机覆盖，脏数据安全跳过。
 
-**零配置分层（issue #56）**：`agent.js` 1.2.0 起开机自动探测四层，用户零输入即可开聊——
-① 本机代理网关 `cloudproxy`（`http://127.0.0.1:8765/v1`，key 在维护者环境变量，见上方「AI 代理网关」）→
-② 发布站点免密钥通道 `CloudAI` →
-③ 本机已保存 key 的手动预设 →
-④ 全灭则提示配 Key。
-探测到可用层自动切换（`Agent.probeLayers` / `Agent.autoSelect`）；用户在「Agent 配置」里显式选过预设后 `manualLock` 生效，自动降级不再覆盖。聊天入口只在 Agent 层整体不可用时才回落 CloudAI。
-**登录即检测 + 自动对应模型**：登录成功那一刻会重跑一次分层探测（不用等下次打开页面），第 ① 层可用时 `Agent.autoSelect` 直接选用本机代理 `/v1/models` 回报的第一个可用模型——宿主只配了混元 / 方舟 key 时也不会拿预设默认模型去撞 502，全程无需任何 API Key 输入。
+**零配置（issue #56 → 2.0.0 收敛）**：工作台 AI 只有一条通道——本机 Qoder CLI（策略见上方「Agent 配置（agent.config.json）」）。曾经的「本机代理网关 → 发布站点免密钥 CloudAI → 手动预设 Key」四层探测与 API 预设已在 2.0.0 整体删除：没有 Key 要填、没有 Base URL 要配、没有模型要猜，开机登录即用；桥没起来或本机没装 CLI 时，页面直接给出可执行的修复路径（起桥 / 装 CLI），不再偷偷绕道云端。
 
-**开聊前体检**：`await CloudAI.healthCheck(8000)` 主动探测 `GET {endpoint}/.cloud/llm/models`，返回 `{ok:true, models}` 或 `{ok:false, code}`（`gateway_network_error` / `gateway_timeout` / `gateway_http_<状态码>` / `gateway_invalid_response`），不必等用户打字才发现发布链接已失效。
+**开聊前体检**：`await Agent.qoderStatus(12000)` 一次问全本机 Agent 的真实状态——`ok` / CLI 路径与定位来源 / 账号模型目录（`--list-models`，带 TTL 缓存）/ 生效的工具白名单 / 预算与今日已用回合 / 配置来源与收敛告警。「设置 → Agent 配置」的检测按钮与登录自检共用它，用户不必打字就能发现桥没起来或 CLI 没装。
 
 **干净配置启动器（launch-hwdesk-online.vbs）**：双击后以独立 Chrome profile + 直连代理打开发布站点（绕开本机坏代理 / 旧扩展的干扰，链接里已带完整访问参数），顺带拉起本机桥；首次运行会在桌面生成「hwdesk online」快捷方式。
 

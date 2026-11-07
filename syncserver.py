@@ -30,6 +30,12 @@
   python syncserver.py                # 启动服务（默认 127.0.0.1:8765）
   python syncserver.py --self-test    # 自检：AES 加密 + CAS 页面解析 + 数据映射（不出网）
 
+Agent 配置（语义对齐本机 RoleWeave 数字员工工作台）：
+  同目录 agent.config.json 决定引擎绑定 / CLI 解析顺序 / 模型档位 / 工具白名单 /
+  MCP / 逐任务与逐日预算 / 回合环境隔离。文件缺失或 JSON 坏了自动回退内置默认值，
+  GET /agent/qoder/status 端出真正生效的值与 configError、configWarnings，
+  页面显示的工具档位与实际下发的 --tools 恒一致。
+
 登录门禁：工作台「登录」按钮会把账号密码 POST 到本机 /verify，由本脚本代为
 登录城院统一身份认证验证真伪；验证通过才放行进入工作台。
 
@@ -50,6 +56,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 import datetime
 import http.cookiejar
 import html as html_lib
@@ -60,7 +67,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "3.0.1"  # 3.0.1: TLS 信任根兜底 —— 默认信任库为空的解释器（msys2/mingw pythonw）也能验 https，报错不再误指学校站点；3.0.0: 工作台 AI 收敛为唯一 Agent —— /agent/qoder（本机 Qoder CLI，提示词走 stdin）+ /agent/qoder/status，移除 /agents/discover；2.7.0: /agents/discover 本机 Agent 凭据发现；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
+VERSION = "3.2.0"  # 3.2.0: Agent 配置对齐 RoleWeave —— agent.config.json（引擎绑定锁定 / CLI 解析顺序含 ORG_WORKBENCH_QODER_BIN 且显式值非法即失败 / 模型跟随账号默认 + 档位只在 --list-models 目录里出现才下传 / 权限 defaultEffect=deny + 只读白名单 / MCP deny / perTask+perDay 预算 / 回合环境白名单隔离），status 端出全量生效配置与收敛告警；3.1.0: /agent/qoder/stream NDJSON 流式（思考过程实时进对话框）+ CLI 子进程 CREATE_NO_WINDOW 不弹窗 + 剥离会话泄漏的 SDK 鉴权变量 + 纯对话参数（禁工具/空MCP）；3.0.0: 工作台 AI 收敛为唯一 Agent —— /agent/qoder（本机 Qoder CLI，提示词走 stdin）+ /agent/qoder/status，移除 /agents/discover；2.7.0: /agents/discover 本机 Agent 凭据发现；2.6.0: 逐课采集线程池并行（同步提速）；2.5.0: 数据属主标记 + 缓存按账号分桶（#92 多账号串号）；2.4.0: PNA 预检头；2.3.0: 历史作业详情补齐（#58）；2.2.0: 课件采集（#57）+ AI 代理网关（#55）
 HOST = "127.0.0.1"
 PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -254,6 +261,12 @@ def parse_cas_error(html_text):
     return raw
 
 
+# ---------------------------------------------------------------- TLS 信任锚
+# 有些 Windows 上的 python（典型是 msys2 的 mingw64 版）自带 OpenSSL 却**没有 CA 信任库**，
+# 于是对任何 https 站点都报 CERTIFICATE_VERIFY_FAILED: unable to get local issuer
+# certificate —— 实测学校站与 GitHub、百度一起挂，站点本身毫无问题。旧代码把这种失败
+# 说成「请检查本机能否访问 courses.hzcu.edu.cn」，把排查方向整个带偏。
+# 这里显式补齐信任锚，并把真实原因说清楚（绝不放宽校验，只补锚点）。
 # ---------------------------------------------------------------- TLS 信任根
 _TLS_CTX = None
 
@@ -846,38 +859,381 @@ def collect_payload(creds=None, force=True):
 
 # ---------------------------------------------------------------- HTTP 服务
 # ---- Qoder CLI（工作台唯一 Agent，页面不出本机、提示词不出本机） ----
-QODER_ENTRY_CANDIDATES = [
-    os.path.join(os.path.expanduser("~"), ".qoder-cn", "bin", "qoderclicn", "qoderclicn.exe"),
-    os.path.join(os.path.expanduser("~"), ".qoder-cn", "entry", "qodercn.cmd"),
-]
-QODER_MODEL = "Qwen3.8-Flash"     # qodercn --list-models 当前唯一模型
-QODER_TIMEOUT = 300               # 单次问答上限（作业成稿类任务实测 20~90s）
-QODER_MAX_PROMPT = 60000          # 提示词字符上限（CLI 上下文有限，超长直接拒绝）
+# 语义对齐本机 RoleWeave（数字员工工作台）的岗位包配置：引擎绑定锁定 → CLI 解析
+# 顺序（显式环境变量优先且非法即失败）→ 模型跟随账号默认 + 档位只在账号目录里
+# 出现才可选 → 权限 defaultEffect=deny + 只读白名单 → MCP 默认拒绝 → 逐任务/逐日
+# 预算 → 环境变量白名单隔离。全部读同目录 agent.config.json；文件缺失或 JSON 坏了
+# 回退到下面这份内置默认值，并在 /agent/qoder/status 里回报 configError。
+AGENT_CONFIG_FILE = os.path.join(HERE, "agent.config.json")
+
+AGENT_CONFIG_DEFAULTS = {
+    "schemaVersion": "hwdesk-agent.v1",
+    "engine": {"schemaVersion": "roleweave-agent-binding.v1",
+               "name": "qoder", "locked": True},
+    "cli": {
+        "envOrder": ["HWDESK_QODER_CLI", "ORG_WORKBENCH_QODER_BIN",
+                     "DIGITAL_EMPLOYEE_QODER_COMMAND"],
+        "envFailClosed": ["HWDESK_QODER_CLI"],
+        "pathNames": ["qodercli", "qoderclicn", "qoder"],
+        "userCandidates": [
+            "~/.qoder-cn/bin/qoderclicn/qoderclicn.exe",
+            "~/.qoder-cn/bin/qoderclicn/qoderclicn",
+            "~/.qoder-cn/bin/qodercli/qodercli.exe",
+            "~/.qoder-cn/bin/qodercli/qodercli",
+            "~/.qoder-cn/entry/qodercn.cmd",
+            "~/.qoder-cn/entry/qoder",
+        ],
+        "probeTimeoutMs": 6000,   # 实测 --list-models 冷启动 1.7~2.0s，3s 会被偶发抖动打成 unavailable
+        "catalogCacheSeconds": 600,
+    },
+    "model": {
+        "policy": "follow-account-default",
+        "default": "provider-default",
+        "catalogArgs": ["--list-models"],
+        "allowCustom": True,
+        "customModelFormat": "qoder",
+        "tiers": [
+            {"id": "provider-default", "name": "跟随账号默认", "tier": "default",
+             "model": None, "group": "default"},
+            {"id": "auto", "name": "Auto · Qoder", "tier": "auto", "model": "auto",
+             "billing": "qoder", "group": "tiers"},
+            {"id": "efficient", "name": "Efficient", "tier": "economy", "model": "efficient",
+             "billing": "qoder", "group": "tiers"},
+            {"id": "performance", "name": "Performance", "tier": "balanced",
+             "model": "performance", "billing": "qoder", "group": "tiers"},
+            {"id": "ultimate", "name": "Ultimate", "tier": "powerful", "model": "ultimate",
+             "billing": "qoder", "group": "tiers"},
+        ],
+    },
+    "permissions": {
+        "schemaVersion": "workbench-permissions.v1",
+        "defaultEffect": "deny",
+        "allow": ["Read", "Grep", "Glob"],
+        "deny": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Shell",
+                 "WebFetch", "WebSearch", "Task", "ImageGen"],
+        "permissionMode": "default",
+        "workspace": "app",
+    },
+    "mcp": {"schemaVersion": "workbench-mcp.v1", "defaultEffect": "deny", "servers": []},
+    "isolation": {
+        "cleanEnv": True,
+        "envAllow": [
+            "PATH", "HOME", "USER", "USERPROFILE", "USERNAME", "LOGNAME", "SHELL",
+            "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+            "PATHEXT", "COMSPEC", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR",
+            "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+            "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy",
+            "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
+            # QODER_CONFIG_DIR 要放：CLI 靠它找到 ~/.qoder-cn 里的登录态（零 Key 的前提）。
+            # 凭据类变量（PAT / API Key / session token）一律不放、并无条件剥：
+            # 这条通道只用本机账号自己的登录态，绝不借用拉起本机桥的那个会话的凭据。
+            "QODER_CONFIG_DIR",
+        ],
+        "envDropAlways": [
+            "QODER_SDK_AUTH_PAYLOAD_FILE", "QODER_AGENT_SDK_ENTRYPOINT",
+            "QODER_AGENT_SDK_DAEMON", "QODER_AGENT_SDK_VERSION",
+            "QODER_API_KEY", "QODER_PERSONAL_ACCESS_TOKEN", "QODER_SESSION_ACCESS_TOKEN",
+        ],
+        "settingSources": "",
+        "noSessionPersistence": True,
+    },
+    "budget": {
+        "perTask": {"timeoutSeconds": 300, "maxPromptChars": 150000,
+                    "maxOutputTokens": 8000, "iterations": 8},
+        "perDay": {"turns": 200, "tokens": 200000},
+    },
+    "transport": {"outputFormat": "stream-json", "singleFlight": True, "killWindow": True},
+}
+
+# 不可协商的硬闸：配置文件写坏了、或被误改成放开写/命令/绕过权限时，这里兜住。
+FORBIDDEN_PERMISSION_MODES = ("bypass_permissions", "dont_ask", "auto")
+READONLY_TOOLS = ("Read", "Grep", "Glob", "LS", "ViewImage")
+MAX_CONFIG_BYTES = 256 * 1024
+
+_agent_cfg_cache = {"key": None, "data": None, "error": "", "warnings": []}
 
 
-def qoder_entry():
-    """定位 Qoder CLI：环境变量 HWDESK_QODER_CLI 优先，其次常见安装路径。"""
-    env = os.environ.get("HWDESK_QODER_CLI") or ""
-    if env and os.path.isfile(env):
-        return env
-    for p in QODER_ENTRY_CANDIDATES:
-        if os.path.isfile(p):
-            return p
+def _deep_merge(base, override):
+    """字典逐层合并；列表和标量整体覆盖（配置里写 allow 就是替换而非追加）。"""
+    out = {}
+    for k, v in (base or {}).items():
+        out[k] = _deep_merge(v, {}) if isinstance(v, dict) else (
+            list(v) if isinstance(v, list) else v)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        elif isinstance(v, list):
+            out[k] = list(v)
+        else:
+            out[k] = v
+    return out
+
+
+def _tool_names(values):
+    out = []
+    for v in values or []:
+        if isinstance(v, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,40}", v):
+            if v not in out:
+                out.append(v)
+    return out
+
+
+def _clamp(value, lo, hi, fallback):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(lo, min(hi, n))
+
+
+def _sanitize_config(cfg):
+    """把任意（可能被改坏的）配置收敛回安全形状，并把每次收敛记成 warnings，
+    让页面/自检看得见「配置写了什么、桥实际执行了什么」。"""
+    warnings = []
+    out = _deep_merge(AGENT_CONFIG_DEFAULTS, cfg)
+    eng = out.setdefault("engine", {})
+    if eng.get("name") != "qoder":
+        warnings.append("engine.name 只支持 qoder（本机唯一免密钥通道），已按 qoder 执行")
+        eng["name"] = "qoder"
+    perm = out.setdefault("permissions", {})
+    if perm.get("defaultEffect", "deny") != "deny":
+        warnings.append("permissions.defaultEffect 必须是 deny，已强制为 deny")
+        perm["defaultEffect"] = "deny"
+    mode = str(perm.get("permissionMode") or "default")
+    if mode in FORBIDDEN_PERMISSION_MODES or mode not in ("default", "accept_edits"):
+        warnings.append("permission-mode %s 不允许（绝不绕过权限确认），已强制 default" % mode)
+        mode = "default"
+    perm["permissionMode"] = mode
+    perm["allow"] = _tool_names(perm.get("allow"))
+    perm["deny"] = _tool_names(perm.get("deny"))
+    mcp = out.setdefault("mcp", {})
+    if mcp.get("defaultEffect", "deny") != "deny":
+        warnings.append("mcp.defaultEffect 必须是 deny，已强制为 deny")
+        mcp["defaultEffect"] = "deny"
+    servers = []
+    for s in (mcp.get("servers") or []):
+        name = s.get("name") if isinstance(s, dict) else None
+        if isinstance(s, dict) and s.get("effect") == "allow" \
+                and isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", name):
+            servers.append(s)
+    mcp["servers"] = servers
+    # schemaVersion 是 RoleWeave 的写法：形状对不上就明说，绝不「猜」成新语义。
+    # 本机只实现 v1 这一套解析器，所以不认识的值一律收敛回 v1 并留告警。
+    for node, expected, label in (
+            (out, "hwdesk-agent.v1", "配置文件"),
+            (eng, "roleweave-agent-binding.v1", "engine"),
+            (perm, "workbench-permissions.v1", "permissions"),
+            (mcp, "workbench-mcp.v1", "mcp")):
+        got = node.get("schemaVersion")
+        if got not in (None, "", expected):
+            warnings.append("%s.schemaVersion 写了 %r（本机只认 %s），已按 %s 解析"
+                            % (label, got, expected, expected))
+        node["schemaVersion"] = expected
+    iso = out.setdefault("isolation", {})
+    cli = out.setdefault("cli", {})
+    cli["envOrder"] = [v for v in (cli.get("envOrder") or [])
+                       if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_]{1,64}", v)]
+    if not cli["envOrder"]:
+        cli["envOrder"] = list(AGENT_CONFIG_DEFAULTS["cli"]["envOrder"])
+    # 只有 hwdesk 自己的变量有「非法即停摆」的资格，且必须是 envOrder 里出现过的名字。
+    cli["envFailClosed"] = [v for v in (cli.get("envFailClosed") or [])
+                            if v in cli["envOrder"]]
+    if "HWDESK_QODER_CLI" in cli["envOrder"] and "HWDESK_QODER_CLI" not in cli["envFailClosed"]:
+        cli["envFailClosed"] = ["HWDESK_QODER_CLI"] + cli["envFailClosed"]
+    iso["envAllow"] = [k for k in (iso.get("envAllow") or [])
+                       if isinstance(k, str) and re.fullmatch(r"[A-Za-z0-9_]{1,64}", k)]
+    if not iso["envAllow"]:
+        iso["envAllow"] = list(AGENT_CONFIG_DEFAULTS["isolation"]["envAllow"])
+    for k in iso.get("envDropAlways") or []:
+        if k in iso["envAllow"]:
+            iso["envAllow"].remove(k)
+    if not isinstance(iso.get("settingSources"), str):
+        iso["settingSources"] = ""
+    bud = out.setdefault("budget", {})
+    task = bud.setdefault("perTask", {})
+    day = bud.setdefault("perDay", {})
+    task["timeoutSeconds"] = _clamp(task.get("timeoutSeconds"), 10, 900, 300)
+    task["maxPromptChars"] = _clamp(task.get("maxPromptChars"), 1000, 1000000, 150000)
+    task["maxOutputTokens"] = _clamp(task.get("maxOutputTokens"), 0, 32000, 8000)
+    task["iterations"] = _clamp(task.get("iterations"), 1, 64, 8)
+    day["turns"] = _clamp(day.get("turns"), 1, 10000, 200)
+    day["tokens"] = _clamp(day.get("tokens"), 0, 100000000, 200000)
+    out["budget"] = {"perTask": task, "perDay": day}
+    tr = out.setdefault("transport", {})
+    if tr.get("outputFormat") not in ("stream-json", "json", "text"):
+        tr["outputFormat"] = "stream-json"
+    return out, warnings
+
+
+def load_agent_config(path=None):
+    """读 agent.config.json（缺文件/坏 JSON 一律回退内置默认值，不抛异常）。
+    返回 (cfg, error, warnings)；error 非空表示配置没生效，页面要能看懂为什么。"""
+    p = path or AGENT_CONFIG_FILE
+    try:
+        st = os.stat(p)
+        key = (p, int(st.st_mtime), st.st_size)
+    except OSError:
+        key = (p, None, None)
+    if _agent_cfg_cache["key"] == key and _agent_cfg_cache["data"] is not None:
+        return _agent_cfg_cache["data"], _agent_cfg_cache["error"], _agent_cfg_cache["warnings"]
+    error = ""
+    data = None
+    if key[1] is not None:
+        try:
+            if st.st_size > MAX_CONFIG_BYTES:
+                raise ValueError("文件超过 %d 字节" % MAX_CONFIG_BYTES)
+            with open(p, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if not isinstance(raw, dict):
+                raise ValueError("顶层必须是 JSON 对象")
+            data = raw
+        except (OSError, ValueError) as e:
+            error = "agent.config.json 未能生效（已回退内置默认值）：%s" % e
+    merged = data if data is not None else AGENT_CONFIG_DEFAULTS
+    cfg, warnings = _sanitize_config(merged)
+    _agent_cfg_cache.update(key=key, data=cfg, error=error, warnings=warnings)
+    return cfg, error, warnings
+
+
+def agent_config():
+    return load_agent_config()[0]
+
+
+def _is_model_id(value):
+    return isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/\-]{0,99}", value))
+
+
+def executable_target(candidate):
+    """候选路径 → 真实可执行文件（realpath + 常规文件 + 可执行校验），否则空串。
+    Windows 只认 PATHEXT 里的可执行后缀；扩展名是 .json/.py 这类一律拒绝。"""
+    if not isinstance(candidate, str) or not candidate or "\0" in candidate:
+        return ""
+    if os.name == "nt":
+        exts = [e.lower() for e in (os.environ.get("PATHEXT") or
+                                    ".COM;.EXE;.BAT;.CMD").split(";") if e]
+    try:
+        real = os.path.realpath(os.path.expanduser(candidate))
+    except OSError:
+        return ""
+    if not os.path.isfile(real):
+        return ""
+    if os.name == "nt":
+        return real if os.path.splitext(real)[1].lower() in exts else ""
+    return real if os.access(real, os.X_OK) else ""
+
+
+def find_on_path(name, env=None):
+    env = env if env is not None else os.environ
+    path_value = env.get("PATH") or ""
+    if not path_value:
+        return ""
+    if os.name == "nt" and not os.path.splitext(name)[1]:
+        exts = [e for e in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+    else:
+        exts = [""]
+    for directory in path_value.split(os.pathsep):
+        if not directory:
+            continue
+        for ext in exts:
+            hit = executable_target(os.path.join(directory, name + ext))
+            if hit:
+                return hit
     return ""
 
 
-def qoder_status():
-    entry = qoder_entry()
-    return {"ok": bool(entry), "entry": entry, "cli": "qoder-cn", "model": QODER_MODEL}
+def qoder_entry_detail(cfg=None):
+    """定位 Qoder CLI，顺序照 RoleWeave 的 resolveQoderExecutable：
+    1) envOrder 里第一个非空的显式值；2) PATH 里的 pathNames；3) userCandidates。
+    返回 (可执行文件, 来源说明, 告警[])；每个候选都过 realpath + 常规文件 + 可执行校验，
+    不做家目录扫描。
+
+    失败语义分两档（本机踩过的坑）：hwdesk 自己的变量（envFailClosed，默认
+    HWDESK_QODER_CLI）指向非法值时判未就绪 —— 用户明确指定过路径，不能转头去跑别的
+    可执行文件；而 ORG_WORKBENCH_QODER_BIN / DIGITAL_EMPLOYEE_QODER_COMMAND 是
+    RoleWeave 适配器的内部变量，桥常被 RoleWeave/Qoder 会话拉起来，这些值会跟着环境
+    泄漏进来（实测泄漏过 /home/feng/.local/bin/qoderclicn 这种 POSIX 路径）——
+    外来值非法时只是不采纳它并留一条告警，不能把学生的工作台判成「没装 CLI」。"""
+    cfg = cfg or agent_config()
+    cli = cfg["cli"]
+    fail_closed = set(cli.get("envFailClosed") or ["HWDESK_QODER_CLI"])
+    warnings = []
+    for var in cli.get("envOrder") or []:
+        value = (os.environ.get(var) or "").strip()
+        if not value:
+            continue
+        if "\0" in value:
+            if var in fail_closed:
+                return "", "env:%s" % var, ["%s 含非法字符，已判未就绪" % var]
+            warnings.append("%s 含非法字符，已忽略该外来指定" % var)
+            break
+        if os.path.isabs(value) or "/" in value or "\\" in value:
+            hit = executable_target(value)
+        else:
+            hit = find_on_path(value)
+        if hit:
+            return hit, "env:%s" % var, warnings
+        if var in fail_closed:
+            return "", "env:%s" % var, ["%s 指向的不是可用的可执行文件：%s" % (var, value)]
+        warnings.append("%s=%s 不是可用的可执行文件，已忽略（它属于 RoleWeave 适配器的环境变量，"
+                        "不是 hwdesk 的指定）" % (var, value))
+        break
+    for name in cli.get("pathNames") or []:
+        hit = find_on_path(name)
+        if hit:
+            return hit, "path:%s" % name, warnings
+    for candidate in cli.get("userCandidates") or []:
+        hit = executable_target(candidate)
+        if hit:
+            return hit, "candidate:%s" % candidate, warnings
+    return "", "not-found", warnings
+
+
+def qoder_entry(cfg=None):
+    return qoder_entry_detail(cfg)[0]
+
+
+def qoder_turn_dir(cfg=None):
+    """回合工作目录：workspace=app 落到 hwdesk 目录（只读检索的范围就是这里），
+    home 落用户家目录；目录不存在一律回落到家目录。"""
+    cfg = cfg or agent_config()
+    if str(cfg["permissions"].get("workspace") or "app").lower() == "home":
+        return os.path.expanduser("~")
+    return HERE if os.path.isdir(HERE) else os.path.expanduser("~")
 
 
 _QODER_LOCK = threading.Lock()
+# 当前在跑的 CLI 进程 + 用户中断标记（/agent/qoder/stop 用）
+_QODER_CUR = {"proc": None, "killed": False}
 
 
-def qoder_compose_prompt(messages):
+def qoder_stop():
+    """中断当前 Qoder 生成：杀整个进程树（.cmd 入口会带 cmd.exe 子进程），
+    返回是否真杀到了进程。流式循环随 stdout 关闭收尾并释放单飞锁。"""
+    proc = _QODER_CUR.get("proc")
+    if proc is None or proc.poll() is not None:
+        return False
+    _QODER_CUR["killed"] = True
+    try:
+        if os.name == "nt":
+            subprocess.call(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                            creationflags=_NO_WINDOW)
+        else:
+            proc.kill()
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    return True
+
+
+def qoder_compose_prompt(messages, cfg=None):
     """OpenAI 风格 messages → 单段提示词（CLI -p 一次一轮，无服务端会话态）。
-    system 段置顶，user/assistant 轮次带角色前缀，保证多轮上下文不丢。"""
-    parts = []
+    system 段置顶，user/assistant 轮次带角色前缀，保证多轮上下文不丢。
+    顶部压一条与当前 --tools 一致的模式横幅（见 qoder_mode_banner），工具档位
+    改了横幅跟着改，不会出现「配了只读工具却告诉学生工具全禁」的漂移。"""
+    parts = [qoder_mode_banner(cfg)]
     for m in messages or []:
         if not isinstance(m, dict):
             continue
@@ -894,47 +1250,548 @@ def qoder_compose_prompt(messages):
     return "\n\n".join(parts).strip()
 
 
-def qoder_ask(messages):
-    """调 Qoder CLI 完成一轮问答。提示词走 stdin（不走 argv，无引号注入面）。
-    返回 (ok, output)；同一时刻只放行一个 CLI 进程（本机单用户语义）。"""
-    entry = qoder_entry()
-    if not entry:
-        return False, ("本机未找到 Qoder CLI（qoderclicn）。"
-                       "可用环境变量 HWDESK_QODER_CLI 指定 CLI 路径。")
-    prompt = qoder_compose_prompt(messages)
-    if not prompt:
-        return False, "提示词为空"
-    if len(prompt) > QODER_MAX_PROMPT:
-        return False, ("提示词过长（%d 字符 > 上限 %d），请精简资料后重试"
-                       % (len(prompt), QODER_MAX_PROMPT))
-    if not _QODER_LOCK.acquire(blocking=False):
-        return False, "Qoder CLI 正在处理上一条请求，请稍候再发"
+# 桥可能被桌面应用/无头 agent 的会话拉起，子进程会继承会话的 SDK 鉴权变量，
+# 指向一个已清理的临时凭据文件 → CLI 退出码 41 秒死。调 CLI 前必须剥掉。
+_QODER_ENV_DROP = ("QODER_SDK_AUTH_PAYLOAD_FILE", "QODER_AGENT_SDK_ENTRYPOINT",
+                   "QODER_AGENT_SDK_DAEMON", "QODER_AGENT_SDK_VERSION")
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # 控制台 CLI 不再弹黑窗
+
+
+# ---- 账号模型目录：--list-models 有界探测 + TTL 缓存（RoleWeave 3s probe 同款） ----
+_QODER_CATALOG = {"at": 0.0, "models": [], "status": "unknown", "error": ""}
+_QODER_CATALOG_LOCK = threading.Lock()
+
+
+def parse_model_catalog(text):
+    """--list-models 的纯文本表（本机实测首行是 MODEL 表头）→ 模型 id 列表。
+    解析不出合法 id 就报「空目录」，绝不硬编一个公开模型名上去冒充可用性。"""
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip().strip("|").strip()
+        if not line or set(line) <= set("-= "):
+            continue
+        if line.upper() in ("MODEL", "MODELS", "NAME", "ID", "MODEL ID"):
+            continue
+        # 出错时 CLI 也会往 stdout 写句子（实测「SDK auth payload file not found: …」），
+        # 带路径或「词后跟冒号」的一定是散文不是模型 id（qwen3:8b 这种紧贴冒号的 id 保留）。
+        if "/" in line or "\\" in line or ": " in line or line.endswith(":"):
+            continue
+        candidate = line.split()[0].strip(",")
+        if _is_model_id(candidate) and candidate not in out:
+            out.append(candidate)
+    return out[:64]
+
+
+def _run_catalog_probe(entry, cfg):
+    args = [a for a in (cfg["model"].get("catalogArgs") or ["--list-models"])
+            if isinstance(a, str) and a.startswith("-")]
+    cmd = (["cmd.exe", "/d", "/c", entry] + args) if entry.lower().endswith((".cmd", ".bat")) \
+        else ([entry] + args)
+    timeout = _clamp(cfg["cli"].get("probeTimeoutMs"), 1000, 10000, 6000) / 1000.0
     try:
-        if entry.lower().endswith(".cmd"):
-            cmd = ["cmd.exe", "/d", "/c", entry, "-p"]
+        done = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=timeout, cwd=qoder_turn_dir(cfg),
+                              env=_qoder_clean_env(cfg), creationflags=_NO_WINDOW)
+    except subprocess.TimeoutExpired:
+        return None, "模型目录探测超时（%.1f 秒）" % timeout
+    except OSError as exc:
+        return None, "模型目录探测无法启动：%s" % exc
+    if done.returncode != 0:
+        err = (done.stderr or b"").decode("utf-8", "replace").strip()
+        return None, "退出码 %d：%s" % (done.returncode, err[:200] or "无错误输出")
+    return (done.stdout or b"").decode("utf-8", "replace"), ""
+
+
+def qoder_catalog(cfg=None, refresh=False):
+    """返回 {models, status, error}，status ∈ ok|empty|no-cli|unavailable|unknown。
+    status 非 ok 时任何档位/自定义模型都不下传：本机实测把账号没有的档位塞给 -m，
+    CLI 静默降级成账号默认（stderr 提示、退出码仍 0），页面显示的模型就成了假的。
+    失败只短缓存 30 秒 —— 一次探测超时不该把档位锁死十分钟。"""
+    cfg = cfg or agent_config()
+    ttl = _clamp(cfg["cli"].get("catalogCacheSeconds"), 30, 86400, 600)
+    now = time.time()
+    with _QODER_CATALOG_LOCK:
+        cached_ttl = _QODER_CATALOG.get("ttl", ttl)
+        if not refresh and _QODER_CATALOG["status"] != "unknown" \
+                and now - _QODER_CATALOG["at"] < cached_ttl:
+            snap = dict(_QODER_CATALOG)
+            snap["ageSeconds"] = int(now - _QODER_CATALOG["at"])
+            snap.pop("ttl", None)
+            return snap
+    entry = qoder_entry(cfg)
+    if not entry:
+        snap = {"at": now, "models": [], "status": "no-cli", "error": "未找到 Qoder CLI"}
+    else:
+        text, err = _run_catalog_probe(entry, cfg)
+        if err:
+            snap = {"at": now, "models": [], "status": "unavailable", "error": err}
         else:
-            cmd = [entry, "-p"]
+            models = parse_model_catalog(text)
+            snap = {"at": now, "models": models,
+                    "status": "ok" if models else "empty", "error": ""}
+    with _QODER_CATALOG_LOCK:
+        _QODER_CATALOG.update(snap)
+        _QODER_CATALOG["ttl"] = ttl if snap["status"] == "ok" else min(ttl, 30)
+        out = dict(_QODER_CATALOG)
+    out["ageSeconds"] = 0
+    out.pop("ttl", None)
+    return out
+
+
+def _gate_model(target, label, catalog, cfg):
+    cat = catalog if isinstance(catalog, dict) else qoder_catalog(cfg)
+    if label == (cfg["model"].get("default") or "provider-default"):
+        return None, ""
+    if cat.get("status") != "ok":
+        return None, "账号模型目录没取到（%s%s），已跟随账号默认" % (
+            cat.get("status"), "：" + cat.get("error") if cat.get("error") else "")
+    models = cat.get("models") or []
+    if str(target).lower() not in [m.lower() for m in models]:
+        return None, ("%s 不在本机账号的模型目录里（目录：%s），已跟随账号默认"
+                      % (label, "、".join(models[:6])))
+    return target, ""
+
+
+def resolve_qoder_model(requested, cfg=None, catalog=None):
+    """页面选的档位/自定义模型 → 真正下传给 -m 的模型名（None＝跟随账号默认）。
+    返回 (model|None, note)；档位只有在账号目录里真实存在才下传。"""
+    cfg = cfg or agent_config()
+    model_cfg = cfg["model"]
+    want = str(requested or "").strip()
+    if not want or want == (model_cfg.get("default") or "provider-default"):
+        return None, ""
+    for tier in model_cfg.get("tiers") or []:
+        if isinstance(tier, dict) and tier.get("id") == want:
+            target = tier.get("model")
+            if not target:
+                return None, ""
+            return _gate_model(target, want, catalog, cfg)
+    if model_cfg.get("allowCustom"):
+        if not _is_model_id(want):
+            return None, "模型名不合法（只允许字母数字与 . _ - : /，长度 ≤100），已跟随账号默认"
+        return _gate_model(want, want, catalog, cfg)
+    return None, "当前配置未开放自选模型（model.allowCustom=false），已跟随账号默认"
+
+
+def qoder_turn_args(cfg=None, model=None):
+    """按配置拼一次回合的 CLI 参数。deny 打底 + 只读白名单在这里落地：--tools 只列
+    allow（本机实测 init 事件回报的 tools 就等于这份白名单），MCP 恒为
+    --strict-mcp-config + 空 servers，权限模式来自已收敛的配置，绝不出现
+    --dangerously-skip-permissions。"""
+    cfg = cfg or agent_config()
+    perm = cfg["permissions"]
+    mcp = cfg["mcp"]
+    iso = cfg["isolation"]
+    task = cfg["budget"]["perTask"]
+    tr = cfg["transport"]
+    allow = list(perm.get("allow") or [])
+    args = ["-p", "-o", tr.get("outputFormat") or "stream-json"]
+    servers = {}
+    for entry in mcp.get("servers") or []:
+        spec = entry.get("spec")
+        if isinstance(spec, dict) and spec:
+            servers[entry["name"]] = spec
+    args += ["--strict-mcp-config", "--mcp-config",
+             json.dumps({"mcpServers": servers}, separators=(",", ":"), ensure_ascii=False)]
+    if perm.get("defaultEffect") == "deny" and not allow:
+        args += ["--tools", ""]
+    elif perm.get("defaultEffect") == "deny":
+        args += ["--tools"] + allow        # 变长参数遇到下一个 --xx 自然结束（本机实测）
+    else:
+        args += ["--tools", "default"]
+    if perm.get("deny"):
+        args += ["--disallowed-tools", ",".join(perm["deny"])]
+    args += ["--permission-mode", perm.get("permissionMode") or "default"]
+    if isinstance(iso.get("settingSources"), str):
+        args += ["--setting-sources", iso["settingSources"]]
+    if iso.get("noSessionPersistence"):
+        args.append("--no-session-persistence")
+    if int(task.get("maxOutputTokens") or 0) > 0:
+        args += ["--max-output-tokens", str(task["maxOutputTokens"])]
+    if model:
+        args += ["-m", model]
+    return args
+
+
+def _qoder_clean_env(cfg=None):
+    """只带白名单变量进 CLI（RoleWeave engine/driver-cli.js 的回合环境白名单同款
+    思路）；envDropAlways 再无条件剥一遍，双保险。"""
+    cfg = cfg or agent_config()
+    iso = cfg["isolation"]
+    source = os.environ
+    if not iso.get("cleanEnv", True):
+        env = dict(source)
+    else:
+        allow = list(iso.get("envAllow") or [])
+        env = {}
+        for key in allow:
+            value = source.get(key)
+            if value is not None:
+                env[key] = value
+        if os.name == "nt":
+            # Windows 环境变量大小写不敏感，注册表里通常是 Path / SystemRoot / Temp，
+            # 按精确大写取会漏，漏了 CLI 直接起不来 —— 补齐同名变体。
+            wanted = {k.upper() for k in allow}
+            for key, value in source.items():
+                if key.upper() in wanted and key not in env:
+                    env[key] = value
+    for key in list(iso.get("envDropAlways") or []) + list(_QODER_ENV_DROP):
+        env.pop(key, None)
+    return env
+
+
+def qoder_mode_banner(cfg=None):
+    """横幅必须与真正下发的 --tools 一致：工具全关时讲「纯对话」，开了只读白名单时
+    讲清「能读什么、不能干什么」。伪调用标记在这里用拼接写 —— 直接写全名会被工具链
+    当成标签吞掉，源码和提示词都得留得住这句话。"""
+    cfg = cfg or agent_config()
+    fake_call = "<" + "tool_call" + ">"
+    allow = cfg["permissions"].get("allow") or []
+    if not allow:
+        return ("【运行模式】本通道是 hwdesk 工作台的纯对话通道：文件、命令、联网检索等工具"
+                "全部不可用，也无需可用。绝不要输出 %s 之类的调用文本（那会被当成正文发给学生）。"
+                "课程材料以本提示中的上下文为准；上下文里没有的关键信息（具体题目原文、课件内容等），"
+                "用一句话向学生索要，学生粘贴后即可继续。请直接用自然语言作答。" % fake_call)
+    return ("【运行模式】本通道是 hwdesk 工作台的作业辅导对话：工具默认全部拒绝，只开放只读检索 %s"
+            "（只能读工作目录 %s 里的文件，不能写文件、不能执行命令、不能联网）。要看本机资料就用这几个"
+            "只读工具，别凭记忆编。绝不要输出 %s 之类的调用文本（那会被当成正文发给学生）。"
+            "上下文里没有的关键信息（具体题目原文、课件内容等），先查工作目录，查不到就用一句话向学生"
+            "索要。请直接用自然语言作答。"
+            % ("、".join(allow), qoder_turn_dir(cfg), fake_call))
+
+
+# ---- 预算：RoleWeave budget.json 的 perTask/perDay 语义落到本机桥上 ----
+_QODER_BUDGET = {"day": "", "turns": 0, "tokens": 0, "credits": 0.0}
+_QODER_BUDGET_LOCK = threading.Lock()
+
+
+def budget_snapshot(cfg=None):
+    cfg = cfg or agent_config()
+    today = datetime.date.today().isoformat()
+    with _QODER_BUDGET_LOCK:
+        if _QODER_BUDGET["day"] != today:
+            _QODER_BUDGET.update(day=today, turns=0, tokens=0, credits=0.0)
+        snap = dict(_QODER_BUDGET)
+    per_day = cfg["budget"]["perDay"]
+    snap["credits"] = round(snap.get("credits") or 0.0, 4)
+    snap["limitTurns"] = per_day["turns"]
+    snap["limitTokens"] = per_day["tokens"]
+    return snap
+
+
+def budget_refusal(cfg=None):
+    """超预算时给人话说明。本机账号的 CLI usage token 全回 0，所以 token 上限只在
+    它真实回报过 token 时才参与熔断，主指标用回合数 —— 不假装统计了 token。"""
+    cfg = cfg or agent_config()
+    snap = budget_snapshot(cfg)
+    if snap["turns"] >= snap["limitTurns"]:
+        return ("今天已用 %d 个回合，达到 agent.config.json 里 budget.perDay.turns=%d 的上限，"
+                "次日自动恢复；要放宽就改那个数" % (snap["turns"], snap["limitTurns"]))
+    if snap["limitTokens"] and snap["tokens"] >= snap["limitTokens"]:
+        return ("今天已用 %d token，达到 budget.perDay.tokens=%d 的上限，次日自动恢复"
+                % (snap["tokens"], snap["limitTokens"]))
+    return ""
+
+
+def budget_record(result_event):
+    ev = result_event if isinstance(result_event, dict) else {}
+    usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
+    try:
+        tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    except (TypeError, ValueError):
+        tokens = 0
+    try:
+        credits = float(ev.get("total_credits") or 0.0)
+    except (TypeError, ValueError):
+        credits = 0.0
+    with _QODER_BUDGET_LOCK:
+        _QODER_BUDGET["turns"] = int(_QODER_BUDGET.get("turns") or 0) + 1
+        _QODER_BUDGET["tokens"] = int(_QODER_BUDGET.get("tokens") or 0) + tokens
+        _QODER_BUDGET["credits"] = float(_QODER_BUDGET.get("credits") or 0.0) + credits
+    return tokens
+
+
+def _public_config(value):
+    """递归剔掉 _doc / _comment 这类给人读的键，状态接口只端真会生效的字段。"""
+    if isinstance(value, dict):
+        return {k: _public_config(v) for k, v in value.items()
+                if not str(k).startswith("_")}
+    if isinstance(value, list):
+        return [_public_config(v) for v in value]
+    return value
+
+
+def qoder_status(cfg=None, refresh_catalog=False):
+    """页面唯一的 Agent 面板数据源：引擎绑定 / 档位 / 权限 / MCP / 预算 / 隔离
+    全在这里，并带上配置文件真实状态（file|defaults）与收敛告警。"""
+    cfg, error, warnings = load_agent_config() if cfg is None else (cfg, "", [])
+    entry, entry_source, entry_warnings = qoder_entry_detail(cfg)
+    cat = qoder_catalog(cfg, refresh=refresh_catalog) if entry \
+        else {"models": [], "status": "no-cli", "error": "未找到 Qoder CLI"}
+    models = cat.get("models") or []
+    default_id = cfg["model"].get("default") or "provider-default"
+    tiers = []
+    for tier in cfg["model"].get("tiers") or []:
+        if not isinstance(tier, dict) or not tier.get("id"):
+            continue
+        target = tier.get("model")
+        available = not target or (cat.get("status") == "ok" and
+                                   str(target).lower() in [m.lower() for m in models])
+        tiers.append({"id": tier["id"], "name": tier.get("name") or tier["id"],
+                      "tier": tier.get("tier") or "default", "model": target,
+                      "available": bool(available),
+                      "note": "" if available else "本机账号的模型目录里没有这个档位"})
+    return {
+        "ok": bool(entry),
+        "entry": entry,
+        "entrySource": entry_source,
+        "entryWarnings": list(entry_warnings),
+        "error": "" if entry else (
+            "本机未找到可用的 Qoder CLI。安装 qoderclicn，或用 %s 显式指向可执行文件；"
+            "已尝试：%s（定位告警：%s）"
+            % (" / ".join(cfg["cli"].get("envOrder") or ["HWDESK_QODER_CLI"]),
+               " → ".join(list(cfg["cli"].get("pathNames") or [])
+                          + list(cfg["cli"].get("userCandidates") or [])),
+               "; ".join(entry_warnings) or "无")),
+        "cli": "qoder-cn",
+        "model": models[0] if models else "跟随账号默认",
+        "modelPolicy": cfg["model"].get("policy"),
+        "modelDefault": default_id,
+        "allowCustomModel": bool(cfg["model"].get("allowCustom")),
+        "tiers": tiers,
+        "catalog": models,
+        "catalogStatus": cat.get("status"),
+        "catalogAgeSeconds": cat.get("ageSeconds"),
+        "catalogError": cat.get("error") or "",
+        "engine": _public_config(cfg["engine"]),
+        "permissions": {
+            "defaultEffect": cfg["permissions"]["defaultEffect"],
+            "allow": list(cfg["permissions"]["allow"]),
+            "deny": list(cfg["permissions"]["deny"]),
+            "permissionMode": cfg["permissions"]["permissionMode"],
+            "workspace": cfg["permissions"].get("workspace"),
+            "turnDir": qoder_turn_dir(cfg),
+        },
+        "mcp": {"defaultEffect": cfg["mcp"]["defaultEffect"],
+                "servers": [s.get("name") for s in cfg["mcp"].get("servers") or []]},
+        "budget": cfg["budget"],
+        "spentToday": budget_snapshot(cfg),
+        "isolation": {"cleanEnv": bool(cfg["isolation"].get("cleanEnv")),
+                      "envAllowCount": len(cfg["isolation"].get("envAllow") or []),
+                      "settingSources": cfg["isolation"].get("settingSources"),
+                      "noSessionPersistence": bool(cfg["isolation"].get("noSessionPersistence"))},
+        "timeoutSeconds": cfg["budget"]["perTask"]["timeoutSeconds"],
+        "maxPromptChars": cfg["budget"]["perTask"]["maxPromptChars"],
+        "turnArgs": qoder_turn_args(cfg, None),
+        "configFile": AGENT_CONFIG_FILE,
+        "configSource": "defaults" if error or not os.path.isfile(AGENT_CONFIG_FILE) else "file",
+        "configError": error or "",
+        "configWarnings": list(warnings or []),
+        "version": VERSION,
+    }
+
+
+def _qoder_spawn(prompt, ctx):
+    """起 CLI（非交互 stream-json）。参数、工作目录、环境全部来自 agent.config.json
+    收敛后的结果。stderr 落临时文件防管道塞死，调用方负责 wait+清理。"""
+    cfg = ctx["cfg"]
+    entry = ctx["entry"]
+    cmd = ([entry] + ctx["args"]) if not entry.lower().endswith((".cmd", ".bat")) \
+        else (["cmd.exe", "/d", "/c", entry] + ctx["args"])
+    errf = tempfile.NamedTemporaryFile(prefix="wb_qoder_err_", suffix=".log", delete=False)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=errf, creationflags=_NO_WINDOW,
+                            env=_qoder_clean_env(cfg), cwd=qoder_turn_dir(cfg))
+    proc._wb_errfile = errf
+    try:
+        proc.stdin.write(prompt.encode("utf-8"))
+        proc.stdin.close()
+    except OSError:
+        pass  # CLI 启动即死时由后面的退出码路径报真实错误
+    return proc
+
+
+def _qoder_strip_toolcall(text):
+    """兜底：模型无视横幅仍漏出工具调用文本时，截到第一个调用标记为止，
+    不把 <tool_call> 之类的伪调用原文发给学生。"""
+    if text:
+        i = text.find("<tool_call>")
+        if i >= 0:
+            text = text[:i].rstrip()
+    return text
+
+
+def _qoder_events(proc):
+    """stdout NDJSON → 事件 dict 流（非 JSON 行忽略）。"""
+    for raw in proc.stdout:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("{"):
+            continue
         try:
-            proc = subprocess.run(
-                cmd, input=prompt.encode("utf-8"),
-                capture_output=True, timeout=QODER_TIMEOUT,
-                cwd=os.path.expanduser("~"))
-        except FileNotFoundError:
-            return False, "Qoder CLI 启动失败：找不到 " + entry
-        except subprocess.TimeoutExpired:
-            return False, "Qoder CLI 超时（%d 秒）未完成，请重试或精简任务" % QODER_TIMEOUT
-        out = (proc.stdout or b"").decode("utf-8", "replace").strip()
-        err = (proc.stderr or b"").decode("utf-8", "replace").strip()
-        if proc.returncode != 0 and not out:
-            return False, "Qoder CLI 退出码 %d：%s" % (proc.returncode, err[:300] or "无错误输出")
-        return True, out or err
+            yield json.loads(line)
+        except ValueError:
+            pass
+
+
+def _qoder_prepare(messages, model=None, cfg=None):
+    """公共前置：CLI 定位 → 模型档位解析 → 提示词组装 → 预算/长度检查 → 单飞锁。
+    返回 (ctx, err)；ctx 里带上下发的参数与解析说明，页面能显示真实生效的档位。"""
+    cfg = cfg or agent_config()
+    entry = qoder_entry(cfg)
+    if not entry:
+        return None, ("本机未找到可用的 Qoder CLI。可安装 qoderclicn，或用环境变量 %s "
+                      "之一显式指定 CLI 路径（显式指定后路径非法不会回落，请核对）。"
+                      % " / ".join(cfg["cli"].get("envOrder") or ["HWDESK_QODER_CLI"]))
+    refusal = budget_refusal(cfg)
+    if refusal:
+        return None, refusal
+    catalog = qoder_catalog(cfg)
+    resolved, note = resolve_qoder_model(model, cfg, catalog)
+    prompt = qoder_compose_prompt(messages, cfg)
+    if not prompt:
+        return None, "提示词为空"
+    limit = cfg["budget"]["perTask"]["maxPromptChars"]
+    if len(prompt) > limit:
+        return None, ("提示词过长（%d 字符 > 上限 %d，来自 agent.config.json 的 "
+                      "budget.perTask.maxPromptChars），请精简资料后重试" % (len(prompt), limit))
+    if cfg["transport"].get("singleFlight", True) and not _QODER_LOCK.acquire(blocking=False):
+        return None, "Qoder CLI 正在处理上一条请求，请稍候再发"
+    ctx = {"cfg": cfg, "entry": entry, "prompt": prompt,
+           "args": qoder_turn_args(cfg, resolved),
+           "modelRequested": str(model or "").strip() or cfg["model"].get("default"),
+           "modelSent": resolved, "modelNote": note,
+           "locked": bool(cfg["transport"].get("singleFlight", True))}
+    return ctx, None
+
+
+def _qoder_run(ctx, emit):
+    """跑一轮 CLI 并把映射后的事件（thinking/answer/done/error）逐条 emit。
+    假定锁已由 _qoder_prepare 拿到；本函数负责收尾与放锁。
+    done 事件带上 CLI 在 init 里回报的真实模型 + 档位解析说明，页面显示不靠猜。"""
+    cfg = ctx.get("cfg") or agent_config()
+    prompt = ctx.get("prompt") or ""
+    proc = None
+    timer = None
+    timed_out = [False]
+    observed_model = [None]
+    try:
+        proc = _qoder_spawn(prompt, ctx)
+        _QODER_CUR["proc"] = proc
+        _QODER_CUR["killed"] = False
+        def _kill():
+            timed_out[0] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        timer = threading.Timer(cfg["budget"]["perTask"]["timeoutSeconds"], _kill)
+        timer.start()
+        got_result = False
+        for ev in _qoder_events(proc):
+            t = ev.get("type")
+            if t == "system" and ev.get("subtype") == "init":
+                observed_model[0] = ev.get("model") or observed_model[0]
+                ctx["toolsReported"] = ev.get("tools")
+                ctx["mcpReported"] = ev.get("mcp_servers")
+            if t == "assistant":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "thinking" and b.get("thinking"):
+                        emit({"type": "thinking", "text": b["thinking"]})
+                    elif b.get("type") == "text" and b.get("text"):
+                        emit({"type": "answer", "text": _qoder_strip_toolcall(b["text"])})
+            elif t == "result":
+                got_result = True
+                used = budget_record(ev)
+                emit({"type": "done", "text": _qoder_strip_toolcall(ev.get("result") or ""),
+                      "is_error": bool(ev.get("is_error")),
+                      "model": observed_model[0] or ctx.get("modelSent") or "",
+                      "modelRequested": ctx.get("modelRequested"),
+                      "modelNote": ctx.get("modelNote") or "",
+                      "tools": ctx.get("toolsReported"),
+                      "tokens": used,
+                      "turns": ev.get("num_turns"),
+                      "durationMs": ev.get("duration_ms")})
+        proc.wait()
+        timer.cancel()
+        if not got_result:
+            errf = proc._wb_errfile
+            try:
+                errf.close()
+                with open(errf.name, "rb") as f:
+                    err = f.read().decode("utf-8", "replace").strip()
+            except OSError:
+                err = ""
+            finally:
+                try:
+                    os.unlink(errf.name)
+                except OSError:
+                    pass
+            if _QODER_CUR.get("killed"):
+                emit({"type": "error", "message": "已中断", "code": "aborted"})
+            elif timed_out[0]:
+                emit({"type": "error", "message": "Qoder CLI 超时（%d 秒，来自 budget.perTask.timeoutSeconds）"
+                                          "未完成，请重试或精简任务" % cfg["budget"]["perTask"]["timeoutSeconds"]})
+            elif proc.returncode != 0:
+                emit({"type": "error", "message": "Qoder CLI 退出码 %d：%s" % (proc.returncode, err[:300] or "无错误输出")})
+            else:
+                emit({"type": "error", "message": "Qoder CLI 未产出结果，请重试"})
+    except (BrokenPipeError, ConnectionResetError):
+        pass  # 页面中途断开：杀进程走 finally
     except Exception as e:      # 任何意外都不许把桥打挂
-        return False, "Qoder CLI 调用失败：" + str(e)
-    finally:
         try:
-            _QODER_LOCK.release()
+            emit({"type": "error", "message": "Qoder CLI 调用失败：" + str(e)})
         except Exception:
             pass
+    finally:
+        if timer:
+            timer.cancel()
+        if _QODER_CUR.get("proc") is proc:
+            _QODER_CUR["proc"] = None
+        if proc is not None:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            try:
+                proc._wb_errfile.close()
+                os.unlink(proc._wb_errfile.name)
+            except OSError:
+                pass
+        if ctx.get("locked"):
+            try:
+                _QODER_LOCK.release()
+            except Exception:
+                pass
+
+
+def qoder_ask(messages, model=None):
+    """调 Qoder CLI 完成一轮问答（一轮一出，兼容旧页面）。提示词走 stdin。
+    返回 (ok, output, meta)；同一时刻只放行一个 CLI 进程（本机单用户语义）。"""
+    ctx, err = _qoder_prepare(messages, model)
+    if err:
+        return False, err, {}
+    box = {}
+    def emit(ev):
+        if ev.get("type") == "answer":
+            box.setdefault("answers", []).append(ev["text"])
+        elif ev.get("type") == "done":
+            box["done"] = ev
+        elif ev.get("type") == "error":
+            box["error"] = ev["message"]
+    _qoder_run(ctx, emit)
+    done = box.get("done") or {}
+    meta = {"model": done.get("model") or ctx.get("modelSent") or "",
+            "modelRequested": ctx.get("modelRequested"),
+            "modelNote": ctx.get("modelNote") or "",
+            "tools": ctx.get("toolsReported")}
+    if done and not done.get("is_error"):
+        return True, done.get("text") or "\n".join(box.get("answers", [])), meta
+    if done:
+        return False, done.get("text") or "Qoder CLI 返回了错误", meta
+    return False, box.get("error") or "Qoder CLI 未产出结果", meta
 
 
 PAGE_FILE = "作业提交工作台.html"
@@ -1026,7 +1883,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(403, {"ok": False,
                                  "error": "local-only: 本机 Agent 只对本机页面开放"})
                 return
-            self._json(200, qoder_status())
+            self._json(200, qoder_status(
+                refresh_catalog="refresh" in (self.path or "")))
         elif self.path.startswith("/v1/models"):
             ok, token, reason = proxy_check_auth(self.headers.get("Authorization"),
                                                  self.headers.get("Origin"))
@@ -1122,6 +1980,25 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
 
+    def _agent_qoder_stream(self, msgs, model=None):
+        """流式问答：NDJSON 逐行推 {type: thinking|answer|done|error} 事件，
+        页面实时把思考过程渲染进对话框。HTTP/1.0 语义，由连接关闭收尾。"""
+        ctx, err = _qoder_prepare(msgs, model)
+        if err:
+            self._json(400, {"ok": False, "error": err})
+            return
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+        def emit(ev):
+            self.wfile.write((json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.wfile.flush()
+
+        _qoder_run(ctx, emit)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
@@ -1146,6 +2023,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(403, {"ok": False,
                                  "error": "local-only: 本机 Agent 只对本机页面开放"})
                 return
+            if self.path.startswith("/agent/qoder/stop"):
+                # 中断当前生成：杀 CLI 进程树；流式循环随之收尾并释放单飞锁
+                self._json(200, {"ok": True, "killed": qoder_stop()})
+                return
             msgs = creds.get("messages") if isinstance(creds, dict) else None
             if not isinstance(msgs, list):
                 msgs = [{"role": "user", "content": (creds or {}).get("prompt", "")}] \
@@ -1153,9 +2034,18 @@ class Handler(BaseHTTPRequestHandler):
             if not msgs:
                 self._json(400, {"ok": False, "error": "请求缺少 messages（或 prompt）字段"})
                 return
-            ok, output = qoder_ask(msgs)
-            self._json(200, {"ok": ok, "output": output, "model": QODER_MODEL}
-                       if ok else {"ok": False, "error": output})
+            agent_model = creds.get("model") if isinstance(creds, dict) else None
+            if self.path.startswith("/agent/qoder/stream"):
+                self._agent_qoder_stream(msgs, agent_model)
+                return
+            ok, output, meta = qoder_ask(msgs, agent_model)
+            self._json(200, {"ok": ok, "output": output,
+                             "model": meta.get("model") or "",
+                             "modelRequested": meta.get("modelRequested"),
+                             "modelNote": meta.get("modelNote") or "",
+                             "tools": meta.get("tools")}
+                       if ok else {"ok": False, "error": output,
+                                   "modelNote": meta.get("modelNote") or ""})
             return
         if self.path.startswith("/data"):
             try:
@@ -1338,6 +2228,374 @@ def _proxy_opener():
     """强制直连上游（同 Session：系统代理 Clash 会把国内厂商请求带进 502），
     并且共用 tls_context()，否则没信任库的 python 连厂商 https 也会一起挂。"""
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), https_handler())
+
+
+def _reset_agent_caches():
+    """自检/改配置后清掉配置与模型目录缓存，下一次调用重新读盘。"""
+    _agent_cfg_cache.update(key=None, data=None, error="", warnings=[])
+    with _QODER_CATALOG_LOCK:
+        _QODER_CATALOG.update(at=0.0, models=[], status="unknown", error="")
+
+
+def self_test_agent():
+    """agent.config.json（RoleWeave 语义的 hwdesk 侧配置）与回合参数生成的行为断言。
+    全程不出网、不依赖本机装了 Qoder CLI。"""
+    ok = True
+    saved_env = dict(os.environ)
+    tmp = tempfile.mkdtemp(prefix="hwdesk_agent_cfg_")
+
+    def check(label, good, extra=""):
+        nonlocal ok
+        print(("ok  - " if good else "FAIL - ") + label + (("：" + extra) if extra and not good else ""))
+        ok &= bool(good)
+
+    try:
+        # A1) 随包发布的配置文件必须解析成功、来源是文件、且守住硬闸
+        _reset_agent_caches()
+        cfg, error, warnings = load_agent_config()
+        check("A1 agent.config.json 生效（非回退默认值）",
+              not error and cfg is not None and os.path.isfile(AGENT_CONFIG_FILE), error)
+        check("A1 权限模型是 deny 打底 + 只读白名单",
+              cfg["permissions"]["defaultEffect"] == "deny"
+              and set(cfg["permissions"]["allow"]) <= set(READONLY_TOOLS),
+              str(cfg["permissions"]))
+        check("A1 权限模式绝不绕过确认",
+              cfg["permissions"]["permissionMode"] not in FORBIDDEN_PERMISSION_MODES,
+              cfg["permissions"]["permissionMode"])
+        check("A1 MCP 默认拒绝且没有外部 server",
+              cfg["mcp"]["defaultEffect"] == "deny" and not cfg["mcp"]["servers"])
+        check("A1 模型策略跟随账号默认 + 档位齐全",
+              cfg["model"]["policy"] == "follow-account-default"
+              and [t["id"] for t in cfg["model"]["tiers"]][:2]
+              == ["provider-default", "auto"]
+              and cfg["model"]["tiers"][0]["model"] is None)
+        check("A1 CLI 解析顺序含 RoleWeave 的两个环境变量",
+              "ORG_WORKBENCH_QODER_BIN" in cfg["cli"]["envOrder"]
+              and "DIGITAL_EMPLOYEE_QODER_COMMAND" in cfg["cli"]["envOrder"])
+        check("A1 只有 hwdesk 自己的变量有 fail-closed 资格",
+              cfg["cli"]["envFailClosed"] == ["HWDESK_QODER_CLI"], str(cfg["cli"]["envFailClosed"]))
+        check("A1 模型目录探测预算 ≥ 5 秒（实测冷启动 1.7~2.0s，3s 会被抖动打成 unavailable）",
+              cfg["cli"]["probeTimeoutMs"] >= 5000, str(cfg["cli"]["probeTimeoutMs"]))
+        check("A1 配置文件与内置默认值同源（关键安全项一致）",
+              cfg["permissions"]["defaultEffect"]
+              == AGENT_CONFIG_DEFAULTS["permissions"]["defaultEffect"]
+              and cfg["permissions"]["allow"] == AGENT_CONFIG_DEFAULTS["permissions"]["allow"]
+              and cfg["mcp"]["defaultEffect"] == AGENT_CONFIG_DEFAULTS["mcp"]["defaultEffect"],
+              str(cfg["permissions"]["allow"]))
+
+        # A1b) 随包配置与内置默认值的键形状完全对齐：写错一个键名＝静默失效，必须当场抓住
+        def _shape(node, prefix=""):
+            keys = set()
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if isinstance(k, str) and k.startswith("_"):
+                        continue
+                    keys.add(prefix + k)
+                    keys |= _shape(v, prefix + k + ".")
+            elif isinstance(node, list):
+                for item in node:
+                    keys |= _shape(item, prefix)
+            return keys
+
+        try:
+            with open(AGENT_CONFIG_FILE, encoding="utf-8") as fh:
+                raw_cfg = json.load(fh)
+        except (OSError, ValueError) as e:
+            raw_cfg = {}
+            check("A1b 能读回随包配置原文", False, str(e))
+        only_file = sorted(_shape(raw_cfg) - _shape(AGENT_CONFIG_DEFAULTS))
+        only_def = sorted(_shape(AGENT_CONFIG_DEFAULTS) - _shape(raw_cfg))
+        check("A1b agent.config.json 没有默认值不认识的键（打错的键会静默失效）",
+              not only_file, str(only_file))
+        check("A1b agent.config.json 覆盖了默认值的每个键（改默认值时文件要同步）",
+              not only_def, str(only_def))
+        check("A1b 收敛后的生效配置仍等于随包配置的安全项",
+              cfg["permissions"]["allow"] == AGENT_CONFIG_DEFAULTS["permissions"]["allow"]
+              and cfg["permissions"]["deny"] == AGENT_CONFIG_DEFAULTS["permissions"]["deny"]
+              and cfg["permissions"]["schemaVersion"] == "workbench-permissions.v1",
+              str(cfg["permissions"]))
+
+        # A2) 配置文件不存在 → 回退内置默认值，形状与随包发布的一致
+        _reset_agent_caches()
+        cfg2, err2, _w = load_agent_config(os.path.join(tmp, "missing.json"))
+        check("A2 缺文件回退默认值且不报错给页面看空",
+              err2 == "" and cfg2["permissions"]["allow"] == ["Read", "Grep", "Glob"]
+              and cfg2["budget"]["perTask"]["timeoutSeconds"] == 300)
+
+        # A3) 部分覆盖是逐层合并，没写的键保持默认
+        partial = os.path.join(tmp, "partial.json")
+        with open(partial, "w", encoding="utf-8") as f:
+            f.write('{"permissions": {"allow": []}}')
+        _reset_agent_caches()
+        cfg3, _e3, _w3 = load_agent_config(partial)
+        check("A3 局部覆盖：allow 被替换、deny/permissionMode/budget 保持默认",
+              cfg3["permissions"]["allow"] == []
+              and cfg3["permissions"]["permissionMode"] == "default"
+              and cfg3["budget"]["perDay"]["turns"] == 200)
+
+        # A4) 坏 JSON → 回退默认值 + 可读的 configError，绝不抛异常打挂桥
+        broken = os.path.join(tmp, "broken.json")
+        with open(broken, "w", encoding="utf-8") as f:
+            f.write('{"permissions": ')
+        _reset_agent_caches()
+        cfg4, err4, _w4 = load_agent_config(broken)
+        check("A4 坏 JSON 静默回退并回报原因",
+              bool(err4) and cfg4["permissions"]["defaultEffect"] == "deny", err4)
+
+        # A5) 硬闸：配置被改成放开写/绕过权限/MCP 全开时，一律收敛并留 warning
+        hostile = {
+            "permissions": {"defaultEffect": "allow", "permissionMode": "bypass_permissions",
+                            "schemaVersion": "workbench-permissions.v2",
+                            "allow": ["Read", {"bad": 1}, "Bash", "Read"]},
+            "mcp": {"defaultEffect": "allow", "schemaVersion": "not-a-real-schema",
+                    "servers": [{"name": "ok-server", "effect": "allow"},
+                                {"name": "not-allowed"}, {"name": "bad name;rm"}]},
+            "isolation": {"cleanEnv": False,
+                          "envAllow": ["PATH", "HOME", "QODER_SDK_AUTH_PAYLOAD_FILE", 123]},
+            "budget": {"perTask": {"timeoutSeconds": 99999, "maxOutputTokens": -5},
+                       "perDay": {"turns": 0}},
+        }
+        cfg5, warn5 = _sanitize_config(hostile)
+        check("A5 defaultEffect 被强制回 deny",
+              cfg5["permissions"]["defaultEffect"] == "deny")
+        check("A5 permission-mode 被强制回 default",
+              cfg5["permissions"]["permissionMode"] == "default")
+        check("A5 工具白名单去重且剔掉非法项",
+              cfg5["permissions"]["allow"] == ["Read", "Bash"], str(cfg5["permissions"]["allow"]))
+        check("A5 MCP servers 只留显式 allow 且名字合法",
+              [s["name"] for s in cfg5["mcp"]["servers"]] == ["ok-server"],
+              str(cfg5["mcp"]["servers"]))
+        check("A5 不认识的 schemaVersion 收敛回本机真正实现的那一套并留痕",
+              cfg5["permissions"]["schemaVersion"] == "workbench-permissions.v1"
+              and cfg5["mcp"]["schemaVersion"] == "workbench-mcp.v1"
+              and sum(1 for w in warn5 if "schemaVersion" in w) == 2, str(warn5))
+        check("A5 envDropAlways 变量被从白名单里剔掉",
+              "QODER_SDK_AUTH_PAYLOAD_FILE" not in cfg5["isolation"]["envAllow"]
+              and "PATH" in cfg5["isolation"]["envAllow"])
+        check("A5 预算数字被夹到合理区间",
+              cfg5["budget"]["perTask"]["timeoutSeconds"] == 900
+              and cfg5["budget"]["perTask"]["maxOutputTokens"] == 0
+              and cfg5["budget"]["perDay"]["turns"] == 1)
+        check("A5 每次收敛都留了告警", len(warn5) >= 3, str(warn5))
+
+        # A6) CLI 解析：显式值非法即失败（不回落）；PATH 与每用户路径能找到
+        os.environ["HWDESK_QODER_CLI"] = os.path.join(tmp, "definitely-not-here.exe")
+        isolated = _deep_merge(AGENT_CONFIG_DEFAULTS,
+                               {"cli": {"pathNames": [], "userCandidates": []}})
+        check("A6 显式环境变量指向非法路径 → 判未就绪（不静默回落到别的可执行文件）",
+              qoder_entry(isolated) == "")
+        os.environ["HWDESK_QODER_CLI"] = os.path.join(tmp, "not-a-config.json")
+        with open(os.path.join(tmp, "not-a-config.json"), "w", encoding="utf-8") as f:
+            f.write("{}")
+        check("A6 显式指向非可执行文件 → 同样判未就绪", qoder_entry(isolated) == "")
+        os.environ["HWDESK_QODER_CLI"] = os.path.join(tmp, "real.json")
+        with open(os.path.join(tmp, "real.json"), "w", encoding="utf-8") as f:
+            f.write("{}")
+        fake_dir = os.path.join(tmp, "bin")
+        os.makedirs(fake_dir, exist_ok=True)
+        fake = os.path.join(fake_dir, "fakeqodercli" + (".exe" if os.name == "nt" else ""))
+        with open(fake, "w", encoding="utf-8") as f:
+            f.write("@echo off\r\n")
+        os.chmod(fake, 0o755)
+        os.environ["HWDESK_QODER_CLI"] = fake
+        check("A6 显式指向合法可执行文件 → 返回 realpath",
+              qoder_entry(isolated) == os.path.realpath(fake), qoder_entry(isolated))
+        os.environ["HWDESK_QODER_CLI"] = "fakeqodercli"
+        os.environ["PATH"] = fake_dir + os.pathsep + os.environ.get("PATH", "")
+        check("A6 显式值是裸命令名时走 PATH（PATHEXT）解析",
+              qoder_entry(isolated) == os.path.realpath(fake), qoder_entry(isolated))
+        no_env = _deep_merge(AGENT_CONFIG_DEFAULTS, {"cli": {"envOrder": []}})
+        for var in ("HWDESK_QODER_CLI", "ORG_WORKBENCH_QODER_BIN",
+                    "DIGITAL_EMPLOYEE_QODER_COMMAND"):
+            os.environ.pop(var, None)
+        by_path = qoder_entry(_deep_merge(no_env, {"cli": {"envOrder": [], "pathNames": ["fakeqodercli"],
+                                                           "userCandidates": []}}))
+        check("A6 PATH 按 pathNames 命中", by_path == os.path.realpath(fake), by_path)
+        by_cand = qoder_entry(_deep_merge(no_env, {"cli": {"envOrder": [], "pathNames": [],
+                                                           "userCandidates": [fake]}}))
+        check("A6 每用户安装路径候选可命中（realpath 后返回）",
+              by_cand == os.path.realpath(fake), by_cand)
+        miss = qoder_entry(_deep_merge(no_env, {"cli": {"envOrder": [], "pathNames": ["nope-xyz"],
+                                                        "userCandidates": [os.path.join(tmp, "nope")]}}))
+        check("A6 全部落空 → 空串（页面据此提示安装或指定环境变量）", miss == "", miss)
+
+        # A6b) 失败语义分两档（本机踩过的坑：桥被 RoleWeave/Qoder 会话拉起时，那个
+        #      会话的 ORG_WORKBENCH_QODER_BIN 会泄漏进来，值可能是 POSIX 路径）
+        own_only = _deep_merge(AGENT_CONFIG_DEFAULTS, {"cli": {"pathNames": [], "userCandidates": []}})
+        os.environ["HWDESK_QODER_CLI"] = os.path.join(tmp, "gone.exe")
+        hit_closed, src_closed, warn_closed = qoder_entry_detail(own_only)
+        check("A6b hwdesk 自己的变量非法 → 判未就绪并说明（不转头跑别的可执行文件）",
+              hit_closed == "" and src_closed == "env:HWDESK_QODER_CLI" and warn_closed,
+              str((hit_closed, src_closed, warn_closed)))
+        os.environ.pop("HWDESK_QODER_CLI", None)
+        os.environ["ORG_WORKBENCH_QODER_BIN"] = "/home/feng/.local/bin/qoderclicn"
+        fallback_cfg = _deep_merge(own_only, {"cli": {"userCandidates": [fake]}})
+        hit_fk, src_fk, warn_fk = qoder_entry_detail(fallback_cfg)
+        check("A6b RoleWeave 的外部变量非法 → 不采纳它、继续走候选路径、留告警",
+              hit_fk == os.path.realpath(fake) and src_fk.startswith("candidate:") and warn_fk,
+              str((hit_fk, src_fk)))
+        check("A6b 告警写明白是哪来的变量",
+              bool(warn_fk) and "ORG_WORKBENCH_QODER_BIN" in warn_fk[0], str(warn_fk))
+        os.environ["ORG_WORKBENCH_QODER_BIN"] = fake
+        hit_inh, src_inh, _wi = qoder_entry_detail(own_only)
+        check("A6b 外部变量指向合法可执行文件时按 RoleWeave 语义优先采纳",
+              hit_inh == os.path.realpath(fake) and src_inh == "env:ORG_WORKBENCH_QODER_BIN",
+              str((hit_inh, src_inh)))
+        os.environ.pop("ORG_WORKBENCH_QODER_BIN", None)
+
+        # A7) 回合参数：deny + 白名单 / 空 allow / MCP 恒严格 / 无绕过开关
+        cfg_ro = _deep_merge(AGENT_CONFIG_DEFAULTS, {"permissions": {"allow": ["Read", "Grep", "Glob"]}})
+        args_ro = qoder_turn_args(cfg_ro, None)
+        i = args_ro.index("--tools")
+        check("A7 只读白名单原样下发",
+              args_ro[i + 1:i + 4] == ["Read", "Grep", "Glob"]
+              and str(args_ro[i + 4]).startswith("--"), str(args_ro))
+        check("A7 空 MCP + 严格模式（RoleWeave workbench-mcp deny 同款）",
+              "--strict-mcp-config" in args_ro
+              and args_ro[args_ro.index("--mcp-config") + 1] == '{"mcpServers":{}}')
+        check("A7 权限模式 default 且绝不让 --dangerously-skip-permissions 出现",
+              args_ro[args_ro.index("--permission-mode") + 1] == "default"
+              and not any("skip-permissions" in a for a in args_ro), str(args_ro))
+        check("A7 写/命令/联网在 deny 之外再挂一道 disallowed",
+              args_ro[args_ro.index("--disallowed-tools") + 1].startswith("Write,Edit"))
+        check("A7 预算落到 --max-output-tokens，不自选时不带 -m",
+              args_ro[args_ro.index("--max-output-tokens") + 1] == "8000" and "-m" not in args_ro)
+        check("A7 不加载用户 settings + 对话不落本机会话",
+              args_ro[args_ro.index("--setting-sources") + 1] == ""
+              and "--no-session-persistence" in args_ro)
+        cfg_none = _deep_merge(AGENT_CONFIG_DEFAULTS, {"permissions": {"allow": []}})
+        args_none = qoder_turn_args(cfg_none, "Qwen3.8-Flash")
+        check("A7 allow 置空即纯对话：--tools 空串",
+              args_none[args_none.index("--tools") + 1] == "")
+        check("A7 明确选了账号里存在的模型才下传 -m",
+              args_none[args_none.index("-m") + 1] == "Qwen3.8-Flash")
+
+        # A8) 环境隔离：只带白名单，会话泄漏的 SDK 鉴权变量必须掉
+        os.environ["QODER_SDK_AUTH_PAYLOAD_FILE"] = os.path.join(tmp, "payload.json")
+        os.environ["QODER_PERSONAL_ACCESS_TOKEN"] = "someone-elses-credential"
+        os.environ["HWDESK_TEST_SECRET"] = "never-forward"
+        os.environ["ANTHROPIC_API_KEY"] = "never-forward"
+        clean = _qoder_clean_env(agent_config())
+        check("A8 白名单外的一切（含密钥类）不进子进程环境",
+              "QODER_SDK_AUTH_PAYLOAD_FILE" not in clean
+              and "HWDESK_TEST_SECRET" not in clean and "ANTHROPIC_API_KEY" not in clean)
+        check("A8 别人的凭据绝不借用（PAT 在白名单里也被无条件剥掉）",
+              "QODER_PERSONAL_ACCESS_TOKEN" not in clean)
+        check("A8 CLI 自己的登录态目录照常转（零 Key 靠它，剥了就变成未登录）",
+              clean.get("QODER_CONFIG_DIR") == os.environ.get("QODER_CONFIG_DIR"))
+        # POSIX 上临时目录由 /tmp 兜底（CI 里根本不设 TEMP/TMPDIR），不算缺失；
+        # Windows 上 CLI 落临时文件依赖 TEMP，必须真的转过去。
+        tmp_ok = (os.name != "nt" and os.path.isdir("/tmp"))
+        have = {"PATH": bool(clean.get("PATH") or clean.get("Path")),
+                "HOME": bool(clean.get("HOME") or clean.get("USERPROFILE") or clean.get("home")),
+                "TMP": bool(clean.get("TEMP") or clean.get("Temp") or clean.get("TMP")
+                            or clean.get("TMPDIR") or tmp_ok)}
+        check("A8 子进程仍拿得到 PATH / 家目录 / 临时目录",
+              all(have.values()), "缺失：" + ",".join(k for k, v in have.items() if not v))
+
+        # A9) 档位解析：跟随默认不下传；目录没探到/档位不存在一律回默认并说明
+        cat_ok = {"status": "ok", "models": ["Qwen3.8-Flash"], "error": ""}
+        m, _n = resolve_qoder_model("provider-default", agent_config(), cat_ok)
+        check("A9 provider-default 不下传 -m（跟随账号默认）", m is None)
+        m, n = resolve_qoder_model("ultimate", agent_config(), cat_ok)
+        check("A9 账号目录里没有的档位不硬塞（实测会被 CLI 静默降级）",
+              m is None and "不在本机账号的模型目录里" in n, n)
+        m, _n = resolve_qoder_model("Qwen3.8-Flash", agent_config(), cat_ok)
+        check("A9 自定义模型在目录里才下传", m == "Qwen3.8-Flash")
+        m, n = resolve_qoder_model("efficient", agent_config(),
+                                   {"status": "unavailable", "models": [], "error": "超时"})
+        check("A9 目录没探到时任何选择都回默认并说明原因",
+              m is None and "账号模型目录没取到" in n, n)
+        m, n = resolve_qoder_model("bad model;rm -rf", agent_config(), cat_ok)
+        check("A9 非法模型名被拒（不进 argv）",
+              m is None and "不合法" in n, n)
+
+        # A10) 预算：perDay.turns 用满即熔断，换日自动恢复
+        cfg_b = _deep_merge(AGENT_CONFIG_DEFAULTS, {"budget": {"perDay": {"turns": 2, "tokens": 0}}})
+        _QODER_BUDGET.update(day=datetime.date.today().isoformat(), turns=0, tokens=0, credits=0.0)
+        budget_record({"usage": {"input_tokens": 3, "output_tokens": 4}, "total_credits": 0.1})
+        budget_record({"usage": {}})
+        check("A10 回合计数与 token 记账（本账号 usage 全 0 时不假装统计）",
+              _QODER_BUDGET["turns"] == 2 and _QODER_BUDGET["tokens"] == 7)
+        check("A10 超 perDay.turns 即熔断", bool(budget_refusal(cfg_b)))
+        _QODER_BUDGET.update(day="2000-01-01", turns=5, tokens=0, credits=0.0)
+        check("A10 换日自动清零", budget_snapshot(cfg_b)["turns"] == 0 and not budget_refusal(cfg_b))
+
+        # A11) 横幅与 --tools 真值同步，且始终禁止伪调用原文
+        banner_ro = qoder_mode_banner(cfg_ro)
+        banner_none = qoder_mode_banner(cfg_none)
+        check("A11 开了只读工具时横幅讲明范围（不再谎称工具全禁）",
+              "只读检索" in banner_ro and "Read" in banner_ro and "Grep" in banner_ro)
+        check("A11 工具全关时横幅仍讲纯对话", "纯对话通道" in banner_none)
+        fake_call = "<" + "tool_call" + ">"
+        check("A11 两种横幅都禁止把伪调用当正文", fake_call in banner_ro and fake_call in banner_none)
+        composed = qoder_compose_prompt([{"role": "system", "content": "S"},
+                                         {"role": "user", "content": "U"},
+                                         {"role": "assistant", "content": "A"},
+                                         {"role": "bogus", "content": "X"},
+                                         "not-a-dict"], cfg_ro)
+        check("A11 提示词保留多轮角色且非法项被跳过",
+              composed.startswith("【运行模式】") and "【用户】\nU" in composed
+              and "【你上一轮的回复】\nA" in composed and "X" not in composed)
+
+        # A12) --list-models 文本表解析（本机实测首行是 MODEL 表头）
+        check("A12 表头/分隔线被剔掉，只留模型 id",
+              parse_model_catalog("MODEL\nQwen3.8-Flash\n") == ["Qwen3.8-Flash"]
+              and parse_model_catalog("| --- |\n| auto | efficient |\n") == ["auto"]
+              and parse_model_catalog("") == []
+              and parse_model_catalog("SDK auth payload file not found: /tmp/x") == [])
+        # A13) 模型目录缓存窗口：成功长缓存、失败 30 秒就重试（一次抖动不该锁死档位）
+        orig_probe = globals()["_run_catalog_probe"]
+        calls = []
+
+        def fake_probe(entry, cfg):
+            calls.append(1)
+            return None, "模拟探测超时"
+
+        globals()["_run_catalog_probe"] = fake_probe
+        try:
+            _reset_agent_caches()
+            slow_cfg = _deep_merge(AGENT_CONFIG_DEFAULTS, {"cli": {"catalogCacheSeconds": 600}})
+            for var in ("HWDESK_QODER_CLI", "ORG_WORKBENCH_QODER_BIN",
+                        "DIGITAL_EMPLOYEE_QODER_COMMAND"):
+                os.environ.pop(var, None)
+            cat1 = qoder_catalog(slow_cfg)
+            qoder_catalog(slow_cfg)
+            if qoder_entry(slow_cfg):
+                check("A13 探测失败回报 unavailable + 原因",
+                      cat1["status"] == "unavailable" and "模拟探测超时" in cat1["error"], str(cat1))
+                check("A13 失败结果 30 秒内不重复探测（页面不会被拖慢）", len(calls) == 1, str(calls))
+                _QODER_CATALOG["at"] = time.time() - 31
+                qoder_catalog(slow_cfg)
+                check("A13 过了短窗口会再试一次", len(calls) == 2, str(calls))
+            globals()["_run_catalog_probe"] = lambda entry, cfg: ("MODEL\nQwen3.8-Flash\n", "")
+            _reset_agent_caches()
+            if qoder_entry(slow_cfg):
+                cat3 = qoder_catalog(slow_cfg)
+                check("A13 成功时解析出模型并长缓存",
+                      cat3["status"] == "ok" and cat3["models"] == ["Qwen3.8-Flash"], str(cat3))
+                _QODER_CATALOG["at"] = time.time() - 60
+                cat3b = qoder_catalog(slow_cfg)
+                check("A13 成功结果在 TTL 内不重探", cat3b.get("ageSeconds") == 60, str(cat3b))
+            no_cli_cfg = _deep_merge(AGENT_CONFIG_DEFAULTS,
+                                     {"cli": {"envOrder": [], "pathNames": [], "userCandidates": []}})
+            _reset_agent_caches()
+            cat4 = qoder_catalog(no_cli_cfg)
+            check("A13 没装 CLI 时明确报 no-cli（不假装成空目录）",
+                  cat4["status"] == "no-cli", str(cat4))
+        finally:
+            globals()["_run_catalog_probe"] = orig_probe
+            _reset_agent_caches()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_env)
+        _reset_agent_caches()
+        try:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+        except OSError:
+            pass
+    return ok
 
 
 def self_test_tls():
@@ -1693,6 +2951,7 @@ def self_test():
            else "FAIL - collect_payload per-account: %r %r %r" % (p1, p2, q3)))
     ok &= good
 
+    ok &= self_test_agent()
     ok &= self_test_tls()
     ok &= self_test_proxy()
 
